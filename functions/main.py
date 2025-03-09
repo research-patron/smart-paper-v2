@@ -1,5 +1,5 @@
 import functions_framework
-from flask import jsonify, Request
+from flask import Flask, jsonify, Request
 from google.cloud import firestore
 from google.cloud import storage
 from google.cloud import tasks_v2
@@ -7,14 +7,26 @@ from google.protobuf import timestamp_pb2
 import datetime
 import json
 import os
+import logging
 
-# 他のモジュールから関数をインポート
+# 自作モジュールのインポート
 from process_pdf import (
     create_cached_content,
     process_with_cache,
-    cleanup_cache,
-    log_error
+    cleanup_cache
 )
+from error_handling import (
+    log_error,
+    log_info,
+    log_warning,
+    APIError,
+    ValidationError,
+    AuthenticationError,
+    NotFoundError
+)
+
+# ロギング設定
+logging.basicConfig(level=logging.INFO)
 
 # Firestore, Storageクライアントの初期化
 db = firestore.Client()
@@ -23,10 +35,10 @@ tasks_client = tasks_v2.CloudTasksClient()
 
 # 環境変数から設定を取得
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT")
-LOCATION = "us-central1"  # Cloud Functions, Cloud Tasksのリージョン
-QUEUE = "translate-pdf-queue"  # Cloud Tasksキュー名
-CLOUD_FUNCTIONS_URL = f"https://{LOCATION}-{PROJECT_ID}.cloudfunctions.net"
-BUCKET_NAME = os.environ.get("BUCKET_NAME", f"{PROJECT_ID}-storage")  # バケット名
+LOCATION = os.environ.get("FUNCTION_REGION", "us-central1")  # Cloud Functions, Cloud Tasksのリージョン
+QUEUE = os.environ.get("TASK_QUEUE", "translate-pdf-queue")  # Cloud Tasksキュー名
+CLOUD_FUNCTIONS_URL = os.environ.get("FUNCTIONS_URL", f"https://{LOCATION}-{PROJECT_ID}.cloudfunctions.net")
+BUCKET_NAME = os.environ.get("BUCKET_NAME", f"{PROJECT_ID}.appspot.com")  # バケット名
 
 def create_task(payload: dict, task_name: str = None, delay_seconds: int = 0) -> str:
     """Cloud Tasks キューにタスクを追加する
@@ -46,7 +58,7 @@ def create_task(payload: dict, task_name: str = None, delay_seconds: int = 0) ->
             "http_method": tasks_v2.HttpMethod.POST,
             "url": f"{CLOUD_FUNCTIONS_URL}/process_pdf_task",  # Cloud Functions (Python) の URL
             "oidc_token": {
-                "service_account_email": os.environ.get("CLOUD_FUNCTIONS_SA"),  # 環境変数からサービスアカウントを取得
+                "service_account_email": os.environ.get("CLOUD_FUNCTIONS_SA", f"{PROJECT_ID}@appspot.gserviceaccount.com"),
             },
             "headers": {
                 "Content-Type": "application/json",
@@ -66,8 +78,17 @@ def create_task(payload: dict, task_name: str = None, delay_seconds: int = 0) ->
         timestamp.FromDatetime(execution_time)
         task["schedule_time"] = timestamp
 
-    response = tasks_client.create_task(parent=parent, task=task)
-    return response.name
+    try:
+        response = tasks_client.create_task(parent=parent, task=task)
+        log_info("CloudTasks", f"Created task: {response.name}", {"task_name": task_name})
+        return response.name
+    except Exception as e:
+        log_error("CloudTasksError", "Failed to create task", {"error": str(e), "task_name": task_name})
+        raise
+
+def handle_api_error(error: APIError):
+    """APIエラーをHTTPレスポンスに変換"""
+    return jsonify(error.to_dict()), error.status_code
 
 @functions_framework.http
 def process_pdf(request: Request):
@@ -75,28 +96,62 @@ def process_pdf(request: Request):
     PDFアップロードを受け付け、Cloud Storageへの保存、メタデータ抽出、Cloud Tasksへのタスク追加を行う
     """
     try:
+        # CORSヘッダーの設定
+        if request.method == 'OPTIONS':
+            headers = {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                'Access-Control-Max-Age': '3600'
+            }
+            return ('', 204, headers)
+
+        headers = {
+            'Access-Control-Allow-Origin': '*'
+        }
+
         # 1. リクエストのバリデーション
         if not request.method == "POST":
-            return jsonify({"error": "Method not allowed"}), 405
+            raise ValidationError("Method not allowed")
+
         if not request.files or "file" not in request.files:
-            return jsonify({"error": "No file uploaded"}), 400
+            raise ValidationError("No file uploaded")
 
         pdf_file = request.files["file"]
         if not pdf_file.filename.lower().endswith(".pdf"):
-            return jsonify({"error": "Invalid file type"}), 400
-        if pdf_file.content_length > 20 * 1024 * 1024:  # 20MB limit
-            return jsonify({"error": "File too large"}), 400
+            raise ValidationError("Invalid file type. Only PDF files are allowed.")
 
-        # 2. FirebaseのCloud StorageにPDFを保存
+        content_length = request.content_length or 0
+        if content_length > 20 * 1024 * 1024:  # 20MB limit
+            raise ValidationError("File too large. Maximum size is 20MB.")
+
+        # 2. Firebase AuthenticationのIDトークン検証
+        user_id = None
+        if 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            if auth_header.startswith('Bearer '):
+                token = auth_header[7:]  # 'Bearer 'の後の部分を取得
+                try:
+                    # Firebase Admin SDKを使用してIDトークンを検証
+                    # ここでは簡略化のため実装を省略
+                    # 本来はFirebase Admin SDKのauth.verify_id_token()を使用
+                    user_id = "test_user_id"  # 実際の実装ではトークンから取得したユーザーID
+                except Exception as e:
+                    log_error("AuthError", "Invalid ID token", {"error": str(e)})
+                    raise AuthenticationError("Invalid ID token")
+
+        # 3. Cloud StorageにPDFを保存
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
         file_name = f"{timestamp}_{pdf_file.filename}"
         blob = storage_client.bucket(BUCKET_NAME).blob(f"papers/{file_name}")
         blob.upload_from_file(pdf_file, content_type="application/pdf")
         pdf_gs_path = f"gs://{BUCKET_NAME}/papers/{file_name}"
 
-        # 3. Firestoreにドキュメントを作成 (初期ステータス: pending)
-        user_id = request.auth.uid if hasattr(request, 'auth') and request.auth else None
-        doc_ref = db.collection("papers").add({
+        log_info("Storage", f"Uploaded PDF to {pdf_gs_path}")
+
+        # 4. Firestoreにドキュメントを作成 (初期ステータス: pending)
+        doc_ref = db.collection("papers").document()
+        doc_ref.set({
             "user_id": user_id,
             "file_path": pdf_gs_path,
             "cache_id": None,  # 後で更新
@@ -110,9 +165,11 @@ def process_pdf(request: Request):
             "translated_text_path": None,
             "related_papers": None
         })
-        paper_id = doc_ref[1].id
+        paper_id = doc_ref.id
 
-        # 4. メタデータ抽出タスクをCloud Tasksに追加
+        log_info("Firestore", f"Created paper document with ID: {paper_id}")
+
+        # 5. メタデータ抽出タスクをCloud Tasksに追加
         cache_id = f"{file_name}_{timestamp}"
         payload = {
             "pdf_gs_path": pdf_gs_path,
@@ -122,12 +179,15 @@ def process_pdf(request: Request):
         }
         create_task(payload, task_name=f"extract_metadata_{paper_id}")
 
-        # 5. クライアントにレスポンスを返す (FirestoreドキュメントID)
-        return jsonify({"paper_id": paper_id}), 200
+        # 6. クライアントにレスポンスを返す (FirestoreドキュメントID)
+        return jsonify({"paper_id": paper_id}), 200, headers
 
+    except APIError as e:
+        log_error("APIError", e.message, {"details": e.details})
+        return handle_api_error(e)
     except Exception as e:
-        log_error("CloudFunctionsError", "An error occurred in process_pdf", {"error": str(e)})
-        return jsonify({"error": "An internal server error occurred."}), 500
+        log_error("UnhandledError", "An internal server error occurred", {"error": str(e)})
+        return jsonify({"error": "An internal server error occurred."}), 500, headers
 
 @functions_framework.http
 def process_pdf_task(request: Request):
@@ -137,7 +197,7 @@ def process_pdf_task(request: Request):
     try:
         request_json = request.get_json(silent=True)
         if not request_json:
-            return jsonify({"error": "No JSON payload received"}), 400
+            raise ValidationError("No JSON payload received")
             
         pdf_gs_path = request_json.get("pdf_gs_path")
         cache_id = request_json.get("cache_id")
@@ -145,13 +205,20 @@ def process_pdf_task(request: Request):
         operation = request_json.get("operation")
         
         if not all([pdf_gs_path, cache_id, paper_id, operation]):
-            return jsonify({"error": "Required fields missing from payload"}), 400
+            raise ValidationError("Required fields missing from payload")
+
+        log_info("ProcessPDFTask", f"Starting {operation} task", {
+            "paper_id": paper_id, 
+            "operation": operation
+        })
 
         # メタデータ抽出タスク
         if operation == "extract_metadata":
             # 初回のみコンテキストキャッシュを作成
             file_name = pdf_gs_path.split("/")[-1].split(".")[0]
             cached_content_name = create_cached_content(pdf_gs_path, file_name)
+
+            log_info("VertexAI", f"Created context cache: {cached_content_name}")
 
             # メタデータと章構成を抽出
             result = process_with_cache(cache_id, "extract_metadata_and_chapters")
@@ -164,6 +231,8 @@ def process_pdf_task(request: Request):
                 "chapters": result.get("chapters", []),
                 "status": "metadata_extracted",
             })
+
+            log_info("ProcessPDFTask", f"Metadata extraction completed", {"paper_id": paper_id})
 
             # 各章の翻訳タスクをCloud Tasksに追加
             for chapter in result.get("chapters", []):
@@ -190,7 +259,7 @@ def process_pdf_task(request: Request):
         elif operation == "translate":
             chapter_info = request_json.get("chapter_info")
             if not chapter_info:
-                return jsonify({"error": "Chapter info missing for translate task"}), 400
+                raise ValidationError("Chapter info missing for translate task")
             
             # 翻訳処理
             translate_result = process_with_cache(cache_id, "translate", chapter_info)
@@ -198,6 +267,9 @@ def process_pdf_task(request: Request):
             # Firestore (translated_chapters サブコレクション) に結果を保存
             doc_ref = db.collection("papers").document(paper_id)
             doc_ref.collection("translated_chapters").add(translate_result)
+
+            log_info("ProcessPDFTask", f"Translation completed for chapter {chapter_info['chapter_number']}", 
+                     {"paper_id": paper_id})
 
             # 要約タスクをCloud Tasksに追加
             payload = {
@@ -214,7 +286,7 @@ def process_pdf_task(request: Request):
         elif operation == "summarize":
             chapter_info = request_json.get("chapter_info")
             if not chapter_info:
-                return jsonify({"error": "Chapter info missing for summarize task"}), 400
+                raise ValidationError("Chapter info missing for summarize task")
             
             # 要約処理
             summary_result = process_with_cache(cache_id, "summarize", chapter_info)
@@ -226,6 +298,9 @@ def process_pdf_task(request: Request):
             updated_summary = f"{current_summary}\n\n**Chapter {chapter_info['chapter_number']}:**\n{summary_result['summary']}"
             doc_ref.update({"summary": updated_summary})
 
+            log_info("ProcessPDFTask", f"Summary completed for chapter {chapter_info['chapter_number']}", 
+                     {"paper_id": paper_id})
+
             # 全ての章の翻訳・要約が完了したか確認
             # (Cloud Tasksの仕様上、順序は保証されないため、translated_chaptersの数とchaptersの数を比較)
             translated_chapters_count = len(list(doc_ref.collection("translated_chapters").get()))
@@ -233,9 +308,12 @@ def process_pdf_task(request: Request):
             chapters_count = len(chapters)
             
             if translated_chapters_count == chapters_count:
+                log_info("ProcessPDFTask", f"All chapters translated and summarized", {"paper_id": paper_id})
+                
                 # 論文全体の翻訳結果を結合
                 all_translated_text = ""
-                for chapter_doc in doc_ref.collection("translated_chapters").get():
+                for chapter_doc in sorted(doc_ref.collection("translated_chapters").get(), 
+                                         key=lambda x: x.to_dict().get("chapter_number", 0)):
                     chapter_data = chapter_doc.to_dict()
                     all_translated_text += f"\n\n{chapter_data.get('translated_text', '')}"
 
@@ -247,12 +325,16 @@ def process_pdf_task(request: Request):
                     blob = storage_client.bucket(BUCKET_NAME).blob(f"papers/{file_name}")
                     blob.upload_from_string(all_translated_text, content_type="text/plain")
                     translated_text_path = f"gs://{BUCKET_NAME}/papers/{file_name}"
+                    
                     doc_ref.update({
                         "translated_text_path": translated_text_path, 
                         "translated_text": None,
                         "status": "completed",
                         "completed_at": datetime.datetime.now()
                     })
+                    
+                    log_info("ProcessPDFTask", f"Large translated text saved to Cloud Storage", 
+                            {"paper_id": paper_id, "path": translated_text_path})
                 else:
                     # Firestoreに保存
                     doc_ref.update({
@@ -261,31 +343,55 @@ def process_pdf_task(request: Request):
                         "status": "completed",
                         "completed_at": datetime.datetime.now()
                     })
-
-                # コンテキストキャッシュの削除 (全ての処理が完了した後)
-                cleanup_cache(cache_id)
+                    
+                    log_info("ProcessPDFTask", f"Translated text saved to Firestore", {"paper_id": paper_id})
 
         # 関連論文推薦タスク
         elif operation == "recommend_related_papers":
             # 仮のダミーデータを使用 (本来は関連論文APIなどを使用)
             related_papers = [
-                {"title": "Related Paper 1", "doi": "10.1234/abcd"},
-                {"title": "Related Paper 2", "doi": "10.5678/efgh"},
-                {"title": "Related Paper 3", "doi": "10.9101/ijkl"},
+                {"title": "Related Paper 1", "doi": "10.1234/abcd1234"},
+                {"title": "Related Paper 2", "doi": "10.5678/efgh5678"},
+                {"title": "Related Paper 3", "doi": "10.9101/ijkl9101"},
             ]
+            
             doc_ref = db.collection("papers").document(paper_id)
             doc_ref.update({"related_papers": related_papers})
+            
+            log_info("ProcessPDFTask", f"Added related papers recommendations", {"paper_id": paper_id})
+            
+            # 全ての処理が完了していることを確認
+            paper_data = doc_ref.get().to_dict()
+            
+            if paper_data.get("status") == "completed":
+                # コンテキストキャッシュの削除 (全ての処理が完了した後)
+                cleanup_cache(cache_id)
+                log_info("ProcessPDFTask", f"Cleaned up context cache", {"paper_id": paper_id, "cache_id": cache_id})
 
         return jsonify({"message": f"{operation} task completed"}), 200
 
-    except Exception as e:
-        log_error("CloudFunctionsError", "An error occurred in process_pdf_task", {"error": str(e)})
+    except APIError as e:
+        log_error("APIError", e.message, {"details": e.details})
+        
         # Firestoreのステータスを 'error' に更新
         if "paper_id" in request_json:
             try:
                 db.collection("papers").document(paper_id).update({"status": "error"})
             except Exception as db_error:
                 log_error("FirestoreError", "Failed to update Firestore status", {"error": str(db_error)})
+                
+        return handle_api_error(e)
+        
+    except Exception as e:
+        log_error("UnhandledError", "An internal server error occurred", {"error": str(e)})
+        
+        # Firestoreのステータスを 'error' に更新
+        if request_json and "paper_id" in request_json:
+            try:
+                db.collection("papers").document(request_json["paper_id"]).update({"status": "error"})
+            except Exception as db_error:
+                log_error("FirestoreError", "Failed to update Firestore status", {"error": str(db_error)})
+                
         return jsonify({"error": "An internal server error occurred."}), 500
 
 @functions_framework.http
@@ -294,13 +400,27 @@ def get_signed_url(request: Request):
     Cloud StorageのファイルへのURLを取得する
     """
     try:
+        # CORSヘッダーの設定
+        if request.method == 'OPTIONS':
+            headers = {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                'Access-Control-Max-Age': '3600'
+            }
+            return ('', 204, headers)
+
+        headers = {
+            'Access-Control-Allow-Origin': '*'
+        }
+        
         request_json = request.get_json(silent=True)
         if not request_json:
-            return jsonify({"error": "No JSON payload received"}), 400
+            raise ValidationError("No JSON payload received")
             
         file_path = request_json.get("filePath")
         if not file_path:
-            return jsonify({"error": "File path is required"}), 400
+            raise ValidationError("File path is required")
         
         # gs://バケット名/パス の形式から、バケット名とオブジェクト名を抽出
         if file_path.startswith("gs://"):
@@ -316,8 +436,13 @@ def get_signed_url(request: Request):
             method="GET"
         )
         
-        return jsonify({"url": url}), 200
+        log_info("Storage", f"Generated signed URL for {file_path}", {"expires_in": "5 minutes"})
         
+        return jsonify({"url": url}), 200, headers
+        
+    except APIError as e:
+        log_error("APIError", e.message, {"details": e.details})
+        return handle_api_error(e)
     except Exception as e:
-        log_error("CloudFunctionsError", "An error occurred in get_signed_url", {"error": str(e)})
+        log_error("UnhandledError", "An internal server error occurred", {"error": str(e)})
         return jsonify({"error": "An internal server error occurred."}), 500
