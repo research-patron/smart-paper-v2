@@ -1,14 +1,23 @@
-import vertexai
-import datetime
 import json
 import re
-import sys
-import traceback
-import logging
-from vertexai.generative_models import Part
-from vertexai.preview import caching
-from vertexai.preview.generative_models import GenerativeModel
-from google.api_core import exceptions
+import os
+import datetime
+from typing import Dict, Optional, Any, List
+from vertex import (
+    initialize_vertex_ai,
+    create_context_cache,
+    get_cached_model,
+    generate_content,
+    process_json_response,
+    delete_context_cache
+)
+from error_handling import (
+    log_error,
+    log_info,
+    log_warning,
+    VertexAIError,
+    ValidationError
+)
 
 # 使用するプロンプトファイルのパス
 TRANSLATION_PROMPT_FILE = "./prompts/translation_prompt_v1.json"
@@ -96,6 +105,32 @@ DEFAULT_METADATA_PROMPT = """
 ```
 """
 
+def load_prompt(filename: str) -> str:
+    """
+    JSONファイルからプロンプトを読み込む
+
+    Args:
+        filename: プロンプトファイル名 (例: "translation_prompt.json")
+
+    Returns:
+        str: プロンプト文字列
+    """
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            prompt = json.load(f)
+        return prompt["prompt"]  # プロンプトはJSONの "prompt" キーに格納
+    except Exception as e:
+        log_error("PromptLoadError", f"Failed to load prompt: {filename}", {"error": str(e)})
+        # デフォルトのプロンプトを返す
+        if "translation" in filename:
+            return DEFAULT_TRANSLATION_PROMPT
+        elif "summary" in filename:
+            return DEFAULT_SUMMARY_PROMPT
+        elif "metadata" in filename:
+            return DEFAULT_METADATA_PROMPT
+        else:
+            raise ValueError(f"Unknown prompt type: {filename}")
+
 def create_cached_content(pdf_gs_path: str, file_name: str) -> str:
     """
     PDFファイルからコンテキストキャッシュを生成する
@@ -107,29 +142,15 @@ def create_cached_content(pdf_gs_path: str, file_name: str) -> str:
     Returns:
         str: キャッシュID
     """
-    try:
-        contents = [
-            Part.from_uri(
-                pdf_gs_path,
-                mime_type="application/pdf",
-            )
-        ]
-
-        # キャッシュIDを生成 (ファイル名 + タイムスタンプ)
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
-        cache_id = f"{file_name}_{timestamp}"
-
-        cached_content = caching.CachedContent.create(
-            model_name="gemini-1.5-flash-002",
-            contents=contents,
-            ttl=None,  # TTLは設定しない
-            display_name=cache_id  # キャッシュ名としてファイル名とタイムスタンプを使用
-        )
-
-        return cached_content.name
-    except Exception as e:
-        log_error("VertexAIError", "Failed to create context cache", {"error": str(e), "file_path": pdf_gs_path})
-        raise
+    # Vertex AIの初期化
+    initialize_vertex_ai()
+    
+    # キャッシュIDを生成 (ファイル名 + タイムスタンプ)
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
+    cache_id = f"{file_name}_{timestamp}"
+    
+    # コンテキストキャッシュを生成
+    return create_context_cache(pdf_gs_path, cache_id)
 
 def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None) -> dict:
     """
@@ -144,33 +165,50 @@ def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None)
         dict: 処理結果（JSON形式）
     """
     try:
-        cached_content = caching.CachedContent(cached_content_name=cache_id)
-        model = GenerativeModel.from_cached_content(cached_content=cached_content, model_name="gemini-1.5-flash-002")
-
+        # Vertex AIの初期化
+        initialize_vertex_ai()
+        
+        # キャッシュからモデルを取得
+        model = get_cached_model(cache_id)
+        
         # 処理内容に応じてプロンプトを選択
         if operation == "translate":
+            if not chapter_info:
+                raise ValidationError("Chapter info is required for translation operation")
+                
             prompt = load_prompt(TRANSLATION_PROMPT_FILE)
             # プロンプトに章情報を追加
             prompt += f"\n\nChapter Number: {chapter_info['chapter_number']}"
             prompt += f"\nStart Page: {chapter_info['start_page']}"
             prompt += f"\nEnd Page: {chapter_info['end_page']}"
             prompt += f"\nChapter Title: {chapter_info['title']}"
+            
         elif operation == "summarize":
+            if not chapter_info:
+                raise ValidationError("Chapter info is required for summarize operation")
+                
             prompt = load_prompt(SUMMARY_PROMPT_FILE)
             # プロンプトに章情報を追加
             prompt += f"\n\nChapter Number: {chapter_info['chapter_number']}"
             prompt += f"\nStart Page: {chapter_info['start_page']}"
             prompt += f"\nEnd Page: {chapter_info['end_page']}"
             prompt += f"\nChapter Title: {chapter_info['title']}"
+            
         elif operation == "extract_metadata_and_chapters":
             prompt = load_prompt(METADATA_AND_CHAPTER_PROMPT_FILE)
+            
         else:
-            raise ValueError(f"Invalid operation: {operation}")
+            raise ValidationError(f"Invalid operation: {operation}")
 
-        response = generate_content_with_retry(model, prompt)
-
+        # コンテンツを生成
+        log_info("ProcessPDF", f"Generating content for operation: {operation}", 
+                {"cache_id": cache_id, "operation": operation})
+        response_text = generate_content(model, prompt)
+        
         try:
-            result = json.loads(response.text)
+            # レスポンスをJSON形式として解析
+            result = process_json_response(response_text)
+            
             # 翻訳結果のHTMLをサニタイズ
             if operation == "translate":
                 if 'chapters' in result:  # チャプターで分割
@@ -183,66 +221,36 @@ def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None)
                     result["title"] = chapter_info["title"]
                     result["start_page"] = chapter_info["start_page"]
                     result["end_page"] = chapter_info["end_page"]
+                    
+            log_info("ProcessPDF", f"Successfully processed {operation}", 
+                    {"cache_id": cache_id, "operation": operation})
             return result
-        except json.JSONDecodeError as e:
-            log_error("JSONDecodeError", "Invalid JSON response from Vertex AI", 
-                     {"response_text": response.text, "error": str(e)})
             
+        except json.JSONDecodeError as e:
             # JSONでない場合のフォールバック処理
+            log_warning("JSONDecodeError", "Invalid JSON response from Vertex AI. Trying fallback processing.", 
+                       {"response_text": response_text[:1000] + "..." if len(response_text) > 1000 else response_text})
+            
             if operation == "translate":
                 return {
-                    "translated_text": sanitize_html(response.text),
+                    "translated_text": sanitize_html(response_text),
                     "chapter_number": chapter_info["chapter_number"],
                     "title": chapter_info["title"],
                     "start_page": chapter_info["start_page"],
                     "end_page": chapter_info["end_page"]
                 }
             elif operation == "summarize":
-                return {"summary": response.text}
+                return {"summary": response_text}
             else:
                 # それでも失敗する場合は例外を発生させる
-                raise
+                log_error("JSONDecodeError", "Failed to parse response as JSON and no fallback available", 
+                         {"response_text": response_text[:1000] + "..." if len(response_text) > 1000 else response_text})
+                raise VertexAIError("Failed to parse Vertex AI response as JSON")
+                
     except Exception as e:
-        log_error("VertexAIError", f"Failed to process with cache: {operation}", {"error": str(e), "cache_id": cache_id})
+        log_error("ProcessPDFError", f"Failed to process with cache: {operation}", 
+                 {"error": str(e), "cache_id": cache_id, "operation": operation})
         raise
-
-def generate_content_with_retry(model, prompt, max_retries=3):
-    """
-    Vertex AIのGenerative AIモデルを呼び出し、リトライロジックを組み込む
-
-    Args:
-        model: 生成モデル
-        prompt: プロンプト文字列
-        max_retries: 最大リトライ回数
-
-    Returns:
-        生成レスポンス
-    """
-    retries = 0
-    last_error = None
-
-    while retries < max_retries:
-        try:
-            response = model.generate_content(prompt)
-            return response
-        except exceptions.DeadlineExceeded as e:
-            # タイムアウトエラー
-            last_error = e
-            retries += 1
-            log_error("VertexAITimeout", f"Retry {retries}/{max_retries}: API request timed out", {"error": str(e)})
-        except exceptions.ServiceUnavailable as e:
-            # サービス一時的利用不可
-            last_error = e
-            retries += 1
-            log_error("VertexAIUnavailable", f"Retry {retries}/{max_retries}: Service unavailable", {"error": str(e)})
-        except Exception as e:
-            # その他のエラー (リトライしない)
-            log_error("VertexAIError", "Error generating content", {"error": str(e)})
-            raise
-
-    # すべてのリトライが失敗
-    log_error("VertexAIMaxRetries", "All retries failed", {"error": str(last_error)})
-    raise last_error
 
 def cleanup_cache(cache_id: str):
     """
@@ -251,12 +259,11 @@ def cleanup_cache(cache_id: str):
     Args:
         cache_id: キャッシュID
     """
-    try:
-        cached_content = caching.CachedContent(cached_content_name=cache_id)
-        cached_content.delete()
-    except Exception as e:
-        log_error("VertexAIError", "Failed to cleanup cache", {"error": str(e), "cache_id": cache_id})
-        # キャッシュ削除の失敗はエラーとして扱わず、ログだけ残す
+    # Vertex AIの初期化
+    initialize_vertex_ai()
+    
+    # キャッシュを削除
+    delete_context_cache(cache_id)
 
 def sanitize_html(html_text: str) -> str:
     """
@@ -319,49 +326,3 @@ def sanitize_html(html_text: str) -> str:
                 html_text = html_text.replace(old_tag, new_tag)
     
     return html_text
-
-def log_error(error_type: str, message: str, details: dict = None):
-    """
-    エラー情報を構造化ログとして標準エラー出力に出力
-
-    Args:
-        error_type: エラーの種類
-        message: エラーメッセージ
-        details: エラーの詳細情報（オプション）
-    """
-    # Cloud Logging で認識される形式でログを出力
-    logging.error(json.dumps({
-        "severity": "ERROR",  # Cloud Logging でエラーとして認識される
-        "error_type": error_type,
-        "message": message,
-        "timestamp": datetime.datetime.now().isoformat(),
-        "stack_trace": traceback.format_exc(),
-        "details": details,
-    }))
-
-# プロンプトファイルの読み込み
-def load_prompt(filename: str) -> str:
-    """
-    JSONファイルからプロンプトを読み込む
-
-    Args:
-        filename: プロンプトファイル名 (例: "translation_prompt.json")
-
-    Returns:
-        str: プロンプト文字列
-    """
-    try:
-        with open(filename, "r", encoding="utf-8") as f:
-            prompt = json.load(f)
-        return prompt["prompt"]  # プロンプトはJSONの "prompt" キーに格納
-    except Exception as e:
-        log_error("PromptLoadError", f"Failed to load prompt: {filename}", {"error": str(e)})
-        # デフォルトのプロンプトを返す
-        if "translation" in filename:
-            return DEFAULT_TRANSLATION_PROMPT
-        elif "summary" in filename:
-            return DEFAULT_SUMMARY_PROMPT
-        elif "metadata" in filename:
-            return DEFAULT_METADATA_PROMPT
-        else:
-            raise ValueError(f"Unknown prompt type: {filename}")
