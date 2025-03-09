@@ -102,9 +102,13 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
   
   // アップロード処理
   const handleUpload = async () => {
-    if (!selectedFile || !user) {
+    if (!selectedFile) {
+      setError('ファイルを選択してください');
       return;
     }
+    
+    // デモ用：userが未設定でも動作するように修正
+    const userId = user?.uid || 'demo-user-id';
     
     setIsUploading(true);
     setUploadProgress(0);
@@ -124,7 +128,8 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
       }, 500);
       
       // 実際のアップロード処理
-      const paperId = await uploadPDF(selectedFile, user.uid);
+      console.log("Uploading PDF with user ID:", userId);
+      const paperId = await uploadPDF(selectedFile, userId);
       
       clearInterval(progressInterval);
       setUploadProgress(100);
