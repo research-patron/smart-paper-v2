@@ -8,7 +8,6 @@ import {
   Paper,
   Tabs,
   Tab,
-  Grid,
   CircularProgress,
   Alert,
   Button,
@@ -44,6 +43,11 @@ import { useAuthStore } from '../store/authStore';
 import ErrorMessage from '../components/common/ErrorMessage';
 import SplitView from '../components/papers/SplitView';
 import { MarkdownExporter } from '../utils/MarkdownExporter';
+import { 
+  getPaperPdfUrl, 
+  getPaperTranslatedText, 
+  Paper as PaperType
+} from '../api/papers';
 
 // タブパネルコンポーネント
 interface TabPanelProps {
@@ -87,13 +91,17 @@ const PaperViewPage: React.FC = () => {
   const [tabValue, setTabValue] = useState(0);
   // 選択された章番号
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
-  // PDFの署名付きURL (実際の実装では、Cloud Functionsから取得する)
+  // PDFの署名付きURL
   const [pdfUrl, setPdfUrl] = useState<string>("");
+  // ローカルに保存された翻訳テキスト（Storageから取得した場合）
+  const [localTranslatedText, setLocalTranslatedText] = useState<string | null>(null);
   // ダウンロードメニュー
   const [downloadMenuAnchor, setDownloadMenuAnchor] = useState<null | HTMLElement>(null);
   // Obsidianエクスポートダイアログ
   const [obsidianDialogOpen, setObsidianDialogOpen] = useState(false);
   const [obsidianFilename, setObsidianFilename] = useState('');
+  // エラー状態
+  const [error, setError] = useState<string | null>(null);
   
   // 論文データを取得
   useEffect(() => {
@@ -104,29 +112,47 @@ const PaperViewPage: React.FC = () => {
     // クリーンアップ
     return () => {
       clearCurrentPaper();
+      setLocalTranslatedText(null); // ローカルステートもクリア
     };
   }, [id, user, fetchPaper, clearCurrentPaper]);
   
-  // PDFのURLを設定 (実装例)
+  // PDFのURLを設定
   useEffect(() => {
-    if (currentPaper?.file_path) {
-      // 本番では、Cloud Functionsから署名付きURLを取得する
-      // 仮のURLを設定
-      setPdfUrl(`https://firebasestorage.googleapis.com/v0/b/smart-paper-v2/o/papers%2F${id}.pdf?alt=media`);
-      
-      // 実際の実装では以下のようになる
-      /*
-      fetch(`https://YOUR_REGION-YOUR_PROJECT_ID.cloudfunctions.net/getSignedUrl?filePath=${currentPaper.file_path}`)
-        .then(res => res.json())
-        .then(data => {
-          setPdfUrl(data.url);
-        })
-        .catch(err => {
-          console.error('Error getting signed URL:', err);
-        });
-      */
-    }
-  }, [currentPaper, id]);
+    const fetchPaperResources = async () => {
+      if (currentPaper && currentPaper.file_path) {
+        try {
+          // getPaperPdfUrl 関数を使用してPDFの署名付きURLを取得
+          const url = await getPaperPdfUrl(currentPaper);
+          setPdfUrl(url);
+        } catch (error) {
+          console.error('Error fetching PDF URL:', error);
+          setError('PDFの読み込みに失敗しました');
+        }
+      }
+    };
+
+    fetchPaperResources();
+  }, [currentPaper]);
+  
+  // 翻訳テキストの取得（大きなファイルの場合はStorageから取得する）
+  useEffect(() => {
+    const fetchTranslatedText = async () => {
+      if (currentPaper && currentPaper.status === 'completed' && 
+          !currentPaper.translated_text && currentPaper.translated_text_path) {
+        try {
+          // Storageから翻訳テキストを取得
+          const text = await getPaperTranslatedText(currentPaper);
+          // ローカルステートを更新
+          setLocalTranslatedText(text);
+        } catch (error) {
+          console.error('Error fetching translated text:', error);
+          setError('翻訳テキストの読み込みに失敗しました');
+        }
+      }
+    };
+
+    fetchTranslatedText();
+  }, [currentPaper]);
   
   // デフォルトのObsidianファイル名を設定
   useEffect(() => {
@@ -172,10 +198,17 @@ const PaperViewPage: React.FC = () => {
   
   // プレーンテキストをダウンロード
   const handleDownloadPlainText = () => {
-    if (!currentPaper || !currentPaper.translated_text) return;
+    if (!currentPaper) return;
+    
+    let text = currentPaper.translated_text || localTranslatedText;
+    
+    if (!text) {
+      setError('翻訳テキストがありません');
+      return;
+    }
     
     const fileName = `${currentPaper.metadata?.title || 'translation'}.txt`;
-    const blob = new Blob([currentPaper.translated_text], { type: 'text/plain' });
+    const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     
     const a = document.createElement('a');
@@ -298,6 +331,11 @@ const PaperViewPage: React.FC = () => {
   
   // 選択された章の翻訳テキストを取得
   const getSelectedChapterText = () => {
+    // ローカルに保存された翻訳テキストがあればそれを優先
+    if (localTranslatedText && !selectedChapter) {
+      return localTranslatedText;
+    }
+    
     if (!selectedChapter) {
       return currentPaper.translated_text; // 全文を表示
     }
@@ -308,10 +346,10 @@ const PaperViewPage: React.FC = () => {
   
   // 選択された章の情報を取得
   const getSelectedChapterInfo = () => {
-    if (!selectedChapter) return null;
+    if (!selectedChapter) return undefined;
     
     const chapter = currentPaperChapters.find(c => c.chapter_number === selectedChapter);
-    if (!chapter) return null;
+    if (!chapter) return undefined;
     
     return {
       title: chapter.title,
@@ -356,7 +394,7 @@ const PaperViewPage: React.FC = () => {
                   size="small" 
                   startIcon={<DownloadIcon />}
                   onClick={handleOpenDownloadMenu}
-                  disabled={!currentPaper.translated_text}
+                  disabled={!currentPaper.translated_text && !localTranslatedText}
                 >
                   ダウンロード
                 </Button>
@@ -384,6 +422,10 @@ const PaperViewPage: React.FC = () => {
           </Box>
         </Paper>
         
+        {error && (
+          <ErrorMessage message={error} onRetry={() => setError(null)} />
+        )}
+        
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tabs value={tabValue} onChange={handleTabChange} aria-label="論文タブ">
             <Tab icon={<TranslateIcon />} label="翻訳" id="paper-tab-0" />
@@ -398,7 +440,7 @@ const PaperViewPage: React.FC = () => {
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
                 <Typography>翻訳が完了するまでお待ちください...</Typography>
               </Box>
-            ) : !currentPaper.translated_text ? (
+            ) : !currentPaper.translated_text && !localTranslatedText && !currentPaper.translated_text_path ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
                 <Typography>翻訳テキストが見つかりません</Typography>
               </Box>

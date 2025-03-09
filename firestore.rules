@@ -1,19 +1,31 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
+    // users コレクション: 認証されたユーザーのみが自分のドキュメントを読み書きできる
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
 
-    // This rule allows anyone with your Firestore database reference to view, edit,
-    // and delete all data in your Firestore database. It is useful for getting
-    // started, but it is configured to expire after 30 days because it
-    // leaves your app open to attackers. At that time, all client
-    // requests to your Firestore database will be denied.
-    //
-    // Make sure to write security rules for your app before that time, or else
-    // all client requests to your Firestore database will be denied until you Update
-    // your rules
+    // papers コレクション: 認証されたユーザーのみが自分の論文を読み書きできる
+    match /papers/{paperId} {
+      allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow update: if request.auth != null && 
+                    resource.data.user_id == request.auth.uid && 
+                    request.resource.data.user_id == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.user_id == request.auth.uid;
+
+      // translated_chapters サブコレクション: 認証されたユーザーのみが、自分の論文の章を読み書きできる
+      match /translated_chapters/{chapterId} {
+        allow read, write: if request.auth != null && 
+                           get(/databases/$(database)/documents/papers/$(paperId)).data.user_id == request.auth.uid;
+      }
+    }
+
+    // システム管理用のルール: Cloudファンクションは権限を持つサービスアカウントとして実行されるため、
+    // このルールは通常必要ありませんが、カスタム管理者ロール用に追加
     match /{document=**} {
-      allow read, write: if request.time < timestamp.date(2025, 3, 19);
+      allow read, write: if request.auth != null && request.auth.token.admin == true;
     }
   }
 }

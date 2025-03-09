@@ -1,12 +1,45 @@
 rules_version = '2';
-
-// Craft rules based on data in your Firestore database
-// allow write: if firestore.get(
-//    /databases/(default)/documents/users/$(request.auth.uid)).data.isAdmin;
 service firebase.storage {
   match /b/{bucket}/o {
+    // 基本的なルール: すべてのファイルのアクセスは拒否
     match /{allPaths=**} {
       allow read, write: if false;
+    }
+
+    // papers/フォルダの中の論文ファイル
+    match /papers/{fileName} {
+      // PDF ファイルのアップロード: 認証されたユーザーのみ
+      allow create: if request.auth != null &&
+                     request.resource.contentType == 'application/pdf' &&
+                     request.resource.size <= 20 * 1024 * 1024; // 20MB
+
+      // PDF ファイルの読み取り: Cloud Functions経由で署名付きURLを使用する
+      // ユーザーは直接読み取れない、Firestoreの情報に基づいて認証を行う
+      allow read: if request.auth != null &&
+                   exists(/databases/$(database)/documents/papers/$(resource.metadata.paperId)) &&
+                   get(/databases/$(database)/documents/papers/$(resource.metadata.paperId)).data.user_id == request.auth.uid;
+
+      // PDFファイルの削除: 認証されたユーザーのみが自分のファイルを削除できる
+      allow delete: if request.auth != null &&
+                    exists(/databases/$(database)/documents/papers/$(resource.metadata.paperId)) &&
+                    get(/databases/$(database)/documents/papers/$(resource.metadata.paperId)).data.user_id == request.auth.uid;
+    }
+
+    // translated_text ファイルも同様のルールを適用
+    match /papers/translated_text_{timestamp}_{paperId}.txt {
+      allow read: if request.auth != null &&
+                   exists(/databases/$(database)/documents/papers/$(paperId)) &&
+                   get(/databases/$(database)/documents/papers/$(paperId)).data.user_id == request.auth.uid;
+
+      allow delete: if request.auth != null &&
+                    exists(/databases/$(database)/documents/papers/$(paperId)) &&
+                    get(/databases/$(database)/documents/papers/$(paperId)).data.user_id == request.auth.uid;
+    }
+
+    // Cloud Functionsが利用するサービスアカウント向けのルール
+    match /{allPaths=**} {
+      // Cloud Functionsのサービスアカウントはすべてのファイルにアクセス可能
+      allow read, write: if request.auth != null && request.auth.token.firebase.sign_in_provider == 'custom';
     }
   }
 }
