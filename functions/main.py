@@ -3,7 +3,9 @@ from flask import Flask, jsonify, Request
 from google.cloud import firestore
 from google.cloud import storage
 from google.cloud import tasks_v2
+from google.cloud import secretmanager
 from google.protobuf import timestamp_pb2
+from google.oauth2 import service_account
 import datetime
 import json
 import os
@@ -28,17 +30,44 @@ from error_handling import (
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
 
-# Firestore, Storageクライアントの初期化
-db = firestore.Client()
-storage_client = storage.Client()
-tasks_client = tasks_v2.CloudTasksClient()
-
-# 環境変数から設定を取得
+# プロジェクトID
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT")
-LOCATION = os.environ.get("FUNCTION_REGION", "us-central1")  # Cloud Functions, Cloud Tasksのリージョン
-QUEUE = os.environ.get("TASK_QUEUE", "translate-pdf-queue")  # Cloud Tasksキュー名
+LOCATION = os.environ.get("FUNCTION_REGION", "us-central1")
+QUEUE = os.environ.get("TASK_QUEUE", "translate-pdf-queue")
 CLOUD_FUNCTIONS_URL = os.environ.get("FUNCTIONS_URL", f"https://{LOCATION}-{PROJECT_ID}.cloudfunctions.net")
-BUCKET_NAME = os.environ.get("BUCKET_NAME", f"{PROJECT_ID}.appspot.com")  # バケット名
+BUCKET_NAME = os.environ.get("BUCKET_NAME", f"{PROJECT_ID}.appspot.com")
+
+# Secret Managerからサービスアカウント認証情報を取得
+def get_credentials(secret_name="firebase-credentials"):
+    try:
+        client = secretmanager.SecretManagerServiceClient()
+        name = f"projects/{PROJECT_ID}/secrets/{secret_name}/versions/latest"
+        response = client.access_secret_version(request={"name": name})
+        credentials_json = response.payload.data.decode("UTF-8")
+        
+        # JSON形式の認証情報を辞書に変換
+        credentials_info = json.loads(credentials_json)
+        
+        # サービスアカウント認証情報を作成
+        credentials = service_account.Credentials.from_service_account_info(credentials_info)
+        return credentials
+    except Exception as e:
+        log_error("CredentialsError", f"Failed to get credentials from Secret Manager: {str(e)} (secret: {secret_name})")
+        # エラー時はデフォルトの認証情報を返す（開発環境のフォールバック）
+        return None
+
+# 認証情報を使用してクライアントを初期化
+try:
+    credentials = get_credentials()
+    db = firestore.Client(credentials=credentials) if credentials else firestore.Client()
+    storage_client = storage.Client(credentials=credentials) if credentials else storage.Client()
+    tasks_client = tasks_v2.CloudTasksClient(credentials=credentials) if credentials else tasks_v2.CloudTasksClient()
+except Exception as e:
+    log_error("ClientInitError", f"Failed to initialize clients: {str(e)}")
+    # フォールバック
+    db = firestore.Client()
+    storage_client = storage.Client()
+    tasks_client = tasks_v2.CloudTasksClient()
 
 def create_task(payload: dict, task_name: str = None, delay_seconds: int = 0) -> str:
     """Cloud Tasks キューにタスクを追加する
@@ -428,12 +457,21 @@ def get_signed_url(request: Request):
             
         bucket_name, object_name = file_path.split("/", 1)
         
+        # Signed URL用の認証情報を取得
+        credentials = get_credentials("signed-url-credentials")
+        if not credentials:
+            raise ValidationError("Could not obtain credentials for signed URL")
+            
         # 署名付きURLを生成（有効期限は5分）
-        blob = storage_client.bucket(bucket_name).blob(object_name)
+        client = storage.Client(credentials=credentials)
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(object_name)
+        
         url = blob.generate_signed_url(
             version="v4",
             expiration=datetime.timedelta(minutes=5),
-            method="GET"
+            method="GET",
+            credentials=credentials
         )
         
         log_info("Storage", f"Generated signed URL for {file_path}", {"expires_in": "5 minutes"})
