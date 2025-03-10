@@ -103,8 +103,8 @@ export const uploadPDF = async (file: File, userId: string): Promise<string> => 
     const response = await fetch(`${API_BASE_URL}/process_pdf`, {
       method: 'POST',
       body: formData,
-      // 認証情報を含めるため
-      credentials: 'include'
+      // credentials: 'include' を削除し、モードを cors に設定
+      mode: 'cors'
     });
     
     if (!response.ok) {
@@ -206,12 +206,13 @@ export const getPaperTranslatedText = async (paper: Paper): Promise<string> => {
         headers: {
           'Content-Type': 'application/json',
         },
+        // これを 'include' から 'cors' に変更
+        mode: 'cors',
         body: JSON.stringify({ filePath: paper.translated_text_path }),
-        credentials: 'include'
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || '翻訳テキストの取得に失敗しました');
       }
 
@@ -247,12 +248,13 @@ export const getPaperPdfUrl = async (paper: Paper): Promise<string> => {
       headers: {
         'Content-Type': 'application/json',
       },
+      // これを 'include' から 'cors' に変更
+      mode: 'cors', 
       body: JSON.stringify({ filePath: paper.file_path }),
-      credentials: 'include'
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
+      const errorData = await response.json().catch(() => ({}));
       throw new Error(errorData.error || 'PDFファイルの取得に失敗しました');
     }
 

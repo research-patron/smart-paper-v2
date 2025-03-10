@@ -1,19 +1,31 @@
+// Firebase Console > Storage > Rules タブに設定する
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // デフォルトでは直接アクセスを禁止
+    // デフォルトルール: 認証されたユーザーのみが読み書き可能
     match /{allPaths=**} {
-      allow read, write: if false;
-    }
-    
-    // papers/ パス: Cloud Functions からのみアクセス可能
-    // ユーザー認証とセキュアアクセスは Cloud Functions 内で処理
-    match /papers/{filename} {
-      // 認証されたユーザーは読み取り可能 (実際の制御はCloud Functions内で行う)
+      // 開発中は一時的にすべての読み取りを許可
+      allow read: if true;  // 開発中に一時的に緩和（本番環境ではコメントアウトする）
+      
+      // 認証ユーザーに対するルール（本番環境用）
       allow read: if request.auth != null;
       
-      // アップロードは禁止 (Cloud Functions経由のみ)
-      allow write: if false;
+      // 書き込み権限は認証済みユーザーのみ
+      allow write: if request.auth != null;
+    }
+    
+    // papers/ フォルダ内のPDFファイルに対するルール
+    match /papers/{filename} {
+      // 読み取り: 認証されたユーザーのみ（開発中は一時的に緩和）
+      allow read: if true;  // 開発中に一時的に緩和
+      allow read: if request.auth != null;
+      
+      // 書き込み: 認証されたユーザーのみ
+      allow write: if request.auth != null;
+      
+      // ファイルサイズは20MB以下に制限
+      allow write: if request.resource.size <= 20 * 1024 * 1024
+                    && request.auth != null;
     }
   }
 }

@@ -54,11 +54,13 @@ google-cloud-firestore>=2.5.0
 google-cloud-storage>=2.1.0
 google-cloud-tasks>=2.7.0
 google-cloud-aiplatform>=1.24.0
-Flask>=2.0.0
+google-cloud-secret-manager
+Flask>=2.3.2
 python-dateutil>=2.8.2
 requests>=2.25.0" > requirements.txt
 
-pip install -r requirements.txt -t lib
+python -m pip install --upgrade pip
+pip install -r requirements.txt -t lib --upgrade
 cd ..
 
 # Cloud Functions のデプロイ
@@ -92,7 +94,7 @@ gcloud functions deploy get_signed_url \
   --trigger-http \
   --source=./functions \
   --entry-point=get_signed_url \
-  --memory=256MB \
+  --memory=512MB \
   --timeout=60s \
   --allow-unauthenticated \
   --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
