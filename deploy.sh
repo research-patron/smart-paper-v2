@@ -3,7 +3,7 @@
 # プロジェクトID (環境に合わせて変更してください)
 PROJECT_ID="smart-paper-v2"
 REGION="us-central1"
-BUCKET_NAME="${PROJECT_ID}.appspot.com"
+BUCKET_NAME="${PROJECT_ID}.firebasestorage.app"
 SERVICE_ACCOUNT="${PROJECT_ID}@appspot.gserviceaccount.com"
 
 # 色を使用してログを分かりやすく表示

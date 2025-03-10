@@ -35,7 +35,7 @@ PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT")
 LOCATION = os.environ.get("FUNCTION_REGION", "us-central1")
 QUEUE = os.environ.get("TASK_QUEUE", "translate-pdf-queue")
 CLOUD_FUNCTIONS_URL = os.environ.get("FUNCTIONS_URL", f"https://{LOCATION}-{PROJECT_ID}.cloudfunctions.net")
-BUCKET_NAME = os.environ.get("BUCKET_NAME", f"{PROJECT_ID}.appspot.com")
+BUCKET_NAME = os.environ.get("BUCKET_NAME", f"{PROJECT_ID}.firebasestorage.app")
 
 # Secret Managerからサービスアカウント認証情報を取得
 def get_credentials(secret_name="firebase-credentials"):
@@ -426,7 +426,7 @@ def process_pdf_task(request: Request):
 @functions_framework.http
 def get_signed_url(request: Request):
     """
-    Cloud StorageのファイルへのURLを取得する
+    Cloud StorageのファイルへのURLを取得する（メモリ使用量を最適化）
     """
     try:
         # CORSヘッダーの設定
@@ -439,48 +439,48 @@ def get_signed_url(request: Request):
             }
             return ('', 204, headers)
 
-        headers = {
-            'Access-Control-Allow-Origin': '*'
-        }
+        headers = {'Access-Control-Allow-Origin': '*'}
         
+        # リクエスト検証（軽量化）
         request_json = request.get_json(silent=True)
-        if not request_json:
-            raise ValidationError("No JSON payload received")
+        if not request_json or "filePath" not in request_json:
+            print("Invalid request: Missing filePath")
+            return jsonify({"error": "File path is required"}), 400, headers
             
         file_path = request_json.get("filePath")
-        if not file_path:
-            raise ValidationError("File path is required")
         
-        # gs://バケット名/パス の形式から、バケット名とオブジェクト名を抽出
+        # ファイルパスのパース（簡素化）
         if file_path.startswith("gs://"):
             file_path = file_path[5:]  # "gs://" を削除
             
-        bucket_name, object_name = file_path.split("/", 1)
+        try:
+            bucket_name, object_name = file_path.split("/", 1)
+        except ValueError:
+            print(f"Invalid file path format: {file_path}")
+            return jsonify({"error": "Invalid file path format"}), 400, headers
         
-        # Signed URL用の認証情報を取得
-        credentials = get_credentials("signed-url-credentials")
-        if not credentials:
-            raise ValidationError("Could not obtain credentials for signed URL")
+        # 署名付きURLの生成（軽量化）
+        try:
+            # 一時的なクライアントを作成して直接操作（グローバル変数を使用しない）
+            storage_client_local = storage.Client()
+            bucket = storage_client_local.bucket(bucket_name)
+            blob = bucket.blob(object_name)
             
-        # 署名付きURLを生成（有効期限は5分）
-        client = storage.Client(credentials=credentials)
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(object_name)
-        
-        url = blob.generate_signed_url(
-            version="v4",
-            expiration=datetime.timedelta(minutes=5),
-            method="GET",
-            credentials=credentials
-        )
-        
-        log_info("Storage", f"Generated signed URL for {file_path}", {"expires_in": "5 minutes"})
-        
-        return jsonify({"url": url}), 200, headers
-        
-    except APIError as e:
-        log_error("APIError", e.message, {"details": e.details})
-        return handle_api_error(e)
+            url = blob.generate_signed_url(
+                version="v4",
+                expiration=datetime.timedelta(minutes=5),
+                method="GET"
+            )
+            
+            # 最小限のログ記録
+            print(f"Generated signed URL for {file_path}")
+            
+            return jsonify({"url": url}), 200, headers
+            
+        except Exception as e:
+            print(f"Error generating signed URL: {str(e)}")
+            return jsonify({"error": "Failed to generate signed URL"}), 500, headers
+            
     except Exception as e:
-        log_error("UnhandledError", "An internal server error occurred", {"error": str(e)})
-        return jsonify({"error": "An internal server error occurred."}), 500
+        print(f"Unexpected error in get_signed_url: {str(e)}")
+        return jsonify({"error": "An internal server error occurred"}), 500, headers
