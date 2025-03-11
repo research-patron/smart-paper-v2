@@ -42,6 +42,7 @@ import { usePaperStore } from '../store/paperStore';
 import { useAuthStore } from '../store/authStore';
 import ErrorMessage from '../components/common/ErrorMessage';
 import SplitView from '../components/papers/SplitView';
+import Summary from '../components/papers/Summary';
 import { MarkdownExporter } from '../utils/MarkdownExporter';
 import { 
   getPaperPdfUrl, 
@@ -254,6 +255,54 @@ const PaperViewPage: React.FC = () => {
     handleCloseObsidianDialog();
   };
   
+  // 選択された章の翻訳テキストを取得
+  const getSelectedChapterText = () => {
+    if (!currentPaper) {
+      return null;
+    }
+
+    // ローカルに保存された翻訳テキストがあればそれを優先
+    if (localTranslatedText && !selectedChapter) {
+      return localTranslatedText;
+    }
+    
+    if (!selectedChapter) {
+      return currentPaper?.translated_text; // 全文を表示
+    }
+    
+    // 特定の章を表示する場合は、その章のデータを探す
+    const chapter = currentPaperChapters.find(c => c.chapter_number === selectedChapter);
+    
+    // 章が見つかった場合、その翻訳を表示
+    if (chapter && chapter.translated_text) {
+      return chapter.translated_text;
+    }
+    
+    // 章が見つからないか翻訳がない場合は、全体の翻訳から推定
+    if (currentPaper?.translated_text || localTranslatedText) {
+      const fullText = currentPaper?.translated_text || localTranslatedText;
+      
+      // 強引だが章タイトルなどをもとに該当箇所を探す方法も検討できる
+      // 今回は単純に全体を返す
+      return fullText;
+    }
+    
+    return null;
+  };
+  
+  // 選択された章の情報を取得
+  const getSelectedChapterInfo = () => {
+    if (!selectedChapter) return undefined;
+    
+    const chapter = currentPaperChapters.find(c => c.chapter_number === selectedChapter);
+    if (!chapter) return undefined;
+    
+    return {
+      title: chapter.title,
+      chapter_number: chapter.chapter_number
+    };
+  };
+  
   // ローディング表示
   if (currentPaperLoading) {
     return (
@@ -296,24 +345,18 @@ const PaperViewPage: React.FC = () => {
     } else if (currentPaper.status === 'error') {
       return <Chip label="エラー" color="error" />;
     } else {
-      let progress = 0;
+      let progress = currentPaper.progress || 0;
       let statusText = '';
       
       switch (currentPaper.status) {
         case 'pending':
-          progress = 10;
           statusText = '処理を準備中...';
           break;
         case 'metadata_extracted':
-          progress = 30;
           statusText = 'メタデータを抽出中...';
           break;
         case 'processing':
-          // 処理中章数に基づいて進捗を計算
-          const totalChapters = currentPaper.chapters?.length || 1;
-          const processedChapters = currentPaperChapters.length;
-          progress = 30 + (processedChapters / totalChapters) * 60;
-          statusText = `翻訳中... (${processedChapters}/${totalChapters} 章)`;
+          statusText = `翻訳中... (${progress}%)`;
           break;
       }
       
@@ -327,34 +370,6 @@ const PaperViewPage: React.FC = () => {
         </Box>
       );
     }
-  };
-  
-  // 選択された章の翻訳テキストを取得
-  const getSelectedChapterText = () => {
-    // ローカルに保存された翻訳テキストがあればそれを優先
-    if (localTranslatedText && !selectedChapter) {
-      return localTranslatedText;
-    }
-    
-    if (!selectedChapter) {
-      return currentPaper.translated_text; // 全文を表示
-    }
-    
-    const chapter = currentPaperChapters.find(c => c.chapter_number === selectedChapter);
-    return chapter ? chapter.translated_text : null;
-  };
-  
-  // 選択された章の情報を取得
-  const getSelectedChapterInfo = () => {
-    if (!selectedChapter) return undefined;
-    
-    const chapter = currentPaperChapters.find(c => c.chapter_number === selectedChapter);
-    if (!chapter) return undefined;
-    
-    return {
-      title: chapter.title,
-      chapter_number: chapter.chapter_number
-    };
   };
   
   return (
@@ -511,10 +526,10 @@ const PaperViewPage: React.FC = () => {
               </Box>
             ) : (
               <Paper elevation={0} sx={{ p: 3, height: '100%', overflow: 'auto' }}>
-                <Typography variant="h6" gutterBottom>
-                  論文の要約
-                </Typography>
-                <div dangerouslySetInnerHTML={{ __html: currentPaper.summary.replace(/\n/g, '<br>') }} />
+                <Summary 
+                  summaryText={currentPaper.summary} 
+                  chapters={currentPaper.chapters || []} 
+                />
               </Paper>
             )}
           </TabPanel>

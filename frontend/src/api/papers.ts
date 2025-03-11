@@ -67,6 +67,7 @@ export interface Paper {
   translated_text_path: string | null;
   related_papers: RelatedPaper[] | null;
   error_message?: string;
+  progress?: number; // 処理進捗率（0-100）
 }
 
 // Cloud Functionsへのリクエスト型

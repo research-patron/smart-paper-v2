@@ -262,6 +262,213 @@ def process_content(pdf_gs_path: str, operation: str, chapter_info: dict = None,
                  {"error": str(e), "file_path": pdf_gs_path, "operation": operation})
         raise
 
+async def process_chapter(pdf_gs_path: str, chapter_info: dict, paper_id: str):
+    """
+    指定された章の翻訳および要約を順次処理する
+
+    Args:
+        pdf_gs_path: PDFファイルのパス
+        chapter_info: 章情報
+        paper_id: 論文ID
+
+    Returns:
+        dict: 処理結果
+    """
+    try:
+        # 翻訳処理
+        log_info("ProcessChapter", f"Starting translation for chapter {chapter_info['chapter_number']}",
+                {"paper_id": paper_id})
+        translate_result = process_content(pdf_gs_path, "translate", chapter_info)
+
+        # Firestore (translated_chapters サブコレクション) に結果を保存
+        from google.cloud import firestore
+        db = firestore.Client()
+        doc_ref = db.collection("papers").document(paper_id)
+        
+        # この章がすでに存在するか確認
+        chapter_query = doc_ref.collection("translated_chapters").where("chapter_number", "==", chapter_info['chapter_number'])
+        chapter_docs = chapter_query.get()
+        
+        if len(chapter_docs) > 0:
+            # 既存の章を更新
+            chapter_doc = chapter_docs[0]
+            chapter_doc.reference.update(translate_result)
+        else:
+            # 新しい章を追加
+            doc_ref.collection("translated_chapters").add(translate_result)
+
+        log_info("ProcessChapter", f"Translation completed for chapter {chapter_info['chapter_number']}",
+                {"paper_id": paper_id})
+
+        # 要約処理
+        log_info("ProcessChapter", f"Starting summary for chapter {chapter_info['chapter_number']}",
+                {"paper_id": paper_id})
+        summary_result = process_content(pdf_gs_path, "summarize", chapter_info)
+
+        # Firestoreに結果を保存（章番号付きでフォーマット）
+        current_summary = doc_ref.get().to_dict().get("summary", "")
+        updated_summary = current_summary
+        if current_summary:
+            updated_summary += "\n\n"
+        updated_summary += f"**Chapter {chapter_info['chapter_number']}:**\n{summary_result['summary']}"
+        doc_ref.update({"summary": updated_summary})
+
+        log_info("ProcessChapter", f"Summary completed for chapter {chapter_info['chapter_number']}",
+                {"paper_id": paper_id})
+
+        return {
+            "chapter_number": chapter_info["chapter_number"],
+            "translated": True,
+            "summarized": True
+        }
+    except Exception as e:
+        log_error("ProcessChapterError", f"Error processing chapter {chapter_info['chapter_number']}",
+                 {"paper_id": paper_id, "error": str(e)})
+        return {
+            "chapter_number": chapter_info["chapter_number"],
+            "translated": False,
+            "summarized": False,
+            "error": str(e)
+        }
+
+async def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str):
+    """
+    すべての章を順番に処理する
+
+    Args:
+        chapters: 章情報のリスト
+        paper_id: 論文ID
+        pdf_gs_path: PDFのパス
+    """
+    from google.cloud import firestore
+    from google.cloud import storage
+    import datetime
+    
+    db = firestore.Client()
+    storage_client = storage.Client()
+    BUCKET_NAME = os.environ.get("BUCKET_NAME", f"{os.environ.get('GOOGLE_CLOUD_PROJECT')}.appspot.com")
+    
+    try:
+        doc_ref = db.collection("papers").document(paper_id)
+
+        # ステータスを処理中に更新
+        doc_ref.update({
+            "status": "processing",
+            "progress": 0
+        })
+
+        # 各章を順番に処理
+        results = []
+        # 章番号でソートして処理
+        sorted_chapters = sorted(chapters, key=lambda x: x["chapter_number"])
+        total_chapters = len(sorted_chapters)
+        
+        for i, chapter in enumerate(sorted_chapters, 1):
+            try:
+                log_info("ProcessAllChapters", f"Processing chapter {i}/{total_chapters}: Chapter {chapter['chapter_number']}",
+                         {"paper_id": paper_id})
+                
+                # 章ごとに個別の翻訳を実行
+                result = await process_chapter(pdf_gs_path, chapter, paper_id)
+                results.append(result)
+                
+                # 進捗を更新
+                progress = int((i / total_chapters) * 100)
+                doc_ref.update({"progress": progress})
+                
+                # 操作ごとに少し待つ (APIレート制限対策)
+                import asyncio
+                await asyncio.sleep(1)
+                
+            except Exception as chapter_error:
+                log_error("ProcessChapterError", f"Error processing chapter {chapter['chapter_number']}",
+                         {"paper_id": paper_id, "error": str(chapter_error)})
+                # エラーが発生しても続行
+                results.append({
+                    "chapter_number": chapter["chapter_number"],
+                    "translated": False,
+                    "summarized": False,
+                    "error": str(chapter_error)
+                })
+
+        # 全ての章の翻訳結果を結合
+        all_translated_text = ""
+        
+        # 章番号順にソート
+        chapter_docs = sorted(
+            doc_ref.collection("translated_chapters").get(),
+            key=lambda x: x.to_dict().get("chapter_number", 0)
+        )
+        
+        for chapter_doc in chapter_docs:
+            chapter_data = chapter_doc.to_dict()
+            translated_text = chapter_data.get('translated_text', '')
+            if translated_text:
+                if all_translated_text:
+                    all_translated_text += "\n\n"
+                # 章番号とタイトルを追加
+                chapter_title = chapter_data.get('title', f"Chapter {chapter_data.get('chapter_number', '?')}")
+                all_translated_text += f"<h2>Chapter {chapter_data.get('chapter_number', '?')}: {chapter_title}</h2>\n\n"
+                all_translated_text += translated_text
+
+        # エラーチェック
+        if not all_translated_text:
+            log_warning("ProcessAllChapters", "No translated text was generated", {"paper_id": paper_id})
+            all_translated_text = "<p>翻訳の生成に失敗しました。しばらくしてから再度お試しください。</p>"
+
+        # 文字数に応じて保存先を決定
+        if len(all_translated_text) > 800000:
+            # Cloud Storageに保存
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
+            file_name = f"translated_text_{timestamp}_{paper_id}.txt"
+            blob = storage_client.bucket(BUCKET_NAME).blob(f"papers/{file_name}")
+            blob.upload_from_string(all_translated_text, content_type="text/plain")
+            translated_text_path = f"gs://{BUCKET_NAME}/papers/{file_name}"
+
+            doc_ref.update({
+                "translated_text_path": translated_text_path,
+                "translated_text": None,
+                "status": "completed",
+                "completed_at": datetime.datetime.now(),
+                "progress": 100
+            })
+
+            log_info("ProcessAllChapters", f"Large translated text saved to Cloud Storage",
+                    {"paper_id": paper_id, "path": translated_text_path})
+        else:
+            # Firestoreに保存
+            doc_ref.update({
+                "translated_text_path": None,
+                "translated_text": all_translated_text,
+                "status": "completed",
+                "completed_at": datetime.datetime.now(),
+                "progress": 100
+            })
+
+            log_info("ProcessAllChapters", f"Translated text saved to Firestore", {"paper_id": paper_id})
+
+        # 関連論文の追加（ダミーデータ）
+        related_papers = [
+            {"title": "Related Paper 1", "doi": "10.1234/abcd1234"},
+            {"title": "Related Paper 2", "doi": "10.5678/efgh5678"},
+            {"title": "Related Paper 3", "doi": "10.9101/ijkl9101"}
+        ]
+
+        doc_ref.update({"related_papers": related_papers})
+        log_info("ProcessAllChapters", f"Added related papers recommendations", {"paper_id": paper_id})
+
+        return results
+    except Exception as e:
+        log_error("ProcessAllChaptersError", "Failed to process all chapters",
+                 {"paper_id": paper_id, "error": str(e)})
+
+        # エラー状態に更新
+        doc_ref.update({
+            "status": "error",
+            "error_message": str(e)
+        })
+        raise
+
 def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None) -> dict:
     """
     互換性のために残す関数（非推奨）
