@@ -9,9 +9,10 @@ import json
 import os
 import logging
 import vertexai
+import asyncio
 
 # 自作モジュールのインポート
-from process_pdf import process_content
+from process_pdf import process_content, process_all_chapters
 from error_handling import (
     log_error,
     log_info,
@@ -28,7 +29,7 @@ logging.basicConfig(level=logging.INFO)
 # プロジェクトID
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT")
 LOCATION = os.environ.get("FUNCTION_REGION", "us-central1")
-BUCKET_NAME = os.environ.get("BUCKET_NAME", f"{PROJECT_ID}.firebasestorage.app")
+BUCKET_NAME = os.environ.get("BUCKET_NAME", f"{PROJECT_ID}.appspot.com")
 
 # Secret Managerからサービスアカウント認証情報を取得
 def get_credentials(secret_name="firebase-credentials"):
@@ -63,172 +64,6 @@ except Exception as e:
 def handle_api_error(error: APIError):
     """APIエラーをHTTPレスポンスに変換"""
     return jsonify(error.to_dict()), error.status_code
-
-async def process_chapter(pdf_gs_path: str, chapter_info: dict, paper_id: str):
-    """
-    指定された章の翻訳および要約を順次処理する
-
-    Args:
-        pdf_gs_path: PDFファイルのパス
-        chapter_info: 章情報
-        paper_id: 論文ID
-
-    Returns:
-        dict: 処理結果
-    """
-    try:
-        # 翻訳処理
-        log_info("ProcessChapter", f"Starting translation for chapter {chapter_info['chapter_number']}",
-                {"paper_id": paper_id})
-        translate_result = process_content(pdf_gs_path, "translate", chapter_info)
-
-        # Firestore (translated_chapters サブコレクション) に結果を保存
-        doc_ref = db.collection("papers").document(paper_id)
-        doc_ref.collection("translated_chapters").add(translate_result)
-
-        log_info("ProcessChapter", f"Translation completed for chapter {chapter_info['chapter_number']}",
-                {"paper_id": paper_id})
-
-        # 要約処理
-        log_info("ProcessChapter", f"Starting summary for chapter {chapter_info['chapter_number']}",
-                {"paper_id": paper_id})
-        summary_result = process_content(pdf_gs_path, "summarize", chapter_info)
-
-        # Firestoreに結果を保存（チャプター番号なし）
-        current_summary = doc_ref.get().to_dict().get("summary", "")
-        updated_summary = current_summary
-        if current_summary:
-            updated_summary += "\n\n"
-        updated_summary += summary_result['summary']
-        doc_ref.update({"summary": updated_summary})
-
-        log_info("ProcessChapter", f"Summary completed for chapter {chapter_info['chapter_number']}",
-                {"paper_id": paper_id})
-
-        return {
-            "chapter_number": chapter_info["chapter_number"],
-            "translated": True,
-            "summarized": True
-        }
-    except Exception as e:
-        log_error("ProcessChapterError", f"Error processing chapter {chapter_info['chapter_number']}",
-                 {"paper_id": paper_id, "error": str(e)})
-        return {
-            "chapter_number": chapter_info["chapter_number"],
-            "translated": False,
-            "summarized": False,
-            "error": str(e)
-        }
-
-async def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str):
-    """
-    すべての章を順番に処理する
-
-    Args:
-        chapters: 章情報のリスト
-        paper_id: 論文ID
-        pdf_gs_path: PDFのパス
-    """
-    try:
-        doc_ref = db.collection("papers").document(paper_id)
-
-        # ステータスを処理中に更新
-        doc_ref.update({
-            "status": "processing",
-            "progress": 0
-        })
-
-        # 各章を順番に処理
-        results = []
-        total_chapters = len(sorted(chapters, key=lambda x: x["chapter_number"]))
-        for i, chapter in enumerate(sorted(chapters, key=lambda x: x["chapter_number"]), 1):
-            try:
-                # 章ごとに個別の翻訳を実行
-                result = await process_chapter(pdf_gs_path, chapter, paper_id)
-                results.append(result)
-                
-                # 進捗を更新
-                progress = int((i / total_chapters) * 100)
-                doc_ref.update({"progress": progress})
-                
-            except Exception as chapter_error:
-                log_error("ProcessChapterError", f"Error processing chapter {chapter['chapter_number']}",
-                         {"paper_id": paper_id, "error": str(chapter_error)})
-                # エラーが発生しても続行
-                results.append({
-                    "chapter_number": chapter["chapter_number"],
-                    "translated": False,
-                    "summarized": False,
-                    "error": str(chapter_error)
-                })
-
-        # 全ての章の翻訳結果を結合
-        all_translated_text = ""
-        for chapter_doc in sorted(doc_ref.collection("translated_chapters").get(),
-                                key=lambda x: x.to_dict().get("chapter_number", 0)):
-            chapter_data = chapter_doc.to_dict()
-            translated_text = chapter_data.get('translated_text', '')
-            if translated_text:
-                if all_translated_text:
-                    all_translated_text += "\n\n"
-                all_translated_text += translated_text
-
-        # エラーチェック
-        if not all_translated_text:
-            raise Exception("No translated text generated")
-
-        # 文字数に応じて保存先を決定
-        if len(all_translated_text) > 800000:
-            # Cloud Storageに保存
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
-            file_name = f"translated_text_{timestamp}_{paper_id}.txt"
-            blob = storage_client.bucket(BUCKET_NAME).blob(f"papers/{file_name}")
-            blob.upload_from_string(all_translated_text, content_type="text/plain")
-            translated_text_path = f"gs://{BUCKET_NAME}/papers/{file_name}"
-
-            doc_ref.update({
-                "translated_text_path": translated_text_path,
-                "translated_text": None,
-                "status": "completed",
-                "completed_at": datetime.datetime.now(),
-                "progress": 100
-            })
-
-            log_info("ProcessAllChapters", f"Large translated text saved to Cloud Storage",
-                    {"paper_id": paper_id, "path": translated_text_path})
-        else:
-            # Firestoreに保存
-            doc_ref.update({
-                "translated_text_path": None,
-                "translated_text": all_translated_text,
-                "status": "completed",
-                "completed_at": datetime.datetime.now(),
-                "progress": 100
-            })
-
-            log_info("ProcessAllChapters", f"Translated text saved to Firestore", {"paper_id": paper_id})
-
-        # 関連論文の追加（ダミーデータ）
-        related_papers = [
-            {"title": "Related Paper 1", "doi": "10.1234/abcd1234"},
-            {"title": "Related Paper 2", "doi": "10.5678/efgh5678"},
-            {"title": "Related Paper 3", "doi": "10.9101/ijkl9101"}
-        ]
-
-        doc_ref.update({"related_papers": related_papers})
-        log_info("ProcessAllChapters", f"Added related papers recommendations", {"paper_id": paper_id})
-
-        return results
-    except Exception as e:
-        log_error("ProcessAllChaptersError", "Failed to process all chapters",
-                 {"paper_id": paper_id, "error": str(e)})
-
-        # エラー状態に更新
-        doc_ref.update({
-            "status": "error",
-            "error_message": str(e)
-        })
-        raise
 
 @functions_framework.http
 def process_pdf(request: Request):
@@ -366,18 +201,40 @@ def process_pdf_background(request: Request):
         if not pdf_gs_path:
             raise ValidationError("PDF file path is missing")
 
-        # メタデータと章構成を抽出
-        log_info("ProcessPDFBackground", f"Extracting metadata and chapters", {"paper_id": paper_id})
-        result = process_content(pdf_gs_path, "extract_metadata_and_chapters")
+        # 既に処理が完了している場合はスキップ
+        if paper_data.get("status") == "completed":
+            return jsonify({"message": "Paper already processed", "paper_id": paper_id}), 200, headers
 
-        # Firestoreに結果を保存
-        doc_ref.update({
-            "metadata": result.get("metadata", {}),
-            "chapters": result.get("chapters", []),
-            "status": "metadata_extracted"
-        })
+        # 現在の状態を確認
+        current_status = paper_data.get("status", "pending")
+        
+        # メタデータ抽出済みならスキップする
+        if current_status == "pending" or not paper_data.get("metadata"):
+            # メタデータと章構成を抽出
+            log_info("ProcessPDFBackground", f"Extracting metadata and chapters", {"paper_id": paper_id})
+            
+            # 処理中ステータスに更新
+            doc_ref.update({
+                "status": "metadata_extracted",
+                "progress": 10
+            })
+            
+            result = process_content(pdf_gs_path, "extract_metadata_and_chapters")
 
-        log_info("ProcessPDFBackground", f"Metadata extraction completed", {"paper_id": paper_id})
+            # Firestoreに結果を保存
+            doc_ref.update({
+                "metadata": result.get("metadata", {}),
+                "chapters": result.get("chapters", []),
+                "status": "metadata_extracted",
+                "progress": 20
+            })
+
+            log_info("ProcessPDFBackground", f"Metadata extraction completed", {"paper_id": paper_id})
+        else:
+            # メタデータが既に抽出済み
+            result = {
+                "chapters": paper_data.get("chapters", [])
+            }
 
         # すべての章を順番に処理
         chapters = result.get("chapters", [])
@@ -385,12 +242,14 @@ def process_pdf_background(request: Request):
             log_warning("ProcessPDFBackground", f"No chapters found", {"paper_id": paper_id})
             doc_ref.update({
                 "status": "completed",
-                "completed_at": datetime.datetime.now()
+                "completed_at": datetime.datetime.now(),
+                "progress": 100,
+                "summary": "この論文には章が見つかりませんでした。",
+                "translated_text": "<p>この論文には処理可能な章が見つかりませんでした。別の論文を試してください。</p>"
             })
             return jsonify({"message": "Processing completed (no chapters found)"}), 200, headers
 
         # 章を順番に処理
-        import asyncio
         chapter_results = asyncio.run(process_all_chapters(chapters, paper_id, pdf_gs_path))
 
         log_info("ProcessPDFBackground", f"All chapters processed",
@@ -399,7 +258,7 @@ def process_pdf_background(request: Request):
         return jsonify({
             "message": "Processing completed",
             "paper_id": paper_id,
-            "chapters_processed": len(chapter_results)
+            "chapters_processed": len(chapter_results) if chapter_results else 0
         }), 200, headers
 
     except APIError as e:
@@ -408,7 +267,8 @@ def process_pdf_background(request: Request):
             try:
                 db.collection("papers").document(paper_id).update({
                     "status": "error",
-                    "error_message": e.message
+                    "error_message": e.message,
+                    "progress": 0  # エラー時は進捗を0に戻す
                 })
             except Exception as db_error:
                 log_error("FirestoreError", "Failed to update Firestore status", {"error": str(db_error)})
@@ -421,7 +281,8 @@ def process_pdf_background(request: Request):
             try:
                 db.collection("papers").document(paper_id_local).update({
                     "status": "error",
-                    "error_message": str(e)
+                    "error_message": str(e),
+                    "progress": 0  # エラー時は進捗を0に戻す
                 })
             except Exception as db_error:
                 log_error("FirestoreError", "Failed to update Firestore status", {"error": str(db_error)})

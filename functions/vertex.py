@@ -8,7 +8,7 @@ from error_handling import log_error, log_info, VertexAIError
 # 環境変数から設定を取得
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT")
 LOCATION = "us-central1"  # Vertex AIのリージョン
-MODEL_NAME = "gemini-1.5-flash-002"
+MODEL_NAME = "gemini-2.0-flash-001"
 
 def initialize_vertex_ai():
     """

@@ -8,7 +8,8 @@ import {
   getPaper, 
   getTranslatedChapters,
   watchPaperStatus,
-  deletePaper
+  deletePaper,
+  startPaperProcessing
 } from '../api/papers';
 
 interface PaperState {
@@ -89,6 +90,17 @@ export const usePaperStore = create<PaperState>()(
           
           // 章の翻訳も取得
           await get().fetchTranslatedChapters(paperId);
+          
+          // 論文のステータスが processing なら、バックグラウンド処理の開始を確認
+          if (paper.status === 'pending' || paper.status === 'metadata_extracted') {
+            try {
+              // 念のためバックグラウンド処理を開始/再開する
+              await startPaperProcessing(paperId);
+            } catch (err) {
+              console.error('Error starting background processing:', err);
+              // エラーは無視して続行
+            }
+          }
         } catch (error: any) {
           set({ currentPaperError: error.message, currentPaperLoading: false });
           console.error('Error fetching paper:', error);
