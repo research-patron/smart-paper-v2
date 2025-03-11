@@ -66,6 +66,21 @@ export interface Paper {
   translated_text: string | null;
   translated_text_path: string | null;
   related_papers: RelatedPaper[] | null;
+  error_message?: string;
+}
+
+// Cloud Functionsへのリクエスト型
+export interface TranslationRequest {
+  paper_id: string;
+  chapter_info?: {
+    chapter_number: number;
+    title: string;
+    start_page: number;
+    end_page: number;
+  };
+  metadata?: {
+    chapters: Chapter[];
+  };
 }
 
 export interface TranslatedChapter {
@@ -81,6 +96,28 @@ export interface TranslatedChapter {
 // Cloud Functions APIのベースURL
 // 本番環境では環境変数から取得するなど、適切に設定する
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'https://us-central1-smart-paper-v2.cloudfunctions.net';
+
+// 翻訳をリクエスト
+export const requestTranslation = async (request: TranslationRequest): Promise<void> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/translate_paper`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      mode: 'cors',
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || '翻訳リクエストに失敗しました');
+    }
+  } catch (error) {
+    console.error('Translation request error:', error);
+    throw error;
+  }
+};
 
 // PDFファイルをアップロード
 export const uploadPDF = async (file: File, userId: string): Promise<string> => {
