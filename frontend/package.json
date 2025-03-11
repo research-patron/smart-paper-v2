@@ -34,6 +34,7 @@
     "zustand": "^4.5.2"
   },
   "scripts": {
+    "postinstall": "cp node_modules/pdfjs-dist/build/pdf.worker.min.js public/",
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",

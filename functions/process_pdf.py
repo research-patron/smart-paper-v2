@@ -1,12 +1,13 @@
 import json
 import re
 import os
-import datetime
 from typing import Dict, Optional, Any, List
-import vertexai
-from vertexai.generative_models import Part, GenerationConfig
-from vertexai.preview import caching
-from vertexai.preview.generative_models import GenerativeModel
+from vertex import (
+    initialize_vertex_ai,
+    get_model,
+    process_pdf_content,
+    process_json_response
+)
 from error_handling import (
     log_error,
     log_info,
@@ -127,67 +128,13 @@ def load_prompt(filename: str) -> str:
         else:
             raise ValueError(f"Unknown prompt type: {filename}")
 
-def initialize_vertex_ai():
-    """
-    Vertex AIの初期化
-    """
-    try:
-        project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
-        location = os.environ.get("FUNCTION_REGION", "us-central1")
-        vertexai.init(project=project_id, location=location)
-        log_info("VertexAI", "Vertex AI initialized successfully")
-    except Exception as e:
-        log_error("VertexAIInitError", "Failed to initialize Vertex AI", {"error": str(e)})
-        raise VertexAIError("Vertex AI initialization failed") from e
 
-def create_cached_content(pdf_gs_path: str, file_name: str) -> str:
+def process_content(pdf_gs_path: str, operation: str, chapter_info: dict = None) -> dict:
     """
-    PDFファイルからコンテキストキャッシュを生成する
+    PDFファイルを直接処理して翻訳・要約・メタデータ抽出を行う
 
     Args:
-        pdf_gs_path: FirebaseのCloud Storage上のPDFファイルパス (gs://で始まる)
-        file_name: ファイル名
-
-    Returns:
-        str: キャッシュID
-    """
-    # Vertex AIの初期化
-    initialize_vertex_ai()
-    
-    try:
-        log_info("VertexAI", f"Creating context cache for {pdf_gs_path}")
-        
-        contents = [
-            Part.from_uri(
-                pdf_gs_path,
-                mime_type="application/pdf",
-            )
-        ]
-
-        # キャッシュIDを生成 (ファイル名 + タイムスタンプ)
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
-        cache_id = f"{file_name}_{timestamp}"
-        
-        cached_content = caching.CachedContent.create(
-            model_name="gemini-1.5-flash-002",
-            contents=contents,
-            ttl=None,  # TTLは設定しない
-            display_name=cache_id  # キャッシュ名としてファイル名とタイムスタンプを使用
-        )
-
-        log_info("VertexAI", f"Context cache created successfully: {cached_content.name}")
-        return cached_content.name
-    except Exception as e:
-        log_error("VertexAICacheError", "Failed to create context cache", 
-                 {"error": str(e), "file_path": pdf_gs_path})
-        raise VertexAIError(f"Failed to create context cache: {str(e)}") from e
-
-def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None) -> dict:
-    """
-    コンテキストキャッシュを使用して翻訳・要約・メタデータ抽出を行う
-
-    Args:
-        cache_id: コンテキストキャッシュID
+        pdf_gs_path: PDFファイルのパス (gs://から始まる)
         operation: 処理内容 ('translate', 'summarize', 'extract_metadata_and_chapters')
         chapter_info: 章情報（章番号、開始ページ、終了ページ）。translate, summarize の場合に必要。
 
@@ -198,9 +145,8 @@ def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None)
         # Vertex AIの初期化
         initialize_vertex_ai()
         
-        # キャッシュからモデルを取得
-        cached_content = caching.CachedContent(cached_content_name=cache_id)
-        model = GenerativeModel.from_cached_content(cached_content=cached_content, model_name="gemini-1.5-flash-002")
+        # モデルを取得
+        model = get_model()
         
         # 処理内容に応じてプロンプトを選択
         if operation == "translate":
@@ -231,25 +177,9 @@ def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None)
         else:
             raise ValidationError(f"Invalid operation: {operation}")
 
-        # コンテンツを生成
-        log_info("ProcessPDF", f"Generating content for operation: {operation}", 
-                {"cache_id": cache_id, "operation": operation})
-        
-        # 生成設定
-        generation_config = GenerationConfig(
-            temperature=0.2,
-            max_output_tokens=8192,  # 出力トークン数の上限
-            top_p=0.95,
-            top_k=40,
-        )
-        
-        response = model.generate_content(
-            prompt,
-            generation_config=generation_config,
-            safety_settings=None,  # デフォルトの安全設定を使用
-        )
-        
-        response_text = response.text
+        # PDFの処理と結果の生成
+        log_info("ProcessPDF", f"Processing PDF content for operation: {operation}")
+        response_text = process_pdf_content(model, pdf_gs_path, prompt)
         
         try:
             # JSONブロックの抽出（```json〜```の形式に対応）
@@ -278,8 +208,7 @@ def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None)
                     result["start_page"] = chapter_info["start_page"]
                     result["end_page"] = chapter_info["end_page"]
                     
-            log_info("ProcessPDF", f"Successfully processed {operation}", 
-                    {"cache_id": cache_id, "operation": operation})
+            log_info("ProcessPDF", f"Successfully processed {operation}")
             return result
             
         except json.JSONDecodeError as e:
@@ -304,28 +233,26 @@ def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None)
                 raise VertexAIError("Failed to parse Vertex AI response as JSON")
                 
     except Exception as e:
+        log_error("ProcessPDFError", f"Failed to process PDF: {operation}", 
+                 {"error": str(e), "file_path": pdf_gs_path, "operation": operation})
+        raise
+
+def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None) -> dict:
+    """
+    互換性のために残す関数（非推奨）
+    新しい process_content 関数を呼び出すだけ
+    """
+    # TODO: この関数は将来的に削除予定
+    try:
+        # Cloud Storageのパスを取得（本来はキャッシュIDから取得していたが、今は直接渡す必要がある）
+        if not hasattr(process_with_cache, 'pdf_gs_path'):
+            raise ValueError("PDF path not set. This function is deprecated.")
+        
+        return process_content(process_with_cache.pdf_gs_path, operation, chapter_info)
+    except Exception as e:
         log_error("ProcessPDFError", f"Failed to process with cache: {operation}", 
                  {"error": str(e), "cache_id": cache_id, "operation": operation})
         raise
-
-def cleanup_cache(cache_id: str):
-    """
-    コンテキストキャッシュを削除する
-
-    Args:
-        cache_id: キャッシュID
-    """
-    try:
-        # Vertex AIの初期化
-        initialize_vertex_ai()
-        
-        # キャッシュを削除
-        cached_content = caching.CachedContent(cached_content_name=cache_id)
-        cached_content.delete()
-        log_info("VertexAI", f"Context cache deleted successfully: {cache_id}")
-    except Exception as e:
-        log_error("VertexAIError", "Failed to delete context cache", {"error": str(e), "cache_id": cache_id})
-        # キャッシュ削除の失敗は致命的ではないのでエラーをスローしない
 
 def sanitize_html(html_text: str) -> str:
     """
