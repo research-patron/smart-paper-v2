@@ -113,10 +113,37 @@ export const uploadPDF = async (file: File, userId: string): Promise<string> => 
     }
     
     const data = await response.json();
+    
+    // 3. バックグラウンド処理を開始
+    await startPaperProcessing(data.paper_id);
+    
     return data.paper_id;
   } catch (error) {
     console.error('PDF upload error:', error);
     throw error;
+  }
+};
+
+// バックグラウンド処理を開始
+export const startPaperProcessing = async (paperId: string): Promise<void> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/process_pdf_background`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      mode: 'cors',
+      body: JSON.stringify({ paper_id: paperId }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('Background processing failed:', errorData);
+      // エラーをスローせず、処理を続行（Firestoreで状態を監視するため）
+    }
+  } catch (error) {
+    console.error('Error starting background processing:', error);
+    // エラーをスローせず、処理を続行（Firestoreで状態を監視するため）
   }
 };
 

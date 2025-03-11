@@ -56,6 +56,8 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
       if (validateFile(file)) {
         setSelectedFile(file);
         setError(null);
+        // ファイル選択時に自動的にアップロードを開始
+        handleUpload(file);
       }
     }
   };
@@ -89,6 +91,8 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
       if (validateFile(file)) {
         setSelectedFile(file);
         setError(null);
+        // ドロップされたファイルを自動的にアップロード
+        handleUpload(file);
       }
     }
   };
@@ -101,8 +105,8 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
   };
   
   // アップロード処理
-  const handleUpload = async () => {
-    if (!selectedFile) {
+  const handleUpload = async (file: File = selectedFile!) => {
+    if (!file) {
       setError('ファイルを選択してください');
       return;
     }
@@ -129,7 +133,7 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
       
       // 実際のアップロード処理
       console.log("Uploading PDF with user ID:", userId);
-      const paperId = await uploadPDF(selectedFile, userId);
+      const paperId = await uploadPDF(file, userId);
       
       clearInterval(progressInterval);
       setUploadProgress(100);
@@ -232,14 +236,6 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
               
               <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 2 }}>
                 <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={handleUpload}
-                  startIcon={<CloudUploadIcon />}
-                >
-                  アップロード
-                </Button>
-                <Button
                   variant="outlined"
                   color="secondary"
                   onClick={handleCancel}
@@ -276,7 +272,7 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
         <ErrorMessage 
           message={error}
           details={errorDetails || undefined}
-          onRetry={selectedFile ? handleUpload : undefined}
+          onRetry={selectedFile ? () => handleUpload() : undefined}
         />
       )}
     </Box>

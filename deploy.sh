@@ -27,26 +27,10 @@ firebase projects:list
 echo -e "\n${BLUE}デプロイするプロジェクトを選択してください:${NC}"
 firebase use ${PROJECT_ID}
 
-# Cloud Tasksのキューの存在を確認
-echo -e "\n${BLUE}Cloud Tasks キューの存在を確認...${NC}"
-gcloud tasks queues describe translate-pdf-queue-new \
-  --location=${REGION} || \
-  gcloud tasks queues create translate-pdf-queue-new \
-  --location=${REGION} \
-  --max-dispatches-per-second=5 \
-  --max-concurrent-dispatches=10 \
-  --max-attempts=1
-
 # サービスアカウントに必要な権限を付与
 echo -e "\n${BLUE}サービスアカウントのロールを設定...${NC}"
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-  --member=serviceAccount:${SERVICE_ACCOUNT} \
-  --role=roles/cloudtasks.enqueuer || true
 
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-  --member=serviceAccount:${SERVICE_ACCOUNT} \
-  --role=roles/cloudtasks.taskCreator || true
-
+# デプロイ用サービスアカウントに必要な権限を付与
 gcloud projects add-iam-policy-binding ${PROJECT_ID} \
   --member=serviceAccount:${SERVICE_ACCOUNT} \
   --role=roles/cloudfunctions.invoker || true
@@ -58,7 +42,6 @@ cd functions
 echo "firebase-functions>=0.1.0
 google-cloud-firestore>=2.5.0
 google-cloud-storage>=2.1.0
-google-cloud-tasks>=2.7.0
 google-cloud-aiplatform>=1.24.0
 google-cloud-secret-manager
 Flask>=2.3.2
@@ -82,14 +65,14 @@ gcloud functions deploy process_pdf \
   --allow-unauthenticated \
   --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_FUNCTIONS_SA=${SERVICE_ACCOUNT}
 
-echo -e "\n${BLUE}process_pdf_task 関数をデプロイしています...${NC}"
-gcloud functions deploy process_pdf_task \
+echo -e "\n${BLUE}process_pdf_background 関数をデプロイしています...${NC}"
+gcloud functions deploy process_pdf_background \
   --region=${REGION} \
   --runtime=python310 \
   --trigger-http \
   --source=./functions \
-  --entry-point=process_pdf_task \
-  --memory=2048MB \
+  --entry-point=process_pdf_background \
+  --memory=4096MB \
   --timeout=540s \
   --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_FUNCTIONS_SA=${SERVICE_ACCOUNT}
 
@@ -108,4 +91,5 @@ gcloud functions deploy get_signed_url \
 echo -e "\n${GREEN}デプロイが完了しました！${NC}"
 echo -e "以下のURLでCloud Functionsにアクセスできます:"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf${NC}"
+echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf_background${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/get_signed_url${NC}"
