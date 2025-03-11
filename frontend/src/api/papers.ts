@@ -57,7 +57,6 @@ export interface Paper {
   id: string;
   user_id: string;
   file_path: string;
-  cache_id: string | null;
   status: 'pending' | 'metadata_extracted' | 'processing' | 'completed' | 'error';
   uploaded_at: Timestamp;
   completed_at: Timestamp | null;
@@ -165,8 +164,7 @@ export const getUserPapers = async (userId: string): Promise<Paper[]> => {
         id: doc.id,
         user_id: data.user_id,
         file_path: data.file_path,
-        cache_id: data.cache_id,
-        status: data.status,
+          status: data.status,
         uploaded_at: data.uploaded_at,
         completed_at: data.completed_at,
         metadata: data.metadata,
@@ -197,7 +195,6 @@ export const getPaper = async (paperId: string): Promise<Paper> => {
         id: docSnap.id,
         user_id: data.user_id,
         file_path: data.file_path,
-        cache_id: data.cache_id,
         status: data.status,
         uploaded_at: data.uploaded_at,
         completed_at: data.completed_at,
@@ -336,7 +333,6 @@ export const watchPaperStatus = (
         id: doc.id,
         user_id: data.user_id,
         file_path: data.file_path,
-        cache_id: data.cache_id,
         status: data.status,
         uploaded_at: data.uploaded_at,
         completed_at: data.completed_at,

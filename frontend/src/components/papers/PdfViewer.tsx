@@ -24,7 +24,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 
 // PDF.jsのワーカーのパスを設定
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = `${process.env.PUBLIC_URL}/pdf.worker.min.js`;
 
 interface PdfViewerProps {
   url: string;

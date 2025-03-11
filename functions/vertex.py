@@ -1,18 +1,13 @@
 import vertexai
-import datetime
 import json
 import os
-from vertexai.generative_models import Part, GenerationConfig
-from vertexai.preview import caching
-from vertexai.preview.generative_models import GenerativeModel
-from google.api_core import exceptions, retry
+from vertexai.generative_models import Part, GenerationConfig, GenerativeModel
+from google.api_core import exceptions
 from error_handling import log_error, log_info, VertexAIError
 
 # 環境変数から設定を取得
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT")
 LOCATION = "us-central1"  # Vertex AIのリージョン
-
-# 使用するモデル名
 MODEL_NAME = "gemini-1.5-flash-002"
 
 def initialize_vertex_ai():
@@ -26,63 +21,60 @@ def initialize_vertex_ai():
         log_error("VertexAIInitError", "Failed to initialize Vertex AI", {"error": str(e)})
         raise VertexAIError("Vertex AI initialization failed") from e
 
-def create_context_cache(pdf_gs_path: str, display_name: str) -> str:
+def get_model() -> GenerativeModel:
     """
-    PDFファイルからコンテキストキャッシュを生成する
-
-    Args:
-        pdf_gs_path: Cloud Storage上のPDFファイルパス (gs://で始まる)
-        display_name: キャッシュ表示名
-
-    Returns:
-        str: キャッシュID
-    """
-    try:
-        log_info("VertexAI", f"Creating context cache for {pdf_gs_path}")
-        
-        contents = [
-            Part.from_uri(
-                pdf_gs_path,
-                mime_type="application/pdf",
-            )
-        ]
-
-        cached_content = caching.CachedContent.create(
-            model_name=MODEL_NAME,
-            contents=contents,
-            ttl=None,  # TTLは設定しない
-            display_name=display_name
-        )
-
-        log_info("VertexAI", f"Context cache created successfully: {cached_content.name}")
-        return cached_content.name
-    except Exception as e:
-        log_error("VertexAICacheError", "Failed to create context cache", 
-                 {"error": str(e), "file_path": pdf_gs_path})
-        raise VertexAIError(f"Failed to create context cache: {str(e)}") from e
-
-def get_cached_model(cache_id: str) -> GenerativeModel:
-    """
-    キャッシュIDからGenerativeModelを取得する
-
-    Args:
-        cache_id: コンテキストキャッシュID
+    Vertex AIのGenerativeModelを初期化して取得する
 
     Returns:
         GenerativeModel: 生成モデル
     """
     try:
-        cached_content = caching.CachedContent(cached_content_name=cache_id)
-        model = GenerativeModel.from_cached_content(
-            cached_content=cached_content, 
-            model_name=MODEL_NAME
-        )
+        model = GenerativeModel(MODEL_NAME)
         return model
     except Exception as e:
-        log_error("VertexAIError", "Failed to get cached model", {"error": str(e), "cache_id": cache_id})
-        raise VertexAIError(f"Failed to get cached model: {str(e)}") from e
+        log_error("VertexAIError", "Failed to initialize model", {"error": str(e)})
+        raise VertexAIError(f"Failed to initialize model: {str(e)}") from e
 
-def generate_content(model, prompt: str, temperature: float = 0.2, max_retries: int = 3) -> str:
+def process_pdf_content(model: GenerativeModel, pdf_gs_path: str, prompt: str, 
+                       temperature: float = 0.2) -> str:
+    """
+    PDFファイルの内容を直接処理する
+
+    Args:
+        model: 生成モデル
+        pdf_gs_path: PDFファイルのパス (gs://から始まる)
+        prompt: プロンプト文字列
+        temperature: 生成の温度パラメータ（デフォルト: 0.2）
+
+    Returns:
+        str: 生成されたテキスト
+    """
+    try:
+        # PDFファイルを直接読み込む
+        content = [Part.from_uri(pdf_gs_path, mime_type="application/pdf")]
+        
+        # 生成設定
+        generation_config = GenerationConfig(
+            temperature=temperature,
+            max_output_tokens=8192,
+            top_p=0.95,
+            top_k=40,
+        )
+        
+        # コンテンツを生成
+        response = model.generate_content(
+            contents=[*content, prompt],
+            generation_config=generation_config,
+            safety_settings=None,
+        )
+        
+        return response.text
+    except Exception as e:
+        log_error("VertexAIError", "Error processing PDF content", 
+                 {"error": str(e), "file_path": pdf_gs_path})
+        raise VertexAIError(f"Error processing PDF content: {str(e)}") from e
+
+def generate_content(model: GenerativeModel, prompt: str, temperature: float = 0.2, max_retries: int = 3) -> str:
     """
     Vertex AIのGenerative AIモデルを呼び出し、リトライロジックを組み込む
 
@@ -166,19 +158,3 @@ def process_json_response(text: str) -> dict:
                  {"response_text": text, "error": str(e)})
         # エラーをそのまま伝播
         raise
-
-def delete_context_cache(cache_id: str):
-    """
-    コンテキストキャッシュを削除する
-
-    Args:
-        cache_id: キャッシュID
-    """
-    try:
-        log_info("VertexAI", f"Deleting context cache: {cache_id}")
-        cached_content = caching.CachedContent(cached_content_name=cache_id)
-        cached_content.delete()
-        log_info("VertexAI", f"Context cache deleted successfully: {cache_id}")
-    except Exception as e:
-        log_error("VertexAIError", "Failed to delete context cache", {"error": str(e), "cache_id": cache_id})
-        # キャッシュ削除の失敗は致命的ではないのでエラーをスローしない
