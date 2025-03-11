@@ -129,9 +129,11 @@ def load_prompt(filename: str) -> str:
             raise ValueError(f"Unknown prompt type: {filename}")
 
 
-def process_content(pdf_gs_path: str, operation: str, chapter_info: dict = None) -> dict:
+def process_content(pdf_gs_path: str, operation: str, chapter_info: dict = None, metadata: dict = None) -> dict:
     """
     PDFファイルを直接処理して翻訳・要約・メタデータ抽出を行う
+    
+    metadata引数が提供された場合、その章構成情報を使用して翻訳を行います。
 
     Args:
         pdf_gs_path: PDFファイルのパス (gs://から始まる)
@@ -153,12 +155,40 @@ def process_content(pdf_gs_path: str, operation: str, chapter_info: dict = None)
             if not chapter_info:
                 raise ValidationError("Chapter info is required for translation operation")
                 
-            prompt = load_prompt(TRANSLATION_PROMPT_FILE)
-            # プロンプトに章情報を追加
-            prompt += f"\n\nChapter Number: {chapter_info['chapter_number']}"
-            prompt += f"\nStart Page: {chapter_info['start_page']}"
-            prompt += f"\nEnd Page: {chapter_info['end_page']}"
-            prompt += f"\nChapter Title: {chapter_info['title']}"
+            base_prompt = load_prompt(TRANSLATION_PROMPT_FILE)
+            
+            if metadata and "chapters" in metadata:
+                # 全章の翻訳を実行
+                results = []
+                for chapter in metadata["chapters"]:
+                    prompt = base_prompt
+                    prompt += f"\n\nChapter Number: {chapter['chapter_number']}"
+                    prompt += f"\nStart Page: {chapter['start_page']}"
+                    prompt += f"\nEnd Page: {chapter['end_page']}"
+                    prompt += f"\nChapter Title: {chapter['title']}"
+                    
+                    # 章ごとの翻訳を実行
+                    chapter_response = process_pdf_content(model, pdf_gs_path, prompt)
+                    chapter_result = process_json_response(chapter_response)
+                    
+                    # 章情報を結果に追加
+                    chapter_result.update({
+                        "chapter_number": chapter["chapter_number"],
+                        "title": chapter["title"],
+                        "start_page": chapter["start_page"],
+                        "end_page": chapter["end_page"]
+                    })
+                    results.append(chapter_result)
+                
+                return {"chapters": results}
+                
+            else:
+                # 単一章の翻訳（従来の処理）
+                prompt = base_prompt
+                prompt += f"\n\nChapter Number: {chapter_info['chapter_number']}"
+                prompt += f"\nStart Page: {chapter_info['start_page']}"
+                prompt += f"\nEnd Page: {chapter_info['end_page']}"
+                prompt += f"\nChapter Title: {chapter_info['title']}"
             
         elif operation == "summarize":
             if not chapter_info:
@@ -181,19 +211,14 @@ def process_content(pdf_gs_path: str, operation: str, chapter_info: dict = None)
         log_info("ProcessPDF", f"Processing PDF content for operation: {operation}")
         response_text = process_pdf_content(model, pdf_gs_path, prompt)
         
+        # JSONレスポンスの処理
         try:
-            # JSONブロックの抽出（```json〜```の形式に対応）
-            if "```json" in response_text and "```" in response_text.split("```json", 1)[1]:
-                json_text = response_text.split("```json", 1)[1].split("```", 1)[0].strip()
-            elif "```" in response_text and "```" in response_text.split("```", 1)[1]:
-                # jsonキーワードなしの場合
-                json_text = response_text.split("```", 1)[1].split("```", 1)[0].strip()
+            if operation == "extract_metadata_and_chapters":
+                # メタデータ抽出の場合は直接JSONを解析
+                result = process_json_response(response_text)
             else:
-                # コードブロックがない場合はテキスト全体を使用
-                json_text = response_text.strip()
-            
-            # JSON解析
-            result = json.loads(json_text)
+                # 翻訳と要約の場合
+                result = process_json_response(response_text)
             
             # 翻訳結果のHTMLをサニタイズ
             if operation == "translate":

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@craco/craco": "^7.1.0",
     "@emotion/react": "^11.11.4",
     "@emotion/styled": "^11.11.0",
     "@fontsource/noto-sans-jp": "^5.2.5",
@@ -34,10 +35,12 @@
     "zustand": "^4.5.2"
   },
   "scripts": {
-    "postinstall": "cp node_modules/pdfjs-dist/build/pdf.worker.min.js public/",
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
+    "postinstall": "cp node_modules/pdfjs-dist/build/pdf.worker.min.js public/ && cp node_modules/pdfjs-dist/build/pdf.worker.min.js.map public/",
+    "prestart": "npm run postinstall",
+    "prebuild": "npm run postinstall",
+    "start": "craco start",
+    "build": "craco build",
+    "test": "craco test",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {

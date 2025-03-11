@@ -94,9 +94,12 @@ async def process_chapter(pdf_gs_path: str, chapter_info: dict, paper_id: str):
                 {"paper_id": paper_id})
         summary_result = process_content(pdf_gs_path, "summarize", chapter_info)
 
-        # Firestoreに結果を保存
+        # Firestoreに結果を保存（チャプター番号なし）
         current_summary = doc_ref.get().to_dict().get("summary", "")
-        updated_summary = f"{current_summary}\n\n**Chapter {chapter_info['chapter_number']}:**\n{summary_result['summary']}"
+        updated_summary = current_summary
+        if current_summary:
+            updated_summary += "\n\n"
+        updated_summary += summary_result['summary']
         doc_ref.update({"summary": updated_summary})
 
         log_info("ProcessChapter", f"Summary completed for chapter {chapter_info['chapter_number']}",
@@ -130,20 +133,49 @@ async def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str):
         doc_ref = db.collection("papers").document(paper_id)
 
         # ステータスを処理中に更新
-        doc_ref.update({"status": "processing"})
+        doc_ref.update({
+            "status": "processing",
+            "progress": 0
+        })
 
         # 各章を順番に処理
         results = []
-        for chapter in sorted(chapters, key=lambda x: x["chapter_number"]):
-            result = await process_chapter(pdf_gs_path, chapter, paper_id)
-            results.append(result)
+        total_chapters = len(sorted(chapters, key=lambda x: x["chapter_number"]))
+        for i, chapter in enumerate(sorted(chapters, key=lambda x: x["chapter_number"]), 1):
+            try:
+                # 章ごとに個別の翻訳を実行
+                result = await process_chapter(pdf_gs_path, chapter, paper_id)
+                results.append(result)
+                
+                # 進捗を更新
+                progress = int((i / total_chapters) * 100)
+                doc_ref.update({"progress": progress})
+                
+            except Exception as chapter_error:
+                log_error("ProcessChapterError", f"Error processing chapter {chapter['chapter_number']}",
+                         {"paper_id": paper_id, "error": str(chapter_error)})
+                # エラーが発生しても続行
+                results.append({
+                    "chapter_number": chapter["chapter_number"],
+                    "translated": False,
+                    "summarized": False,
+                    "error": str(chapter_error)
+                })
 
         # 全ての章の翻訳結果を結合
         all_translated_text = ""
         for chapter_doc in sorted(doc_ref.collection("translated_chapters").get(),
                                 key=lambda x: x.to_dict().get("chapter_number", 0)):
             chapter_data = chapter_doc.to_dict()
-            all_translated_text += f"\n\n{chapter_data.get('translated_text', '')}"
+            translated_text = chapter_data.get('translated_text', '')
+            if translated_text:
+                if all_translated_text:
+                    all_translated_text += "\n\n"
+                all_translated_text += translated_text
+
+        # エラーチェック
+        if not all_translated_text:
+            raise Exception("No translated text generated")
 
         # 文字数に応じて保存先を決定
         if len(all_translated_text) > 800000:
@@ -158,7 +190,8 @@ async def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str):
                 "translated_text_path": translated_text_path,
                 "translated_text": None,
                 "status": "completed",
-                "completed_at": datetime.datetime.now()
+                "completed_at": datetime.datetime.now(),
+                "progress": 100
             })
 
             log_info("ProcessAllChapters", f"Large translated text saved to Cloud Storage",
@@ -169,7 +202,8 @@ async def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str):
                 "translated_text_path": None,
                 "translated_text": all_translated_text,
                 "status": "completed",
-                "completed_at": datetime.datetime.now()
+                "completed_at": datetime.datetime.now(),
+                "progress": 100
             })
 
             log_info("ProcessAllChapters", f"Translated text saved to Firestore", {"paper_id": paper_id})
@@ -178,7 +212,7 @@ async def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str):
         related_papers = [
             {"title": "Related Paper 1", "doi": "10.1234/abcd1234"},
             {"title": "Related Paper 2", "doi": "10.5678/efgh5678"},
-            {"title": "Related Paper 3", "doi": "10.9101/ijkl9101"},
+            {"title": "Related Paper 3", "doi": "10.9101/ijkl9101"}
         ]
 
         doc_ref.update({"related_papers": related_papers})
@@ -190,7 +224,10 @@ async def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str):
                  {"paper_id": paper_id, "error": str(e)})
 
         # エラー状態に更新
-        doc_ref.update({"status": "error"})
+        doc_ref.update({
+            "status": "error",
+            "error_message": str(e)
+        })
         raise
 
 @functions_framework.http
@@ -213,7 +250,7 @@ def process_pdf(request: Request):
             'Access-Control-Allow-Origin': '*'
         }
 
-        # 1. リクエストのバリデーション
+        # リクエストのバリデーション
         if not request.method == "POST":
             raise ValidationError("Method not allowed")
 
@@ -228,7 +265,7 @@ def process_pdf(request: Request):
         if content_length > 20 * 1024 * 1024:  # 20MB limit
             raise ValidationError("File too large. Maximum size is 20MB.")
 
-        # 2. Firebase AuthenticationのIDトークン検証
+        # Firebase AuthenticationのIDトークン検証
         user_id = None
         if 'Authorization' in request.headers:
             auth_header = request.headers['Authorization']
@@ -243,7 +280,7 @@ def process_pdf(request: Request):
                     log_error("AuthError", "Invalid ID token", {"error": str(e)})
                     raise AuthenticationError("Invalid ID token")
 
-        # 3. Cloud StorageにPDFを保存
+        # Cloud StorageにPDFを保存
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
         file_name = f"{timestamp}_{pdf_file.filename}"
         blob = storage_client.bucket(BUCKET_NAME).blob(f"papers/{file_name}")
@@ -252,7 +289,7 @@ def process_pdf(request: Request):
 
         log_info("Storage", f"Uploaded PDF to {pdf_gs_path}")
 
-        # 4. Firestoreにドキュメントを作成 (初期ステータス: pending)
+        # Firestoreにドキュメントを作成
         doc_ref = db.collection("papers").document()
         doc_ref.set({
             "user_id": user_id,
@@ -265,31 +302,23 @@ def process_pdf(request: Request):
             "summary": "",
             "translated_text": None,
             "translated_text_path": None,
-            "related_papers": None
+            "related_papers": None,
+            "progress": 0
         })
         paper_id = doc_ref.id
 
         log_info("Firestore", f"Created paper document with ID: {paper_id}")
 
-        # 5. 処理開始
-        # バックグラウンド処理を起動（非同期でCloud Functionを呼び出す）
+        # バックグラウンド処理を起動
         try:
-            # Firebase Admin SDKを使用して独自のバックグラウンド処理トリガーを作成
             log_info("ProcessPDF", f"Starting background processing for paper {paper_id}")
-
-            # このリクエストのレスポンスを早く返すため、実際の処理は別途実行
-            # 実際のプロダクション環境では、Pub/SubやHTTPトリガーなどでバックグラウンド処理を実装
-
-            # 処理開始を示すフラグを設定
             doc_ref.update({
                 "processing_started": True,
                 "status": "pending"
             })
         except Exception as e:
             log_error("BackgroundProcessingError", "Failed to start background processing", {"error": str(e)})
-            # エラーがあっても進める（フロントエンドでポーリングされる）
 
-        # 6. クライアントにレスポンスを返す (FirestoreドキュメントID)
         return jsonify({"paper_id": paper_id}), 200, headers
 
     except APIError as e:
@@ -316,18 +345,17 @@ def process_pdf_background(request: Request):
 
     headers = {'Access-Control-Allow-Origin': '*'}
 
-    paper_id = None  # paper_id を初期化
+    paper_id = None
     try:
         request_json = request.get_json(silent=True)
         if not request_json:
             raise ValidationError("No JSON payload received")
 
         paper_id = request_json.get("paper_id")
-
         if not paper_id:
             raise ValidationError("Paper ID is required")
 
-        # 1. 論文ドキュメントを取得
+        # 論文ドキュメントを取得
         doc_ref = db.collection("papers").document(paper_id)
         paper_data = doc_ref.get().to_dict()
 
@@ -335,28 +363,26 @@ def process_pdf_background(request: Request):
             raise NotFoundError(f"Paper with ID {paper_id} not found")
 
         pdf_gs_path = paper_data.get("file_path")
-
         if not pdf_gs_path:
             raise ValidationError("PDF file path is missing")
 
-        # 2. メタデータと章構成を抽出
+        # メタデータと章構成を抽出
         log_info("ProcessPDFBackground", f"Extracting metadata and chapters", {"paper_id": paper_id})
         result = process_content(pdf_gs_path, "extract_metadata_and_chapters")
 
-        # 3. Firestoreに結果を保存
+        # Firestoreに結果を保存
         doc_ref.update({
             "metadata": result.get("metadata", {}),
             "chapters": result.get("chapters", []),
-            "status": "metadata_extracted",
+            "status": "metadata_extracted"
         })
 
         log_info("ProcessPDFBackground", f"Metadata extraction completed", {"paper_id": paper_id})
 
-        # 4. すべての章を順番に処理
+        # すべての章を順番に処理
         chapters = result.get("chapters", [])
         if not chapters:
             log_warning("ProcessPDFBackground", f"No chapters found", {"paper_id": paper_id})
-            # 空の場合でもエラーではなく、処理完了として扱う
             doc_ref.update({
                 "status": "completed",
                 "completed_at": datetime.datetime.now()
@@ -378,29 +404,27 @@ def process_pdf_background(request: Request):
 
     except APIError as e:
         log_error("APIError", e.message, {"details": e.details})
-
-        # Firestoreのステータスを 'error' に更新
         if paper_id:
             try:
-                db.collection("papers").document(paper_id).update({"status": "error"})
+                db.collection("papers").document(paper_id).update({
+                    "status": "error",
+                    "error_message": e.message
+                })
             except Exception as db_error:
                 log_error("FirestoreError", "Failed to update Firestore status", {"error": str(db_error)})
-
         return jsonify(e.to_dict()), e.status_code, headers
 
     except Exception as e:
         log_error("UnhandledError", "An internal server error occurred", {"error": str(e)})
-
-        # paper_id変数が定義されていない可能性があるため、ローカル変数で確認
         paper_id_local = request_json.get("paper_id") if request_json else None
-
-        # Firestoreのステータスを 'error' に更新
         if paper_id_local:
             try:
-                db.collection("papers").document(paper_id_local).update({"status": "error"})
+                db.collection("papers").document(paper_id_local).update({
+                    "status": "error",
+                    "error_message": str(e)
+                })
             except Exception as db_error:
                 log_error("FirestoreError", "Failed to update Firestore status", {"error": str(db_error)})
-
         return jsonify({"error": "An internal server error occurred"}), 500, headers
 
 @functions_framework.http
@@ -465,7 +489,7 @@ def get_signed_url(request: Request):
         try:
             url = blob.generate_signed_url(
                 version="v4",
-                expiration=datetime.timedelta(minutes=15),  # 有効期限を15分に延長
+                expiration=datetime.timedelta(minutes=15),
                 method="GET"
             )
             log_info("GetSignedURL", "Successfully generated signed URL")
