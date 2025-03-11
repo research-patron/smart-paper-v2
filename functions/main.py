@@ -33,7 +33,7 @@ logging.basicConfig(level=logging.INFO)
 # プロジェクトID
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT")
 LOCATION = os.environ.get("FUNCTION_REGION", "us-central1")
-QUEUE = os.environ.get("TASK_QUEUE", "translate-pdf-queue")
+QUEUE = os.environ.get("TASK_QUEUE", "translate-pdf-queue-new")
 CLOUD_FUNCTIONS_URL = os.environ.get("FUNCTIONS_URL", f"https://{LOCATION}-{PROJECT_ID}.cloudfunctions.net")
 BUCKET_NAME = os.environ.get("BUCKET_NAME", f"{PROJECT_ID}.firebasestorage.app")
 

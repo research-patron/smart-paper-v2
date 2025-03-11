@@ -27,19 +27,25 @@ firebase projects:list
 echo -e "\n${BLUE}デプロイするプロジェクトを選択してください:${NC}"
 firebase use ${PROJECT_ID}
 
-# Cloud Tasks キューを作成
-echo -e "\n${BLUE}Cloud Tasks キューの作成...${NC}"
-gcloud tasks queues create translate-pdf-queue \
+# Cloud Tasksのキューの存在を確認
+echo -e "\n${BLUE}Cloud Tasks キューの存在を確認...${NC}"
+gcloud tasks queues describe translate-pdf-queue-new \
+  --location=${REGION} || \
+  gcloud tasks queues create translate-pdf-queue-new \
   --location=${REGION} \
   --max-dispatches-per-second=5 \
   --max-concurrent-dispatches=10 \
-  --max-attempts=1 || true
+  --max-attempts=1
 
-# サービスアカウントに必要なロールを付与
+# サービスアカウントに必要な権限を付与
 echo -e "\n${BLUE}サービスアカウントのロールを設定...${NC}"
 gcloud projects add-iam-policy-binding ${PROJECT_ID} \
   --member=serviceAccount:${SERVICE_ACCOUNT} \
   --role=roles/cloudtasks.enqueuer || true
+
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+  --member=serviceAccount:${SERVICE_ACCOUNT} \
+  --role=roles/cloudtasks.taskCreator || true
 
 gcloud projects add-iam-policy-binding ${PROJECT_ID} \
   --member=serviceAccount:${SERVICE_ACCOUNT} \
