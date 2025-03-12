@@ -8,8 +8,6 @@ import datetime
 import json
 import os
 import logging
-import vertexai
-import asyncio
 
 # 自作モジュールのインポート
 from process_pdf import process_content, process_all_chapters
@@ -166,7 +164,7 @@ def process_pdf(request: Request):
 @functions_framework.http
 def process_pdf_background(request: Request):
     """
-    PDF処理を非同期でバックグラウンドで実行する
+    PDF処理を同期的に実行する
     """
     # CORSヘッダーの設定
     if request.method == 'OPTIONS':
@@ -249,10 +247,10 @@ def process_pdf_background(request: Request):
             })
             return jsonify({"message": "Processing completed (no chapters found)"}), 200, headers
 
-        # 章を順番に処理
-        chapter_results = asyncio.run(process_all_chapters(chapters, paper_id, pdf_gs_path))
+        # 章を順番に処理（同期処理）
+        chapter_results = process_all_chapters(chapters, paper_id, pdf_gs_path)
 
-        log_info("ProcessPDFBackground", f"All chapters processed",
+        log_info("ProcessPDFBackground", f"All chapters processed successfully",
                 {"paper_id": paper_id, "chapters_count": len(chapters)})
 
         return jsonify({
@@ -276,10 +274,9 @@ def process_pdf_background(request: Request):
 
     except Exception as e:
         log_error("UnhandledError", "An internal server error occurred", {"error": str(e)})
-        paper_id_local = request_json.get("paper_id") if request_json else None
-        if paper_id_local:
+        if paper_id:
             try:
-                db.collection("papers").document(paper_id_local).update({
+                db.collection("papers").document(paper_id).update({
                     "status": "error",
                     "error_message": str(e),
                     "progress": 0  # エラー時は進捗を0に戻す
