@@ -18,11 +18,11 @@
     "@types/node": "^16.18.126",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
+    "@types/react-pdf": "^6.2.0",
     "axios": "^1.6.7",
     "date-fns": "^3.3.1",
     "firebase": "^10.8.1",
     "i18next": "^23.10.1",
-    "pdfjs-dist": "^4.0.379",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hook-form": "^7.51.0",
@@ -35,7 +35,7 @@
     "zustand": "^4.5.2"
   },
   "scripts": {
-    "postinstall": "cp node_modules/pdfjs-dist/build/pdf.worker.min.js public/ && cp node_modules/pdfjs-dist/build/pdf.worker.min.js.map public/",
+    "postinstall": "mkdir -p public/pdf-worker && cp -f node_modules/react-pdf/dist/esm/pdf.worker.entry.js public/pdf-worker/",
     "prestart": "npm run postinstall",
     "prebuild": "npm run postinstall",
     "start": "craco start",
