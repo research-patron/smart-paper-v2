@@ -19,12 +19,13 @@ import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import ErrorMessage from '../common/ErrorMessage';
 
-// PDFJSをインポート
-import * as pdfjsLib from 'pdfjs-dist';
-import { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
+// react-pdfコンポーネントをインポート
+import { Document, Page, pdfjs } from 'react-pdf';
+import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
+import 'react-pdf/dist/esm/Page/TextLayer.css';
 
-// PDF.jsのワーカーのパスを設定
-pdfjsLib.GlobalWorkerOptions.workerSrc = `${process.env.PUBLIC_URL}/pdf.worker.min.js`;
+// PDFワーカーの設定
+pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`;
 
 interface PdfViewerProps {
   url: string;
@@ -39,123 +40,64 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
   height = '100%',
   onPageChange
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
-  const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [numPages, setNumPages] = useState<number | null>(null);
+  const [pageNumber, setPageNumber] = useState<number>(1);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [scale, setScale] = useState(1.0);
-  const [fullscreen, setFullscreen] = useState(false);
+  const [scale, setScale] = useState<number>(1.0);
+  const [fullscreen, setFullscreen] = useState<boolean>(false);
   
-  // PDFをロード
-  useEffect(() => {
-    const loadPDF = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // PDFを読み込む
-        const loadingTask = pdfjsLib.getDocument(url);
-        const doc = await loadingTask.promise;
-        
-        setPdfDoc(doc);
-        setTotalPages(doc.numPages);
-        setCurrentPage(1);
-        
-        if (onPageChange) {
-          onPageChange(1, doc.numPages);
-        }
-      } catch (err) {
-        console.error('Error loading PDF:', err);
-        setError('PDFの読み込みに失敗しました。');
-      } finally {
-        setLoading(false);
-      }
-    };
+  // PDFのロード完了時
+  const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
+    setNumPages(numPages);
+    setLoading(false);
+    setError(null);
     
-    loadPDF();
-    
-    // クリーンアップ
-    return () => {
-      if (pdfDoc) {
-        pdfDoc.destroy();
-      }
-    };
-  }, [url, onPageChange]);
+    if (onPageChange) {
+      onPageChange(pageNumber, numPages);
+    }
+  };
   
-  // ページを描画
-  useEffect(() => {
-    const renderPage = async () => {
-      if (!pdfDoc || !canvasRef.current) return;
-      
-      try {
-        // ページを取得
-        const page = await pdfDoc.getPage(currentPage);
-        
-        // ビューポートを計算
-        const viewport = page.getViewport({ scale });
-        
-        // canvasの寸法とコンテキストを設定
-        const canvas = canvasRef.current;
-        const context = canvas.getContext('2d');
-        
-        if (!context) {
-          throw new Error('Canvas context not available');
-        }
-        
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
-        
-        // ページをレンダリング
-        const renderContext = {
-          canvasContext: context,
-          viewport: viewport
-        };
-        
-        await page.render(renderContext).promise;
-      } catch (err) {
-        console.error('Error rendering PDF page:', err);
-        setError('PDFページの表示に失敗しました。');
-      }
-    };
-    
-    renderPage();
-  }, [pdfDoc, currentPage, scale]);
+  // PDFのロードエラー時
+  const onDocumentLoadError = (error: Error) => {
+    console.error('Error loading PDF:', error);
+    setError('PDFの読み込みに失敗しました。');
+    setLoading(false);
+  };
   
   // 前のページへ
   const goToPrevPage = () => {
-    if (currentPage > 1) {
-      const newPage = currentPage - 1;
-      setCurrentPage(newPage);
+    if (pageNumber > 1) {
+      const newPage = pageNumber - 1;
+      setPageNumber(newPage);
       
-      if (onPageChange) {
-        onPageChange(newPage, totalPages);
+      if (onPageChange && numPages) {
+        onPageChange(newPage, numPages);
       }
     }
   };
   
   // 次のページへ
   const goToNextPage = () => {
-    if (pdfDoc && currentPage < totalPages) {
-      const newPage = currentPage + 1;
-      setCurrentPage(newPage);
+    if (numPages && pageNumber < numPages) {
+      const newPage = pageNumber + 1;
+      setPageNumber(newPage);
       
-      if (onPageChange) {
-        onPageChange(newPage, totalPages);
+      if (onPageChange && numPages) {
+        onPageChange(newPage, numPages);
       }
     }
   };
   
-  // 特定のページへ
+  // 特定のページへ移動
   const goToPage = (_event: Event, value: number | number[]) => {
     const newPage = typeof value === 'number' ? value : value[0];
-    setCurrentPage(newPage);
+    setPageNumber(newPage);
     
-    if (onPageChange) {
-      onPageChange(newPage, totalPages);
+    if (onPageChange && numPages) {
+      onPageChange(newPage, numPages);
     }
   };
   
@@ -192,23 +134,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [currentPage, totalPages]);
-  
-  if (loading) {
-    return (
-      <Box
-        sx={{
-          width,
-          height,
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center'
-        }}
-      >
-        <CircularProgress />
-      </Box>
-    );
-  }
+  }, [pageNumber, numPages]);
   
   if (error) {
     return (
@@ -264,33 +190,34 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <IconButton onClick={goToPrevPage} disabled={currentPage <= 1}>
+          <IconButton onClick={goToPrevPage} disabled={pageNumber <= 1}>
             <NavigateBeforeIcon />
           </IconButton>
           
           <Box sx={{ display: 'flex', alignItems: 'center', width: 100, mx: 1 }}>
             <Typography variant="body2" sx={{ mr: 1 }}>
-              {currentPage}
+              {pageNumber}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              / {totalPages}
+              / {numPages || '--'}
             </Typography>
           </Box>
           
-          <IconButton onClick={goToNextPage} disabled={currentPage >= totalPages}>
+          <IconButton onClick={goToNextPage} disabled={!numPages || pageNumber >= numPages}>
             <NavigateNextIcon />
           </IconButton>
         </Box>
         
         <Box sx={{ width: 200, mx: 2, display: { xs: 'none', sm: 'block' } }}>
           <Slider
-            value={currentPage}
+            value={pageNumber}
             min={1}
-            max={totalPages}
+            max={numPages || 1}
             step={1}
             onChange={goToPage}
             size="small"
             aria-label="ページスライダー"
+            disabled={!numPages || numPages <= 1}
           />
         </Box>
         
@@ -331,7 +258,38 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
           p: 2,
         }}
       >
-        <canvas ref={canvasRef} />
+        {loading && (
+          <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}>
+            <CircularProgress />
+          </Box>
+        )}
+        
+        <Document
+          file={url}
+          onLoadSuccess={onDocumentLoadSuccess}
+          onLoadError={onDocumentLoadError}
+          loading={<CircularProgress />}
+          error={
+            <Box sx={{ textAlign: 'center', p: 2 }}>
+              <Alert severity="error">PDFの読み込みに失敗しました</Alert>
+              <Button 
+                variant="contained" 
+                onClick={() => window.open(url, '_blank')}
+                sx={{ mt: 2 }}
+              >
+                ブラウザで開く
+              </Button>
+            </Box>
+          }
+        >
+          <Page
+            pageNumber={pageNumber}
+            scale={scale}
+            renderAnnotationLayer={true}
+            renderTextLayer={true}
+            loading={<CircularProgress />}
+          />
+        </Document>
       </Box>
     </Box>
   );
