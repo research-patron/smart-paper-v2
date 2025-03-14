@@ -1,14 +1,18 @@
 import vertexai
 import json
 import os
-from vertexai.generative_models import Part, GenerationConfig, GenerativeModel
+from vertexai.generative_models import Part, GenerationConfig, GenerativeModel, ChatSession
 from google.api_core import exceptions
-from error_handling import log_error, log_info, VertexAIError
+from error_handling import log_error, log_info, log_warning, VertexAIError
 
 # 環境変数から設定を取得
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT")
 LOCATION = "us-central1"  # Vertex AIのリージョン
 MODEL_NAME = "gemini-2.0-flash-001"  # 最新のモデル名に更新
+
+# チャットセッションを保持する辞書
+# キー: 論文ID、値: ChatSessionオブジェクト
+active_chat_sessions = {}
 
 def initialize_vertex_ai():
     """
@@ -35,14 +39,53 @@ def get_model() -> GenerativeModel:
         log_error("VertexAIError", "Failed to initialize model", {"error": str(e)})
         raise VertexAIError(f"Failed to initialize model: {str(e)}") from e
 
-def process_pdf_content(model: GenerativeModel, pdf_gs_path: str, prompt: str, 
-                       temperature: float = 0.2) -> str:
+def start_chat_session(paper_id: str, pdf_gs_path: str) -> ChatSession:
     """
-    PDFファイルの内容を直接処理する
+    PDFファイルを使用して新しいチャットセッションを開始する
 
     Args:
-        model: 生成モデル
+        paper_id: 論文のID (セッションのキーとして使用)
         pdf_gs_path: PDFファイルのパス (gs://から始まる)
+
+    Returns:
+        ChatSession: 初期化されたチャットセッション
+    """
+    try:
+        # すでにセッションが存在する場合は再利用
+        if paper_id in active_chat_sessions:
+            log_info("VertexAI", f"Reusing existing chat session for paper: {paper_id}")
+            return active_chat_sessions[paper_id]
+
+        # モデルの取得
+        model = get_model()
+        
+        # PDFファイルを読み込む
+        pdf_content = Part.from_uri(pdf_gs_path, mime_type="application/pdf")
+        
+        # 初期プロンプト - PDFの内容を保持するための指示
+        initial_prompt = "これから解析する論文のPDFファイルです。このPDFの内容を記憶し、これ以降の質問や指示に対して、このPDFの内容に基づいて回答してください。"
+        
+        # チャットセッションを開始
+        chat = model.start_chat()
+        
+        # 初期メッセージ送信（PDFを含む）
+        chat.send_message([initial_prompt, pdf_content])
+        
+        # セッションを保存
+        active_chat_sessions[paper_id] = chat
+        
+        log_info("VertexAI", f"Created new chat session for paper: {paper_id}")
+        return chat
+    except Exception as e:
+        log_error("VertexAIError", f"Failed to start chat session", {"error": str(e), "paper_id": paper_id})
+        raise VertexAIError(f"Failed to start chat session: {str(e)}") from e
+
+def process_with_chat(paper_id: str, prompt: str, temperature: float = 0.2) -> str:
+    """
+    既存のチャットセッションを使用してプロンプトを処理する
+
+    Args:
+        paper_id: 論文のID
         prompt: プロンプト文字列
         temperature: 生成の温度パラメータ（デフォルト: 0.2）
 
@@ -50,84 +93,108 @@ def process_pdf_content(model: GenerativeModel, pdf_gs_path: str, prompt: str,
         str: 生成されたテキスト
     """
     try:
-        # PDFファイルを直接読み込む
-        content = [Part.from_uri(pdf_gs_path, mime_type="application/pdf")]
+        # セッションが存在するか確認
+        if paper_id not in active_chat_sessions:
+            raise VertexAIError(f"No active chat session found for paper: {paper_id}")
         
-        # 生成設定
-        generation_config = GenerationConfig(
-            temperature=temperature,
-            max_output_tokens=8192,
-            top_p=0.95,
-            top_k=40,
+        chat = active_chat_sessions[paper_id]
+        
+        # メッセージを送信
+        response = chat.send_message(
+            prompt,
+            generation_config=GenerationConfig(
+                temperature=temperature,
+                max_output_tokens=8192,
+                top_p=0.95,
+                top_k=40,
+            )
         )
         
-        # コンテンツを生成
-        response = model.generate_content(
-            contents=[*content, prompt],
-            generation_config=generation_config,
-            safety_settings=None,
-        )
-        
+        log_info("VertexAI", f"Successfully processed prompt with chat session for paper: {paper_id}")
         return response.text
+    except exceptions.DeadlineExceeded as e:
+        log_error("VertexAITimeout", "API request timed out", {"error": str(e), "paper_id": paper_id})
+        raise VertexAIError(f"API request timed out: {str(e)}") from e
+    except exceptions.ServiceUnavailable as e:
+        log_error("VertexAIUnavailable", "Service unavailable", {"error": str(e), "paper_id": paper_id})
+        raise VertexAIError(f"Service unavailable: {str(e)}") from e
     except Exception as e:
-        log_error("VertexAIError", "Error processing PDF content", 
-                 {"error": str(e), "file_path": pdf_gs_path})
-        raise VertexAIError(f"Error processing PDF content: {str(e)}") from e
+        log_error("VertexAIError", "Error processing with chat", {"error": str(e), "paper_id": paper_id})
+        raise VertexAIError(f"Error processing with chat: {str(e)}") from e
 
-def generate_content(model: GenerativeModel, prompt: str, temperature: float = 0.2, max_retries: int = 3) -> str:
+def end_chat_session(paper_id: str) -> bool:
     """
-    Vertex AIのGenerative AIモデルを呼び出し、リトライロジックを組み込む
+    チャットセッションを終了し、リソースを解放する
 
     Args:
-        model: 生成モデル
+        paper_id: 論文のID
+
+    Returns:
+        bool: 成功した場合はTrue
+    """
+    if paper_id in active_chat_sessions:
+        del active_chat_sessions[paper_id]
+        log_info("VertexAI", f"Ended chat session for paper: {paper_id}")
+        return True
+    return False
+
+# 以下の関数は互換性のために残しておくが、内部では新しい会話ベースの関数を使用
+def process_pdf_content(model: GenerativeModel, pdf_gs_path: str, prompt: str, 
+                       temperature: float = 0.2, paper_id: str = None) -> str:
+    """
+    PDFファイルの内容を処理する (互換性のために残す)
+
+    Args:
+        model: 生成モデル (使用しない)
+        pdf_gs_path: PDFファイルのパス
         prompt: プロンプト文字列
-        temperature: 生成の温度パラメータ（デフォルト: 0.2）
-        max_retries: 最大リトライ回数
+        temperature: 生成の温度パラメータ
+        paper_id: 論文ID (新規追加パラメータ)
 
     Returns:
         str: 生成されたテキスト
     """
-    retries = 0
-    last_error = None
+    if not paper_id:
+        # paper_idが指定されていない場合はエラー
+        raise VertexAIError("paper_id is required for processing PDF content")
+    
+    try:
+        # 既存のセッションがあるか確認し、なければ新規作成
+        if paper_id not in active_chat_sessions:
+            start_chat_session(paper_id, pdf_gs_path)
+        
+        # チャットセッションでプロンプトを処理
+        return process_with_chat(paper_id, prompt, temperature)
+    except Exception as e:
+        log_error("VertexAIError", "Error in process_pdf_content", 
+                 {"error": str(e), "paper_id": paper_id})
+        raise VertexAIError(f"Error in process_pdf_content: {str(e)}") from e
 
-    while retries < max_retries:
-        try:
-            log_info("VertexAI", f"Generating content, attempt {retries + 1}/{max_retries}")
-            
-            # 生成設定
-            generation_config = GenerationConfig(
-                temperature=temperature,
-                max_output_tokens=8192,  # 出力トークン数の上限
-                top_p=0.95,
-                top_k=40,
-            )
-            
-            response = model.generate_content(
-                prompt,
-                generation_config=generation_config,
-                safety_settings=None,  # デフォルトの安全設定を使用
-            )
-            
-            log_info("VertexAI", "Content generated successfully")
-            return response.text
-        except exceptions.DeadlineExceeded as e:
-            # タイムアウトエラー
-            last_error = e
-            retries += 1
-            log_error("VertexAITimeout", f"Retry {retries}/{max_retries}: API request timed out", {"error": str(e)})
-        except exceptions.ServiceUnavailable as e:
-            # サービス一時的利用不可
-            last_error = e
-            retries += 1
-            log_error("VertexAIUnavailable", f"Retry {retries}/{max_retries}: Service unavailable", {"error": str(e)})
-        except Exception as e:
-            # その他のエラー (リトライしない)
-            log_error("VertexAIError", "Error generating content", {"error": str(e)})
-            raise VertexAIError(f"Error generating content: {str(e)}") from e
+def generate_content(model: GenerativeModel, prompt: str, temperature: float = 0.2, max_retries: int = 3, paper_id: str = None) -> str:
+    """
+    Vertex AIのGenerative AIモデルを呼び出す (互換性のために残す)
 
-    # すべてのリトライが失敗
-    log_error("VertexAIMaxRetries", "All retries failed", {"error": str(last_error)})
-    raise VertexAIError(f"Failed to generate content after {max_retries} retries") from last_error
+    Args:
+        model: 生成モデル (使用しない)
+        prompt: プロンプト文字列
+        temperature: 生成の温度パラメータ
+        max_retries: 最大リトライ回数 (使用しない)
+        paper_id: 論文ID (新規追加パラメータ)
+
+    Returns:
+        str: 生成されたテキスト
+    """
+    if not paper_id:
+        # paper_idが指定されていない場合はエラー
+        raise VertexAIError("paper_id is required for generating content")
+    
+    try:
+        # チャットセッションでプロンプトを処理
+        return process_with_chat(paper_id, prompt, temperature)
+    except Exception as e:
+        log_error("VertexAIError", "Error in generate_content", 
+                 {"error": str(e), "paper_id": paper_id})
+        raise VertexAIError(f"Error in generate_content: {str(e)}") from e
 
 def process_json_response(text: str) -> dict:
     """

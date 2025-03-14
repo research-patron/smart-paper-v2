@@ -5,6 +5,9 @@ from typing import Dict, Optional, Any, List
 from vertex import (
     initialize_vertex_ai,
     get_model,
+    start_chat_session,
+    process_with_chat,
+    end_chat_session,
     process_pdf_content,
     process_json_response
 )
@@ -29,6 +32,13 @@ DEFAULT_TRANSLATION_PROMPT = """
 数式、図表の参照、引用は原文のまま残してください。
 
 以下の情報を使用して、指定された章（チャプター）だけを翻訳してください：
+Chapter Number: {chapter_number}
+Start Page: {start_page}
+End Page: {end_page}
+Chapter Title: {chapter_title}
+
+PDF内の指定されたページ範囲から、その章だけを翻訳してください。以前の翻訳結果には言及せずに、
+新しく翻訳を行ってください。
 
 出力形式：
 ```json
@@ -40,13 +50,14 @@ DEFAULT_TRANSLATION_PROMPT = """
 
 DEFAULT_SUMMARY_PROMPT = """
 あなたは学術論文を要約する専門家です。
-以下の情報を使用して、指定された章（チャプター）の要約を生成してください。
-要約は日本語で作成し、そのセクションの重要なポイント、方法論、結果、結論を含めてください。
+PDFの内容全体を考慮した上で、論文全体の要約を生成してください。
+要約は日本語で作成し、論文の重要なポイント、方法論、結果、結論を含めてください。
+章ごとに分けずに、一つのまとまった要約として作成してください。
 
 出力形式：
 ```json
 {
-  "summary": "章の要約（500字程度）"
+  "summary": "論文全体の要約（500〜800字程度）"
 }
 ```
 """
@@ -129,14 +140,15 @@ def load_prompt(filename: str) -> str:
             raise ValueError(f"Unknown prompt type: {filename}")
 
 
-def process_content(pdf_gs_path: str, operation: str, chapter_info: dict = None) -> dict:
+def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_info: dict = None) -> dict:
     """
     PDFファイルを直接処理して翻訳・要約・メタデータ抽出を行う
 
     Args:
         pdf_gs_path: PDFファイルのパス (gs://から始まる)
+        paper_id: 論文のID
         operation: 処理内容 ('translate', 'summarize', 'extract_metadata_and_chapters')
-        chapter_info: 章情報（章番号、開始ページ、終了ページ）。translate, summarize の場合に必要。
+        chapter_info: 章情報（章番号、開始ページ、終了ページ）。translate の場合に必要。
 
     Returns:
         dict: 処理結果（JSON形式）
@@ -145,31 +157,27 @@ def process_content(pdf_gs_path: str, operation: str, chapter_info: dict = None)
         # Vertex AIの初期化
         initialize_vertex_ai()
         
-        # モデルを取得
-        model = get_model()
+        # チャットセッションを開始または取得
+        start_chat_session(paper_id, pdf_gs_path)
         
         # 処理内容に応じてプロンプトを選択
         if operation == "translate":
             if not chapter_info:
                 raise ValidationError("Chapter info is required for translation operation")
                 
-            prompt = load_prompt(TRANSLATION_PROMPT_FILE)
-            # プロンプトに章情報を追加
-            prompt += f"\n\nChapter Number: {chapter_info['chapter_number']}"
-            prompt += f"\nStart Page: {chapter_info['start_page']}"
-            prompt += f"\nEnd Page: {chapter_info['end_page']}"
-            prompt += f"\nChapter Title: {chapter_info['title']}"
+            # 翻訳プロンプトのテンプレートを読み込む
+            prompt_template = load_prompt(TRANSLATION_PROMPT_FILE)
+            
+            # 安全なフォーマット処理 - 文字列置換によるフォーマット
+            # format()メソッドではなく手動で置換する
+            prompt = prompt_template.replace("{chapter_number}", str(chapter_info['chapter_number']))
+            prompt = prompt.replace("{start_page}", str(chapter_info['start_page']))
+            prompt = prompt.replace("{end_page}", str(chapter_info['end_page']))
+            prompt = prompt.replace("{chapter_title}", str(chapter_info['title']))
             
         elif operation == "summarize":
-            if not chapter_info:
-                raise ValidationError("Chapter info is required for summarize operation")
-                
+            # 論文全体の要約のためのプロンプト
             prompt = load_prompt(SUMMARY_PROMPT_FILE)
-            # プロンプトに章情報を追加
-            prompt += f"\n\nChapter Number: {chapter_info['chapter_number']}"
-            prompt += f"\nStart Page: {chapter_info['start_page']}"
-            prompt += f"\nEnd Page: {chapter_info['end_page']}"
-            prompt += f"\nChapter Title: {chapter_info['title']}"
             
         elif operation == "extract_metadata_and_chapters":
             prompt = load_prompt(METADATA_AND_CHAPTER_PROMPT_FILE)
@@ -177,21 +185,35 @@ def process_content(pdf_gs_path: str, operation: str, chapter_info: dict = None)
         else:
             raise ValidationError(f"Invalid operation: {operation}")
 
-        # PDFの処理と結果の生成
-        log_info("ProcessPDF", f"Processing PDF content for operation: {operation}")
-        response_text = process_pdf_content(model, pdf_gs_path, prompt)
+        # チャットセッションを使用してプロンプトを処理
+        log_info("ProcessPDF", f"Processing with chat session for operation: {operation}, paper_id: {paper_id}")
+        response_text = process_with_chat(paper_id, prompt)
         
         # JSONレスポンスの処理
         try:
-            if operation == "extract_metadata_and_chapters":
-                # メタデータ抽出の場合は直接JSONを解析
-                result = process_json_response(response_text)
+            # まず、JSON部分を抽出してみる
+            json_pattern = re.compile(r'```(?:json)?\s*([\s\S]*?)\s*```')
+            json_match = json_pattern.search(response_text)
+            
+            if json_match:
+                json_str = json_match.group(1).strip()
+                result = json.loads(json_str)
             else:
-                # 翻訳と要約の場合
-                result = process_json_response(response_text)
+                # JSON形式でないか、フォーマットが異なる場合
+                try:
+                    # 直接JSONとして解析を試みる
+                    result = json.loads(response_text)
+                except json.JSONDecodeError:
+                    # それでも失敗した場合、テキスト全体を該当するキーに格納
+                    if operation == "translate":
+                        result = {"translated_text": sanitize_html(response_text)}
+                    elif operation == "summarize":
+                        result = {"summary": response_text}
+                    else:
+                        raise json.JSONDecodeError("Unable to parse response as JSON", response_text, 0)
             
             # 翻訳結果のHTMLをサニタイズ
-            if operation == "translate":
+            if operation == "translate" and "translated_text" in result:
                 result["translated_text"] = sanitize_html(result.get("translated_text", ""))
                 # 章情報を結果に追加
                 result["chapter_number"] = chapter_info["chapter_number"]
@@ -254,8 +276,12 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
         # ステータスを処理中に更新
         doc_ref.update({
             "status": "processing",
-            "progress": 0
+            "progress": 5
         })
+
+        # チャットセッションを初期化
+        start_chat_session(paper_id, pdf_gs_path)
+        log_info("ProcessAllChapters", f"Initialized chat session for paper", {"paper_id": paper_id})
 
         # 各章を順番に処理
         results = []
@@ -263,13 +289,14 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
         sorted_chapters = sorted(chapters, key=lambda x: x["chapter_number"])
         total_chapters = len(sorted_chapters)
         
+        # 1. 翻訳フェーズ - 各章を順番に翻訳
         for i, chapter in enumerate(sorted_chapters, 1):
             try:
                 log_info("ProcessAllChapters", f"Processing chapter {i}/{total_chapters}: Chapter {chapter['chapter_number']}",
                          {"paper_id": paper_id})
                 
                 # 翻訳処理
-                translate_result = process_content(pdf_gs_path, "translate", chapter)
+                translate_result = process_content(pdf_gs_path, paper_id, "translate", chapter)
                 
                 # FirestoreのサブコレクションにTranslation結果を保存
                 chapter_ref = doc_ref.collection("translated_chapters").document(f"chapter_{chapter['chapter_number']}")
@@ -278,28 +305,13 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
                 log_info("ProcessAllChapters", f"Translation completed for chapter {chapter['chapter_number']}",
                          {"paper_id": paper_id})
                 
-                # 要約処理
-                summary_result = process_content(pdf_gs_path, "summarize", chapter)
-                
-                # Firestoreに結果を保存（章番号付きでフォーマット）
-                current_summary = doc_ref.get().to_dict().get("summary", "")
-                updated_summary = current_summary
-                if current_summary:
-                    updated_summary += "\n\n"
-                updated_summary += f"**Chapter {chapter['chapter_number']}:**\n{summary_result['summary']}"
-                doc_ref.update({"summary": updated_summary})
-                
-                log_info("ProcessAllChapters", f"Summary completed for chapter {chapter['chapter_number']}",
-                         {"paper_id": paper_id})
-                
-                # 進捗を更新
-                progress = int((i / total_chapters) * 100)
+                # 進捗を更新 (翻訳フェーズで5%から75%まで)
+                progress = 5 + int((i / total_chapters) * 70)
                 doc_ref.update({"progress": progress})
                 
                 results.append({
                     "chapter_number": chapter["chapter_number"],
-                    "translated": True,
-                    "summarized": True
+                    "translated": True
                 })
                 
             except Exception as chapter_error:
@@ -309,9 +321,40 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
                 results.append({
                     "chapter_number": chapter["chapter_number"],
                     "translated": False,
-                    "summarized": False,
                     "error": str(chapter_error)
                 })
+
+        # 2. 要約フェーズ - 論文全体の要約を一回だけ生成
+        try:
+            log_info("ProcessAllChapters", f"Generating summary for the entire paper", {"paper_id": paper_id})
+            
+            # 進捗を更新
+            doc_ref.update({"progress": 75})
+            
+            # 要約処理 (章情報なしで全体要約)
+            summary_result = process_content(pdf_gs_path, paper_id, "summarize")
+            
+            # 正常なJSONレスポンスがある場合
+            if isinstance(summary_result, dict) and 'summary' in summary_result:
+                summary_text = summary_result['summary']
+            else:
+                # JSONレスポンスがない場合、結果全体を要約とみなす
+                summary_text = str(summary_result)
+
+            # Firestoreに結果を保存
+            doc_ref.update({
+                "summary": summary_text,
+                "progress": 80
+            })
+            
+            log_info("ProcessAllChapters", f"Summary completed for the entire paper", {"paper_id": paper_id})
+            
+        except Exception as summary_error:
+            log_error("ProcessSummaryError", f"Error generating paper summary",
+                     {"paper_id": paper_id, "error": str(summary_error)})
+            doc_ref.update({
+                "summary": "要約の生成中にエラーが発生しました。"
+            })
 
         # 全ての章の翻訳結果を結合
         all_translated_text = ""
@@ -322,16 +365,29 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
             key=lambda x: x.to_dict().get("chapter_number", 0)
         )
         
+        # 進捗を更新
+        doc_ref.update({"progress": 85})
+        
         for chapter_doc in chapter_docs:
             chapter_data = chapter_doc.to_dict()
             translated_text = chapter_data.get('translated_text', '')
             if translated_text:
                 if all_translated_text:
                     all_translated_text += "\n\n"
-                # 章番号とタイトルを追加
-                chapter_title = chapter_data.get('title', f"Chapter {chapter_data.get('chapter_number', '?')}")
-                all_translated_text += f"<h2>Chapter {chapter_data.get('chapter_number', '?')}: {chapter_title}</h2>\n\n"
+                # 章番号とタイトルを追加（日本語タイトルのみの形式に変更）
+                chapter_number = chapter_data.get('chapter_number', '?')
+                chapter_title = chapter_data.get('title', '')
+                
+                # タイトルが「数字. タイトル」の形式かチェック
+                title_pattern = rf"^{chapter_number}\.\s+.*"
+                if not re.match(title_pattern, chapter_title):
+                    chapter_title = f"{chapter_number}. {chapter_title}"
+                
+                all_translated_text += f"<h2>{chapter_title}</h2>\n\n"
                 all_translated_text += translated_text
+
+        # 進捗を更新
+        doc_ref.update({"progress": 90})
 
         # エラーチェック
         if not all_translated_text:
@@ -379,6 +435,10 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
         doc_ref.update({"related_papers": related_papers})
         log_info("ProcessAllChapters", f"Added related papers recommendations", {"paper_id": paper_id})
 
+        # チャットセッションを終了して解放
+        end_chat_session(paper_id)
+        log_info("ProcessAllChapters", f"Ended chat session for paper", {"paper_id": paper_id})
+
         return results
     except Exception as e:
         log_error("ProcessAllChaptersError", "Failed to process all chapters",
@@ -389,6 +449,13 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
             "status": "error",
             "error_message": str(e)
         })
+        
+        # エラー時もチャットセッションを解放
+        try:
+            end_chat_session(paper_id)
+        except:
+            pass
+            
         raise
 
 def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None) -> dict:
@@ -402,7 +469,10 @@ def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None)
         if not hasattr(process_with_cache, 'pdf_gs_path'):
             raise ValueError("PDF path not set. This function is deprecated.")
         
-        return process_content(process_with_cache.pdf_gs_path, operation, chapter_info)
+        if not hasattr(process_with_cache, 'paper_id'):
+            raise ValueError("Paper ID not set. This function is deprecated.")
+            
+        return process_content(process_with_cache.pdf_gs_path, process_with_cache.paper_id, operation, chapter_info)
     except Exception as e:
         log_error("ProcessPDFError", f"Failed to process with cache: {operation}", 
                  {"error": str(e), "cache_id": cache_id, "operation": operation})
