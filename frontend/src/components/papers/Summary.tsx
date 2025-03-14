@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/components/papers/Summary.tsx
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -23,12 +23,51 @@ interface SummaryProps {
   error?: string;
 }
 
+// JSONパース関数
+const extractJsonContent = (text: string): string => {
+  if (!text) return '';
+
+  try {
+    // JSON形式かチェック
+    const jsonPattern = /^\s*\{\s*"summary"\s*:\s*"(.+)"\s*\}\s*$/;
+    const jsonMatch = jsonPattern.exec(text);
+    if (jsonMatch) {
+      // JSON内の実際の要約テキストを抽出
+      let extractedText = jsonMatch[1];
+      // エスケープされた引用符を戻す
+      extractedText = extractedText.replace(/\\"/g, '"');
+      return extractedText;
+    }
+
+    // JSONオブジェクトとして解析できるか試す
+    try {
+      const jsonObj = JSON.parse(text);
+      if (jsonObj && typeof jsonObj === 'object' && jsonObj.summary) {
+        return jsonObj.summary;
+      }
+    } catch (e) {
+      // JSONとして解析できない場合は無視
+    }
+
+    // どの方法でも抽出できない場合は元のテキストを返す
+    return text;
+  } catch (e) {
+    console.error('Error extracting summary content:', e);
+    return text;
+  }
+};
+
 const Summary: React.FC<SummaryProps> = ({
   chapters = [],
   summaryText = '', // 変更: chapters ごとの要約ではなく単一の要約テキスト
   loading = false,
   error
 }) => {
+  // メモ化された要約テキスト（JSONパース処理を含む）
+  const processedSummary = useMemo(() => {
+    return extractJsonContent(summaryText);
+  }, [summaryText]);
+
   // 要約を章ごとに分割する関数
   const splitSummaryByChapter = (text: string): Record<number, string> => {
     if (!text) return {};
@@ -64,7 +103,7 @@ const Summary: React.FC<SummaryProps> = ({
     return text
       .replace(/^Chapter \d+:?\s*/i, '') // "Chapter X:" または "Chapter X" を除去
       .replace(/^\(\d+\)\s*/, '') // "(X)" を除去
-      .replace(/^[０-９]+[\.．、]\s*/, '') // 全角数字と区切り文字を除去
+      .replace(/^[０-９]+[.．、]\s*/, '') // 全角数字と区切り文字を除去
       .trim();
   };
 
@@ -84,7 +123,7 @@ const Summary: React.FC<SummaryProps> = ({
     );
   }
 
-  if (!summaryText) {
+  if (!processedSummary) {
     return (
       <Box p={2}>
         <Alert severity="info">要約はまだ生成されていません。</Alert>
@@ -93,7 +132,7 @@ const Summary: React.FC<SummaryProps> = ({
   }
 
   // 要約を章ごとに分割
-  const chapterSummaries = splitSummaryByChapter(summaryText);
+  const chapterSummaries = splitSummaryByChapter(processedSummary);
   
   // 章情報がない場合は単一のペーパーとして表示
   if (chapters.length === 0 || Object.keys(chapterSummaries).length === 0) {
@@ -104,7 +143,7 @@ const Summary: React.FC<SummaryProps> = ({
         </Typography>
         <Divider sx={{ mb: 2 }} />
         <Typography variant="body1" component="div" whiteSpace="pre-line">
-          {summaryText}
+          {processedSummary}
         </Typography>
       </Paper>
     );
