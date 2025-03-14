@@ -35,6 +35,10 @@ gcloud projects add-iam-policy-binding ${PROJECT_ID} \
   --member=serviceAccount:${SERVICE_ACCOUNT} \
   --role=roles/cloudfunctions.invoker || true
 
+# Vertex AI APIを有効化
+echo -e "\n${BLUE}Vertex AI APIを有効化...${NC}"
+gcloud services enable aiplatform.googleapis.com
+
 # Cloud Functions依存関係のインストール
 echo -e "\n${BLUE}Cloud Functions依存関係のインストール...${NC}"
 cd functions
@@ -42,7 +46,7 @@ cd functions
 echo "firebase-functions>=0.1.0
 google-cloud-firestore>=2.5.0
 google-cloud-storage>=2.1.0
-google-cloud-aiplatform>=1.24.0
+google-cloud-aiplatform>=1.27.0
 google-cloud-secret-manager
 Flask>=2.3.2
 python-dateutil>=2.8.2
@@ -74,6 +78,7 @@ gcloud functions deploy process_pdf_background \
   --entry-point=process_pdf_background \
   --memory=4096MB \
   --timeout=540s \
+  --allow-unauthenticated \
   --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_FUNCTIONS_SA=${SERVICE_ACCOUNT}
 
 echo -e "\n${BLUE}get_signed_url 関数をデプロイしています...${NC}"

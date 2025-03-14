@@ -217,7 +217,7 @@ def process_pdf_background(request: Request):
                 "progress": 10
             })
             
-            result = process_content(pdf_gs_path, "extract_metadata_and_chapters")
+            result = process_content(pdf_gs_path, paper_id, "extract_metadata_and_chapters")
 
             # Firestoreに結果を保存
             doc_ref.update({
