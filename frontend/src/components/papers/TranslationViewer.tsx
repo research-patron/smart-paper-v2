@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/components/papers/TranslationViewer.tsx
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import {
   Box,
   Paper,
@@ -8,11 +8,8 @@ import {
   Tooltip,
   Divider,
   Chip,
-  CircularProgress,
-  Alert
+  CircularProgress
 } from '@mui/material';
-import ZoomInIcon from '@mui/icons-material/ZoomIn';
-import ZoomOutIcon from '@mui/icons-material/ZoomOut';
 import FormatSizeIcon from '@mui/icons-material/FormatSize';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DoneIcon from '@mui/icons-material/Done';
@@ -30,6 +27,75 @@ interface TranslationViewerProps {
   height?: number | string;
 }
 
+// JSONパース関数: 翻訳テキストからJSON構造を抽出する
+const extractTranslatedText = (text: string | null): string | null => {
+  if (!text) return null;
+
+  try {
+    // JSON形式かチェック - 完全なJSON文字列の場合
+    const jsonPattern = /^\s*\{\s*"translated_text"\s*:\s*"(.+)"\s*\}\s*$/;
+    const jsonMatch = jsonPattern.exec(text);
+    if (jsonMatch) {
+      // JSON内の実際の翻訳テキストを抽出
+      let extractedText = jsonMatch[1];
+      // エスケープされた引用符を戻す
+      extractedText = extractedText.replace(/\\"/g, '"');
+      return extractedText;
+    }
+
+    // JSONオブジェクトとして解析できるか試す
+    try {
+      const jsonObj = JSON.parse(text);
+      if (jsonObj && typeof jsonObj === 'object' && jsonObj.translated_text) {
+        return jsonObj.translated_text;
+      }
+    } catch (e) {
+      // JSONとして解析できない場合は無視
+    }
+
+    // 「I. Introduction」などの見出しを「1. はじめに」のような形式に変換
+    let processedText = text;
+    
+    // Roman numeral headings (I, II, III, etc.)
+    processedText = processedText.replace(
+      /<h([1-6])>\s*(?:Chapter\s+)?([IVX]+)\.\s*([^<]+)<\/h\1>/gi, 
+      (match, tagNum, romanNumeral, title) => {
+        // Convert Roman numerals to Arabic numerals
+        const romanToArabic = (roman: string): number => {
+          const romanNumerals: {[key: string]: number} = {
+            'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000
+          };
+          let result = 0;
+          for (let i = 0; i < roman.length; i++) {
+            const current = romanNumerals[roman[i]];
+            const next = romanNumerals[roman[i + 1]];
+            if (next && current < next) {
+              result -= current;
+            } else {
+              result += current;
+            }
+          }
+          return result;
+        };
+
+        const arabicNumeral = romanToArabic(romanNumeral.toUpperCase());
+        return `<h${tagNum}>${arabicNumeral}. ${title}</h${tagNum}>`;
+      }
+    );
+
+    // Numeric headings (1, 2, 3, etc.)
+    processedText = processedText.replace(
+      /<h([1-6])>\s*(?:Chapter\s+)?(\d+)(?::|\.)\s*([^<]+)<\/h\1>/gi, 
+      (match, tagNum, num, title) => `<h${tagNum}>${num}. ${title}</h${tagNum}>`
+    );
+
+    return processedText;
+  } catch (e) {
+    console.error('Error extracting translated text:', e);
+    return text; // エラーの場合は元のテキストを返す
+  }
+};
+
 const TranslationViewer: React.FC<TranslationViewerProps> = ({
   translatedText,
   loading = false,
@@ -42,6 +108,11 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
   const [fontSize, setFontSize] = useState(16);
   const [copied, setCopied] = useState(false);
   
+  // 処理された翻訳テキスト（JSONパース処理を含む）
+  const processedText = useMemo(() => {
+    return extractTranslatedText(translatedText);
+  }, [translatedText]);
+  
   // フォントサイズを変更
   const changeFontSize = (delta: number) => {
     setFontSize(prev => Math.min(Math.max(prev + delta, 12), 24));
@@ -49,9 +120,14 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
   
   // テキストをコピー
   const copyText = () => {
-    if (!translatedText) return;
+    if (!processedText) return;
     
-    navigator.clipboard.writeText(translatedText)
+    // HTML形式から平文に変換してコピー
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = processedText;
+    const plainText = tempDiv.textContent || tempDiv.innerText || '';
+    
+    navigator.clipboard.writeText(plainText)
       .then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -94,7 +170,7 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
     );
   }
   
-  if (!translatedText) {
+  if (!processedText) {
     return (
       <Box
         sx={{
@@ -185,7 +261,7 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
           lineHeight: 1.6,
         }}
       >
-        <div dangerouslySetInnerHTML={{ __html: translatedText }} />
+        <div dangerouslySetInnerHTML={{ __html: processedText }} />
       </Box>
     </Box>
   );
