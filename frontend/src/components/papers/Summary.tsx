@@ -28,12 +28,41 @@ const extractJsonContent = (text: string): { summary: string, requiredKnowledge?
   if (!text) return { summary: '' };
 
   try {
-    // JSON形式かチェック
-    const jsonPattern = /^\s*\{\s*"summary"\s*:\s*"([\s\S]+?)"\s*(?:,\s*"required_knowledge"\s*:\s*"([\s\S]+?)"\s*)?\}\s*$/;
+    // 1. 完全なJSONオブジェクトとして解析を試みる
+    try {
+      const jsonObj = JSON.parse(text);
+      if (jsonObj && typeof jsonObj === 'object') {
+        return { 
+          summary: jsonObj.summary || '',
+          requiredKnowledge: jsonObj.required_knowledge || jsonObj.requiredKnowledge || ''
+        };
+      }
+    } catch (e) {
+      // JSONとして解析できない場合は以降の方法を試す
+      console.log("Not a complete JSON object, trying other methods");
+    }
+
+    // 2. JSON形式のコードブロックを探す
+    const codeBlockRegex = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/;
+    const codeBlockMatch = codeBlockRegex.exec(text);
+    if (codeBlockMatch) {
+      try {
+        const jsonObj = JSON.parse(codeBlockMatch[1]);
+        return {
+          summary: jsonObj.summary || '',
+          requiredKnowledge: jsonObj.required_knowledge || jsonObj.requiredKnowledge || ''
+        };
+      } catch (e) {
+        console.log("Code block is not valid JSON, trying other methods");
+      }
+    }
+
+    // 3. JSON構造をパターンマッチで抽出
+    const jsonPattern = /\{\s*"summary"\s*:\s*"([\s\S]+?)"\s*(?:,\s*"required_knowledge"\s*:\s*"([\s\S]+?)"\s*)?\}/;
     const jsonMatch = jsonPattern.exec(text);
     
     if (jsonMatch) {
-      // JSON内の実際の要約テキストとrequired_knowledgeを抽出
+      // コードブロック内のJSONテキストを抽出
       let extractedSummary = jsonMatch[1] || '';
       let extractedKnowledge = jsonMatch[2] || '';
       // エスケープされた引用符を戻す
@@ -45,17 +74,38 @@ const extractJsonContent = (text: string): { summary: string, requiredKnowledge?
       };
     }
 
-    // JSONオブジェクトとして解析できるか試す
-    try {
-      const jsonObj = JSON.parse(text);
-      if (jsonObj && typeof jsonObj === 'object') {
-        return { 
-          summary: jsonObj.summary || '',
-          requiredKnowledge: jsonObj.required_knowledge || ''
-        };
-      }
-    } catch (e) {
-      // JSONとして解析できない場合は無視
+    // 4. 個別のフィールドをそれぞれパターンマッチで抽出
+    const summaryPattern = /"summary"\s*:\s*"([\s\S]+?)(?:"\s*,|\"\s*\})/;
+    const knowledgePattern = /"required_knowledge"\s*:\s*"([\s\S]+?)(?:"\s*,|\"\s*\})/;
+    
+    const summaryMatch = summaryPattern.exec(text);
+    const knowledgeMatch = knowledgePattern.exec(text);
+    
+    if (summaryMatch) {
+      const extractedSummary = summaryMatch[1].replace(/\\"/g, '"');
+      const extractedKnowledge = knowledgeMatch ? knowledgeMatch[1].replace(/\\"/g, '"') : '';
+      
+      return {
+        summary: extractedSummary,
+        requiredKnowledge: extractedKnowledge
+      };
+    }
+
+    // 5. "この分野の研究を行うために必要な知識" や "必要な知識" のような見出しを探す
+    const knowledgeSectionPattern = /(?:##|<h[1-6]>)\s*(?:この分野の研究を行うために必要な知識|必要な知識|前提知識)(?:<\/h[1-6]>)?:?\s*([\s\S]+?)(?:(?:##|<h[1-6]>)|$)/i;
+    const knowledgeSectionMatch = knowledgeSectionPattern.exec(text);
+    
+    // 要約と必要な知識のセクションを分離
+    if (knowledgeSectionMatch) {
+      const knowledgeText = knowledgeSectionMatch[1].trim();
+      // セクションの開始位置を見つけて、それより前を要約として扱う
+      const start = text.indexOf(knowledgeSectionMatch[0]);
+      const summaryText = start > 0 ? text.substring(0, start).trim() : text;
+      
+      return {
+        summary: summaryText,
+        requiredKnowledge: knowledgeText
+      };
     }
 
     // どの方法でも抽出できない場合は元のテキストをsummaryとして返す
@@ -116,7 +166,9 @@ const Summary: React.FC<SummaryProps> = ({
 }) => {
   // メモ化された要約情報（JSONパース処理を含む）
   const processedContent = useMemo(() => {
-    return extractJsonContent(summaryText);
+    const result = extractJsonContent(summaryText);
+    console.log("Processed content:", result); // デバッグ用
+    return result;
   }, [summaryText]);
 
   if (loading) {

@@ -441,15 +441,18 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
             summary_result = process_content(pdf_gs_path, paper_id, "summarize")
             
             # 正常なJSONレスポンスがある場合
-            if isinstance(summary_result, dict) and 'summary' in summary_result:
-                summary_text = summary_result['summary']
+            if isinstance(summary_result, dict):
+                summary_text = summary_result.get('summary', '')
+                required_knowledge = summary_result.get('required_knowledge', '')
             else:
                 # JSONレスポンスがない場合、結果全体を要約とみなす
                 summary_text = str(summary_result)
+                required_knowledge = ''
 
             # Firestoreに結果を保存
             doc_ref.update({
                 "summary": summary_text,
+                "required_knowledge": required_knowledge,  # 新しいフィールドを追加
                 "progress": 80
             })
             
@@ -457,9 +460,10 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
             
         except Exception as summary_error:
             log_error("ProcessSummaryError", f"Error generating paper summary",
-                     {"paper_id": paper_id, "error": str(summary_error)})
+                    {"paper_id": paper_id, "error": str(summary_error)})
             doc_ref.update({
-                "summary": "要約の生成中にエラーが発生しました。"
+                "summary": "要約の生成中にエラーが発生しました。",
+                "required_knowledge": ""  # エラー時も空の値を設定
             })
 
         # 全ての章の翻訳結果を結合

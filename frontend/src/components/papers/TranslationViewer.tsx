@@ -56,6 +56,27 @@ const extractTranslatedText = (text: string | null): string | null => {
     // 見出しの処理
     let processedText = text;
     
+    // 連続する見出しの重複を検出して除去
+    // 例: <h2>1. I. Introduction</h2><h2>1. 序論</h2> → <h2>1. 序論</h2>
+    const headingRegex = /<h([1-6])>\s*(\d+)(?:\.|:)\s*([^<]+)<\/h\1>\s*<h\1>\s*\2(?:\.|:)\s*([^<]+)<\/h\1>/gi;
+    processedText = processedText.replace(headingRegex, (match, tag, num, title1, title2) => {
+      // ローマ数字（I, II, III等）やラテン文字が多く含まれる方は英語タイトルと判断
+      const isTitle1English = /\b[IVX]+\b|(?:[A-Z][a-z]+\s+){2,}/i.test(title1);
+      // 日本語文字が含まれる方は日本語タイトルと判断
+      const isTitle2Japanese = /[\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF]/i.test(title2);
+      
+      if (isTitle1English && isTitle2Japanese) {
+        // 英語→日本語の順番の場合、日本語のみ残す
+        return `<h${tag}>${num}. ${title2}</h${tag}>`;
+      } else if (isTitle2Japanese) {
+        // 日本語が検出された場合は後者を優先
+        return `<h${tag}>${num}. ${title2}</h${tag}>`;
+      } else {
+        // それ以外の場合は後者を優先（デフォルト）
+        return `<h${tag}>${num}. ${title2}</h${tag}>`;
+      }
+    });
+    
     // 重複した見出し（数字. 英語タイトル 数字. 日本語タイトル）を修正
     processedText = processedText.replace(
       /<h([1-6])>\s*(\d+)(?:\.|:)\s*([^<]+?)\s+\2(?:\.|:)\s*([^<]+)<\/h\1>/gi, 
@@ -68,11 +89,11 @@ const extractTranslatedText = (text: string | null): string | null => {
       (match, tagNum, num, title) => `<h${tagNum}>${num}. ${title}</h${tagNum}>`
     );
     
-    // Roman numeral headings (I, II, III, etc.)
+    // ローマ数字の見出し (I, II, III, etc.)
     processedText = processedText.replace(
       /<h([1-6])>\s*(?:Chapter\s+)?([IVX]+)(?::|\.)\s*([^<]+)<\/h\1>/gi, 
       (match, tagNum, romanNumeral, title) => {
-        // Convert Roman numerals to Arabic numerals
+        // ローマ数字をアラビア数字に変換
         const romanToArabic = (roman: string): number => {
           const romanNumerals: {[key: string]: number} = {
             'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000
@@ -124,7 +145,7 @@ const extractTranslatedText = (text: string | null): string | null => {
 
     return processedText;
   } catch (e) {
-    console.error('Error extracting translated text:', e);
+    console.error('Error extracting translated text:', e instanceof Error ? e.message : 'Unknown error');
     return text; // エラーの場合は元のテキストを返す
   }
 };
