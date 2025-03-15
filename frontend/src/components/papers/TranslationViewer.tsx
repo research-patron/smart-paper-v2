@@ -53,12 +53,24 @@ const extractTranslatedText = (text: string | null): string | null => {
       // JSONとして解析できない場合は無視
     }
 
-    // 「I. Introduction」などの見出しを「1. はじめに」のような形式に変換
+    // 見出しの処理
     let processedText = text;
+    
+    // 重複した見出し（数字. 英語タイトル 数字. 日本語タイトル）を修正
+    processedText = processedText.replace(
+      /<h([1-6])>\s*(\d+)(?:\.|:)\s*([^<]+?)\s+\2(?:\.|:)\s*([^<]+)<\/h\1>/gi, 
+      (match, tagNum, num, engTitle, jpTitle) => `<h${tagNum}>${num}. ${jpTitle}</h${tagNum}>`
+    );
+    
+    // 「Chapter X: Title」の形式を「X. タイトル」に変換
+    processedText = processedText.replace(
+      /<h([1-6])>\s*(?:Chapter\s+)?(\d+)(?::|\.)\s*([^<]+)<\/h\1>/gi, 
+      (match, tagNum, num, title) => `<h${tagNum}>${num}. ${title}</h${tagNum}>`
+    );
     
     // Roman numeral headings (I, II, III, etc.)
     processedText = processedText.replace(
-      /<h([1-6])>\s*(?:Chapter\s+)?([IVX]+)\.\s*([^<]+)<\/h\1>/gi, 
+      /<h([1-6])>\s*(?:Chapter\s+)?([IVX]+)(?::|\.)\s*([^<]+)<\/h\1>/gi, 
       (match, tagNum, romanNumeral, title) => {
         // Convert Roman numerals to Arabic numerals
         const romanToArabic = (roman: string): number => {
@@ -82,12 +94,33 @@ const extractTranslatedText = (text: string | null): string | null => {
         return `<h${tagNum}>${arabicNumeral}. ${title}</h${tagNum}>`;
       }
     );
+    
+    // 英語のセクション名が残っている場合の処理（サブセクションも含む）
+    const sectionPatterns = [
+      { en: "Introduction", ja: "導入" },
+      { en: "Abstract", ja: "要旨" },
+      { en: "Method", ja: "方法" },
+      { en: "Methods", ja: "方法" },
+      { en: "Methodology", ja: "方法論" },
+      { en: "Results", ja: "結果" },
+      { en: "Discussion", ja: "考察" },
+      { en: "Results and Discussion", ja: "結果と考察" },
+      { en: "Conclusion", ja: "結論" },
+      { en: "Conclusions", ja: "結論" },
+      { en: "Materials", ja: "材料" },
+      { en: "Background", ja: "背景" },
+      { en: "Experimental", ja: "実験" },
+      { en: "Theory", ja: "理論" },
+      { en: "Related Work", ja: "関連研究" },
+      { en: "References", ja: "参考文献" },
+      { en: "Bibliography", ja: "参考文献" }
+    ];
 
-    // Numeric headings (1, 2, 3, etc.)
-    processedText = processedText.replace(
-      /<h([1-6])>\s*(?:Chapter\s+)?(\d+)(?::|\.)\s*([^<]+)<\/h\1>/gi, 
-      (match, tagNum, num, title) => `<h${tagNum}>${num}. ${title}</h${tagNum}>`
-    );
+    for (const pattern of sectionPatterns) {
+      // タイトルを日本語に置き換える
+      const regex = new RegExp(`(<h[1-6]>\\s*\\d+(?:\\.\\:|\\.)\\s*)${pattern.en}(\\s*<\\/h[1-6]>)`, 'gi');
+      processedText = processedText.replace(regex, `$1${pattern.ja}$2`);
+    }
 
     return processedText;
   } catch (e) {
