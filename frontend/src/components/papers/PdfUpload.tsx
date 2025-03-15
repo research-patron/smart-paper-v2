@@ -5,8 +5,8 @@ import {
   Button, 
   Typography, 
   Paper, 
-  LinearProgress, 
   Alert,
+  CircularProgress,
   useTheme,
   useMediaQuery
 } from '@mui/material';
@@ -25,7 +25,6 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -115,28 +114,13 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
     const userId = user?.uid || 'demo-user-id';
     
     setIsUploading(true);
-    setUploadProgress(0);
     setError(null);
     setErrorDetails(null);
     
     try {
-      // アップロード進捗シミュレーション
-      const progressInterval = setInterval(() => {
-        setUploadProgress(prev => {
-          if (prev >= 95) {
-            clearInterval(progressInterval);
-            return 95;
-          }
-          return prev + 5;
-        });
-      }, 500);
-      
       // 実際のアップロード処理
       console.log("Uploading PDF with user ID:", userId);
       const paperId = await uploadPDF(file, userId);
-      
-      clearInterval(progressInterval);
-      setUploadProgress(100);
       
       // アップロード成功時のコールバック
       if (onUploadSuccess) {
@@ -147,7 +131,6 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
       setTimeout(() => {
         setSelectedFile(null);
         setIsUploading(false);
-        setUploadProgress(0);
       }, 1000);
       
     } catch (error: any) {
@@ -209,16 +192,9 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
           {isUploading ? (
             <Box>
               <Typography variant="h6" sx={{ mb: 2 }}>
-                アップロード中...
+                処理中...
               </Typography>
-              <LinearProgress 
-                variant="determinate" 
-                value={uploadProgress} 
-                sx={{ mb: 2 }}
-              />
-              <Typography variant="body2" color="text.secondary">
-                {`${uploadProgress}%`} 完了
-              </Typography>
+              <CircularProgress sx={{ mb: 2 }} />
             </Box>
           ) : selectedFile ? (
             <Box>
