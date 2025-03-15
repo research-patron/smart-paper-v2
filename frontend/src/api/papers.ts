@@ -63,6 +63,7 @@ export interface Paper {
   metadata: PaperMetadata | null;
   chapters: Chapter[] | null;
   summary: string | null;
+  required_knowledge?: string | null;
   translated_text: string | null;
   translated_text_path: string | null;
   related_papers: RelatedPaper[] | null;
@@ -239,6 +240,7 @@ export const getPaper = async (paperId: string): Promise<Paper> => {
         metadata: data.metadata,
         chapters: data.chapters,
         summary: data.summary,
+        required_knowledge: data.required_knowledge,
         translated_text: data.translated_text,
         translated_text_path: data.translated_text_path,
         related_papers: data.related_papers
