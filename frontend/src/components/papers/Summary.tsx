@@ -24,88 +24,100 @@ interface SummaryProps {
 }
 
 // JSONパース関数
-const extractJsonContent = (text: string): string => {
-  if (!text) return '';
+const extractJsonContent = (text: string): { summary: string, requiredKnowledge?: string } => {
+  if (!text) return { summary: '' };
 
   try {
     // JSON形式かチェック
-    const jsonPattern = /^\s*\{\s*"summary"\s*:\s*"(.+)"\s*\}\s*$/;
+    const jsonPattern = /^\s*\{\s*"summary"\s*:\s*"([\s\S]+?)"\s*(?:,\s*"required_knowledge"\s*:\s*"([\s\S]+?)"\s*)?\}\s*$/;
     const jsonMatch = jsonPattern.exec(text);
+    
     if (jsonMatch) {
-      // JSON内の実際の要約テキストを抽出
-      let extractedText = jsonMatch[1];
+      // JSON内の実際の要約テキストとrequired_knowledgeを抽出
+      let extractedSummary = jsonMatch[1] || '';
+      let extractedKnowledge = jsonMatch[2] || '';
       // エスケープされた引用符を戻す
-      extractedText = extractedText.replace(/\\"/g, '"');
-      return extractedText;
+      extractedSummary = extractedSummary.replace(/\\"/g, '"');
+      extractedKnowledge = extractedKnowledge.replace(/\\"/g, '"');
+      return { 
+        summary: extractedSummary,
+        requiredKnowledge: extractedKnowledge 
+      };
     }
 
     // JSONオブジェクトとして解析できるか試す
     try {
       const jsonObj = JSON.parse(text);
-      if (jsonObj && typeof jsonObj === 'object' && jsonObj.summary) {
-        return jsonObj.summary;
+      if (jsonObj && typeof jsonObj === 'object') {
+        return { 
+          summary: jsonObj.summary || '',
+          requiredKnowledge: jsonObj.required_knowledge || ''
+        };
       }
     } catch (e) {
       // JSONとして解析できない場合は無視
     }
 
-    // どの方法でも抽出できない場合は元のテキストを返す
-    return text;
+    // どの方法でも抽出できない場合は元のテキストをsummaryとして返す
+    return { summary: text };
   } catch (e) {
-    console.error('Error extracting summary content:', e);
-    return text;
+    console.error('Error extracting summary content:', e instanceof Error ? e.message : 'Unknown error');
+    return {
+      summary: text,
+      requiredKnowledge: ''
+    };
   }
+};
+
+// 要約を章ごとに分割する関数
+const splitSummaryByChapter = (text: string): Record<number, string> => {
+  if (!text) return {};
+  
+  const chapterSummaries: Record<number, string> = {};
+  
+  // "Chapter X:" または "**Chapter X:**" のパターンで分割
+  const chapterPattern = /\*?\*?Chapter\s+(\d+):?\*?\*?/gi;
+  const parts = text.split(chapterPattern);
+  
+  // 先頭に章番号がない場合の処理
+  if (parts.length > 0 && !parts[0].trim().match(/^\d+$/)) {
+    // 先頭が数字でない場合は全体の要約や導入部分の可能性がある
+    chapterSummaries[0] = parts[0].trim();
+  }
+  
+  // 章ごとに分割
+  for (let i = 1; i < parts.length; i += 2) {
+    if (i + 1 < parts.length) {
+      const chapterNum = parseInt(parts[i], 10);
+      const chapterContent = parts[i + 1].trim();
+      if (!isNaN(chapterNum) && chapterContent) {
+        chapterSummaries[chapterNum] = chapterContent;
+      }
+    }
+  }
+  
+  return chapterSummaries;
+};
+
+// サマリーテキストから不要な文字（"Chapter X" など）を除去
+const cleanSummaryText = (text: string): string => {
+  return text
+    .replace(/^Chapter\s+\d+:?\s*/i, '') // "Chapter X:" または "Chapter X" を除去（スペースの数を柔軟に）
+    .replace(/^\([\d０-９]+\)\s*/, '') // 半角・全角数字の "(X)" を除去
+    .replace(/^[\d０-９]+[.．、:：]\s*/, '') // 半角・全角数字と区切り文字を除去
+    .trim();
 };
 
 const Summary: React.FC<SummaryProps> = ({
   chapters = [],
-  summaryText = '', // 変更: chapters ごとの要約ではなく単一の要約テキスト
+  summaryText = '',
   loading = false,
   error
 }) => {
-  // メモ化された要約テキスト（JSONパース処理を含む）
-  const processedSummary = useMemo(() => {
+  // メモ化された要約情報（JSONパース処理を含む）
+  const processedContent = useMemo(() => {
     return extractJsonContent(summaryText);
   }, [summaryText]);
-
-  // 要約を章ごとに分割する関数
-  const splitSummaryByChapter = (text: string): Record<number, string> => {
-    if (!text) return {};
-    
-    const chapterSummaries: Record<number, string> = {};
-    
-    // "Chapter X:" または "**Chapter X:**" のパターンで分割
-    const chapterPattern = /\*?\*?Chapter\s+(\d+):?\*?\*?/gi;
-    const parts = text.split(chapterPattern);
-    
-    // 先頭に章番号がない場合の処理
-    if (parts.length > 0 && !parts[0].trim().match(/^\d+$/)) {
-      // 先頭が数字でない場合は全体の要約や導入部分の可能性がある
-      chapterSummaries[0] = parts[0].trim();
-    }
-    
-    // 章ごとに分割
-    for (let i = 1; i < parts.length; i += 2) {
-      if (i + 1 < parts.length) {
-        const chapterNum = parseInt(parts[i], 10);
-        const chapterContent = parts[i + 1].trim();
-        if (!isNaN(chapterNum) && chapterContent) {
-          chapterSummaries[chapterNum] = chapterContent;
-        }
-      }
-    }
-    
-    return chapterSummaries;
-  };
-
-  // サマリーテキストから不要な文字（"Chapter X" など）を除去
-  const cleanSummaryText = (text: string): string => {
-    return text
-      .replace(/^Chapter \d+:?\s*/i, '') // "Chapter X:" または "Chapter X" を除去
-      .replace(/^\(\d+\)\s*/, '') // "(X)" を除去
-      .replace(/^[０-９]+[.．、]\s*/, '') // 全角数字と区切り文字を除去
-      .trim();
-  };
 
   if (loading) {
     return (
@@ -123,7 +135,7 @@ const Summary: React.FC<SummaryProps> = ({
     );
   }
 
-  if (!processedSummary) {
+  if (!processedContent.summary) {
     return (
       <Box p={2}>
         <Alert severity="info">要約はまだ生成されていません。</Alert>
@@ -132,56 +144,59 @@ const Summary: React.FC<SummaryProps> = ({
   }
 
   // 要約を章ごとに分割
-  const chapterSummaries = splitSummaryByChapter(processedSummary);
+  const chapterSummaries = splitSummaryByChapter(processedContent.summary);
   
-  // 章情報がない場合は単一のペーパーとして表示
-  if (chapters.length === 0 || Object.keys(chapterSummaries).length === 0) {
-    return (
-      <Paper sx={{ p: 3 }}>
+  return (
+    <Box>
+      {/* メイン要約 */}
+      <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
           論文の要約
         </Typography>
         <Divider sx={{ mb: 2 }} />
         <Typography variant="body1" component="div" whiteSpace="pre-line">
-          {processedSummary}
+          {chapterSummaries[0] || processedContent.summary}
         </Typography>
       </Paper>
-    );
-  }
-
-  // 章ごとに要約を表示
-  return (
-    <Box>
-      {/* 全体の要約があれば表示 */}
-      {chapterSummaries[0] && (
+      
+      {/* 必要な知識の表示 */}
+      {processedContent.requiredKnowledge && (
         <Paper sx={{ p: 3, mb: 3 }}>
           <Typography variant="h6" gutterBottom>
-            全体の要約
+            この分野の研究を行うために必要な知識
           </Typography>
           <Divider sx={{ mb: 2 }} />
           <Typography variant="body1" component="div" whiteSpace="pre-line">
-            {chapterSummaries[0]}
+            {processedContent.requiredKnowledge}
           </Typography>
         </Paper>
       )}
       
-      {/* 章ごとの要約を表示 */}
-      {chapters.map((chapter) => {
-        const summaryForChapter = chapterSummaries[chapter.chapter_number];
-        if (!summaryForChapter) return null;
+      {/* 章ごとの要約を表示（章情報がある場合のみ） */}
+      {chapters.length > 0 && Object.keys(chapterSummaries).length > 1 && (
+        <Box mt={4}>
+          <Typography variant="h6" gutterBottom>
+            章ごとの要約
+          </Typography>
+          
+          {chapters.map((chapter) => {
+            const summaryForChapter = chapterSummaries[chapter.chapter_number];
+            if (!summaryForChapter) return null;
 
-        return (
-          <Paper key={chapter.chapter_number} sx={{ p: 3, mb: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              {chapter.chapter_number}. {chapter.title}
-            </Typography>
-            <Divider sx={{ mb: 2 }} />
-            <Typography variant="body1" component="div" whiteSpace="pre-line">
-              {cleanSummaryText(summaryForChapter)}
-            </Typography>
-          </Paper>
-        );
-      })}
+            return (
+              <Paper key={chapter.chapter_number} sx={{ p: 3, mb: 3 }}>
+                <Typography variant="h6" gutterBottom>
+                  {chapter.chapter_number}. {chapter.title}
+                </Typography>
+                <Divider sx={{ mb: 2 }} />
+                <Typography variant="body1" component="div" whiteSpace="pre-line">
+                  {cleanSummaryText(summaryForChapter)}
+                </Typography>
+              </Paper>
+            );
+          })}
+        </Box>
+      )}
     </Box>
   );
 };
