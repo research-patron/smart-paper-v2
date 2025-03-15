@@ -528,6 +528,7 @@ const PaperViewPage: React.FC = () => {
               <Paper elevation={0} sx={{ p: 3, height: '100%', overflow: 'auto' }}>
                 <Summary 
                   summaryText={currentPaper.summary} 
+                  requiredKnowledgeText={currentPaper.required_knowledge} 
                   chapters={currentPaper.chapters || []} 
                 />
               </Paper>

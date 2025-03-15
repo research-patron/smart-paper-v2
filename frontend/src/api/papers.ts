@@ -203,15 +203,18 @@ export const getUserPapers = async (userId: string): Promise<Paper[]> => {
         id: doc.id,
         user_id: data.user_id,
         file_path: data.file_path,
-          status: data.status,
+        status: data.status,
         uploaded_at: data.uploaded_at,
         completed_at: data.completed_at,
         metadata: data.metadata,
         chapters: data.chapters,
         summary: data.summary,
+        required_knowledge: data.required_knowledge,
         translated_text: data.translated_text,
         translated_text_path: data.translated_text_path,
-        related_papers: data.related_papers
+        related_papers: data.related_papers,
+        progress: data.progress,
+        error_message: data.error_message
       });
     });
     
@@ -243,7 +246,9 @@ export const getPaper = async (paperId: string): Promise<Paper> => {
         required_knowledge: data.required_knowledge,
         translated_text: data.translated_text,
         translated_text_path: data.translated_text_path,
-        related_papers: data.related_papers
+        related_papers: data.related_papers,
+        progress: data.progress,
+        error_message: data.error_message
       };
     } else {
       throw new Error('論文が見つかりません');
@@ -379,9 +384,12 @@ export const watchPaperStatus = (
         metadata: data.metadata,
         chapters: data.chapters,
         summary: data.summary,
+        required_knowledge: data.required_knowledge, // 必要な知識フィールドを追加
         translated_text: data.translated_text,
         translated_text_path: data.translated_text_path,
-        related_papers: data.related_papers
+        related_papers: data.related_papers,
+        progress: data.progress, // 進捗フィールドを追加
+        error_message: data.error_message // エラーメッセージも追加
       });
     }
   }, (error) => {

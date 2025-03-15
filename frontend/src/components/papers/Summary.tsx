@@ -18,7 +18,8 @@ interface Chapter {
 
 interface SummaryProps {
   chapters?: Chapter[];
-  summaryText?: string; // 単一の文字列としての要約に変更
+  summaryText?: string; // 単一の文字列としての要約
+  requiredKnowledgeText?: string | null; // 必要な知識のテキスト（null許容）
   loading?: boolean;
   error?: string;
 }
@@ -119,6 +120,53 @@ const extractJsonContent = (text: string): { summary: string, requiredKnowledge?
   }
 };
 
+// Markdownをプレーンテキストに変換する関数
+const parseMarkdown = (markdown: string): string => {
+  if (!markdown) return '';
+  
+  let html = markdown;
+  
+  // 強調（太字）
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__(.*?)__/g, '<strong>$1</strong>');
+  
+  // 強調（イタリック）
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  html = html.replace(/_(.*?)_/g, '<em>$1</em>');
+  
+  // リスト
+  // 箇条書き（- や * で始まる行）
+  html = html.replace(/^[\s]*[-*+][\s]+(.*?)$/gm, '<li>$1</li>');
+  // 箇条書きが連続するケースで<ul>タグで囲む
+  html = html.replace(/(<li>.*?<\/li>)\n(<li>)/g, '$1$2');
+  html = html.replace(/^<li>/m, '<ul><li>');
+  html = html.replace(/<\/li>$/m, '</li></ul>');
+  
+  // 番号付きリスト
+  html = html.replace(/^[\s]*(\d+)\.[\s]+(.*?)$/gm, '<li>$2</li>');
+  
+  // 見出し (##, ### など)
+  html = html.replace(/^##\s+(.*?)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^###\s+(.*?)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^####\s+(.*?)$/gm, '<h4>$1</h4>');
+  
+  // リンク
+  html = html.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2">$1</a>');
+  
+  // コード
+  html = html.replace(/`(.*?)`/g, '<code>$1</code>');
+  
+  // 段落
+  // 連続する改行を<p>タグで置換
+  html = html.replace(/\n\n(.*?)\n\n/g, '</p><p>$1</p>');
+  
+  // 不完全なリストの修正
+  html = html.replace(/<li>/g, '<ul><li>').replace(/<\/li>/g, '</li></ul>');
+  html = html.replace(/<\/ul><ul>/g, '');
+  
+  return html;
+};
+
 // 要約を章ごとに分割する関数
 const splitSummaryByChapter = (text: string): Record<number, string> => {
   if (!text) return {};
@@ -161,15 +209,21 @@ const cleanSummaryText = (text: string): string => {
 const Summary: React.FC<SummaryProps> = ({
   chapters = [],
   summaryText = '',
+  requiredKnowledgeText = '',
   loading = false,
   error
 }) => {
   // メモ化された要約情報（JSONパース処理を含む）
   const processedContent = useMemo(() => {
     const result = extractJsonContent(summaryText);
-    console.log("Processed content:", result); // デバッグ用
+    
+    // 別フィールドとして requiredKnowledgeText が提供されている場合はそれを優先
+    if (requiredKnowledgeText) {
+      result.requiredKnowledge = requiredKnowledgeText;
+    }
+    
     return result;
-  }, [summaryText]);
+  }, [summaryText, requiredKnowledgeText]);
 
   if (loading) {
     return (
@@ -206,9 +260,11 @@ const Summary: React.FC<SummaryProps> = ({
           論文の要約
         </Typography>
         <Divider sx={{ mb: 2 }} />
-        <Typography variant="body1" component="div" whiteSpace="pre-line">
-          {chapterSummaries[0] || processedContent.summary}
-        </Typography>
+        <div
+          dangerouslySetInnerHTML={{
+            __html: parseMarkdown(chapterSummaries[0] || processedContent.summary)
+          }}
+        />
       </Paper>
       
       {/* 必要な知識の表示 */}
@@ -218,9 +274,11 @@ const Summary: React.FC<SummaryProps> = ({
             この分野の研究を行うために必要な知識
           </Typography>
           <Divider sx={{ mb: 2 }} />
-          <Typography variant="body1" component="div" whiteSpace="pre-line">
-            {processedContent.requiredKnowledge}
-          </Typography>
+          <div
+            dangerouslySetInnerHTML={{
+              __html: parseMarkdown(processedContent.requiredKnowledge)
+            }}
+          />
         </Paper>
       )}
       
@@ -241,9 +299,11 @@ const Summary: React.FC<SummaryProps> = ({
                   {chapter.chapter_number}. {chapter.title}
                 </Typography>
                 <Divider sx={{ mb: 2 }} />
-                <Typography variant="body1" component="div" whiteSpace="pre-line">
-                  {cleanSummaryText(summaryForChapter)}
-                </Typography>
+                <div
+                  dangerouslySetInnerHTML={{
+                    __html: parseMarkdown(cleanSummaryText(summaryForChapter))
+                  }}
+                />
               </Paper>
             );
           })}
