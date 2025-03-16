@@ -18,7 +18,9 @@ import {
   LinearProgress,
   Menu,
   MenuItem,
-  Drawer
+  Drawer,
+  Tooltip,
+  Snackbar
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -28,6 +30,9 @@ import InfoIcon from '@mui/icons-material/Info';
 import SaveAltIcon from '@mui/icons-material/SaveAlt';
 import BookIcon from '@mui/icons-material/Book';
 import TocIcon from '@mui/icons-material/Toc';
+import CloudDoneIcon from '@mui/icons-material/CloudDone';
+import CloudOffIcon from '@mui/icons-material/CloudOff';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { usePaperStore } from '../store/paperStore';
 import { useAuthStore } from '../store/authStore';
 import ErrorMessage from '../components/common/ErrorMessage';
@@ -36,7 +41,12 @@ import Summary from '../components/papers/Summary';
 import { MarkdownExporter } from '../utils/MarkdownExporter';
 import { doc, getDoc, DocumentData } from 'firebase/firestore';
 import { db } from '../api/firebase';
-import { exportToObsidian, ObsidianSettings } from '../api/obsidian';
+import { 
+  exportToObsidian, 
+  ObsidianSettings,
+  ObsidianState,
+  updateObsidianState
+} from '../api/obsidian';
 import { 
   getPaperPdfUrl, 
   getPaperTranslatedText, 
@@ -106,6 +116,11 @@ const PaperViewPage: React.FC = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exportAttempted, setExportAttempted] = useState(false);
+  const [obsidianSettings, setObsidianSettings] = useState<ObsidianSettings | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [obsidianExportStatus, setObsidianExportStatus] = useState<'success' | 'error' | 'pending' | 'none'>('none');
 
   useEffect(() => {
     if (id && user) {
@@ -116,34 +131,96 @@ const PaperViewPage: React.FC = () => {
       setLocalTranslatedText(null);
     };
   }, [id, user, fetchPaper, clearCurrentPaper]);
-
-  // 自動エクスポートの実行
+  
+  // Obsidian設定の読み込み
   useEffect(() => {
-    const autoExportToObsidian = async () => {
-      if (!user || !currentPaper || exportAttempted || 
-          currentPaper.status !== 'completed') return;
-
+    const loadObsidianSettings = async () => {
+      if (!user) return;
+      
       try {
-        setExportAttempted(true);
-        
-        // Obsidian設定を取得
         const settingsRef = doc(db, `users/${user.uid}/obsidian_settings/default`);
         const settingsSnap = await getDoc(settingsRef);
         
         if (settingsSnap.exists()) {
           const settings = convertToObsidianSettings(settingsSnap.data());
-          if (settings.auto_export && settings.vault_name) {
-            await exportToObsidian(currentPaper, currentPaperChapters, settings);
+          setObsidianSettings(settings);
+        }
+      } catch (error) {
+        console.error('Error loading Obsidian settings:', error);
+      }
+    };
+    
+    loadObsidianSettings();
+  }, [user]);
+  
+  // Obsidian連携状態を取得
+  useEffect(() => {
+    const getObsidianState = () => {
+      if (!currentPaper || !currentPaper.obsidian) {
+        setObsidianExportStatus('none');
+        return;
+      }
+      
+      const obsidian = currentPaper.obsidian;
+      
+      if (obsidian.exported) {
+        setObsidianExportStatus('success');
+      } else if (obsidian.error) {
+        setObsidianExportStatus('error');
+      } else {
+        setObsidianExportStatus('none');
+      }
+    };
+    
+    getObsidianState();
+  }, [currentPaper]);
+
+  // 自動エクスポートの実行
+  useEffect(() => {
+    const autoExportToObsidian = async () => {
+      if (!user || !currentPaper || !obsidianSettings || exportAttempted || 
+          currentPaper.status !== 'completed' || !obsidianSettings.auto_export) return;
+      
+      try {
+        setExportAttempted(true);
+        setObsidianExportStatus('pending');
+        
+        // 既に成功している場合はスキップ
+        if (currentPaper.obsidian?.exported) {
+          setObsidianExportStatus('success');
+          return;
+        }
+        
+        // Obsidianエクスポート実行
+        const result = await exportToObsidian(currentPaper, currentPaperChapters, obsidianSettings);
+        
+        if (result.exported) {
+          setObsidianExportStatus('success');
+          setSnackbarMessage('Obsidianに論文を保存しました');
+          setSnackbarOpen(true);
+        } else {
+          setObsidianExportStatus('error');
+          if (result.error) {
+            setError(result.error);
           }
         }
       } catch (error) {
         console.error('Error auto-exporting to Obsidian:', error);
+        setObsidianExportStatus('error');
         setError('Obsidianへの自動保存に失敗しました');
+        
+        // エラー状態を保存
+        if (id) {
+          await updateObsidianState(id, {
+            exported: false,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
       }
     };
 
     autoExportToObsidian();
-  }, [user, currentPaper, currentPaperChapters, exportAttempted]);
+  }, [user, currentPaper, currentPaperChapters, obsidianSettings, exportAttempted, id]);
   
   useEffect(() => {
     const fetchPaperResources = async () => {
@@ -236,6 +313,34 @@ const PaperViewPage: React.FC = () => {
     handleCloseDownloadMenu();
   };
   
+  // Obsidianへの手動エクスポート
+  const handleExportToObsidian = async () => {
+    if (!currentPaper || !obsidianSettings) {
+      setError('Obsidian設定が見つかりません。プロフィールページで設定してください。');
+      return;
+    }
+    
+    try {
+      setIsExporting(true);
+      setObsidianExportStatus('pending');
+      
+      const result = await exportToObsidian(currentPaper, currentPaperChapters, obsidianSettings);
+      
+      if (result.exported) {
+        setObsidianExportStatus('success');
+        setSnackbarMessage('Obsidianに論文を保存しました');
+        setSnackbarOpen(true);
+      }
+      
+    } catch (error) {
+      console.error('Error exporting to Obsidian:', error);
+      setObsidianExportStatus('error');
+      setError('Obsidianへの保存に失敗しました');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+  
   const getSelectedChapterText = () => {
     if (!currentPaper) return null;
     if (localTranslatedText && !selectedChapter) return localTranslatedText;
@@ -258,6 +363,10 @@ const PaperViewPage: React.FC = () => {
       title: chapter.title,
       chapter_number: chapter.chapter_number
     };
+  };
+  
+  const handleSnackbarClose = () => {
+    setSnackbarOpen(false);
   };
   
   const TableOfContents = () => (
@@ -298,11 +407,60 @@ const PaperViewPage: React.FC = () => {
     </Paper>
   );
   
+  // Obsidianの連携ステータスを表示するコンポーネント
+  const ObsidianExportStatusChip = () => {
+    switch (obsidianExportStatus) {
+      case 'success':
+        return (
+          <Tooltip title="Obsidianに保存済み">
+            <Chip 
+              icon={<CloudDoneIcon />} 
+              label="Obsidian保存済" 
+              color="success" 
+              size="small"
+              sx={{ ml: 1 }}
+            />
+          </Tooltip>
+        );
+      case 'error':
+        return (
+          <Tooltip title="Obsidianへの保存に失敗しました">
+            <Chip 
+              icon={<CloudOffIcon />} 
+              label="Obsidian保存失敗" 
+              color="error" 
+              size="small"
+              sx={{ ml: 1 }}
+            />
+          </Tooltip>
+        );
+      case 'pending':
+        return (
+          <Tooltip title="Obsidianに保存中...">
+            <Chip 
+              icon={<AccessTimeIcon />} 
+              label="Obsidian保存中" 
+              color="warning" 
+              size="small"
+              sx={{ ml: 1 }}
+            />
+          </Tooltip>
+        );
+      default:
+        return null;
+    }
+  };
+  
   const renderProgress = () => {
     if (!currentPaper) return null;
     
     if (currentPaper.status === 'completed') {
-      return <Chip label="翻訳完了" color="success" />;
+      return (
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Chip label="翻訳完了" color="success" />
+          <ObsidianExportStatusChip />
+        </Box>
+      );
     } else if (currentPaper.status === 'error') {
       return <Chip label="エラー" color="error" />;
     } else {
@@ -392,7 +550,7 @@ const PaperViewPage: React.FC = () => {
           
           {renderProgress()}
           
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 2 }}>
           {currentPaper.status === 'completed' && (
             <>
               <Button 
@@ -419,6 +577,27 @@ const PaperViewPage: React.FC = () => {
                   Markdown (.md)
                 </MenuItem>
               </Menu>
+              
+              {obsidianSettings && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<BookIcon />}
+                  onClick={handleExportToObsidian}
+                  disabled={isExporting || !currentPaper.translated_text && !localTranslatedText}
+                >
+                  {isExporting ? (
+                    <>
+                      <CircularProgress size={16} sx={{ mr: 1 }} />
+                      Obsidianに保存中...
+                    </>
+                  ) : obsidianExportStatus === 'success' ? (
+                    'Obsidianに再保存'
+                  ) : (
+                    'Obsidianに保存'
+                  )}
+                </Button>
+              )}
             </>
           )}
           </Box>
@@ -606,6 +785,13 @@ const PaperViewPage: React.FC = () => {
           </TabPanel>
         </Box>
       </Box>
+      
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={6000}
+        onClose={handleSnackbarClose}
+        message={snackbarMessage}
+      />
     </Container>
   );
 };

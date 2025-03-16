@@ -53,6 +53,15 @@ export interface RelatedPaper {
   doi: string;
 }
 
+// Obsidian連携状態の型定義
+export interface ObsidianState {
+  exported: boolean;
+  export_path?: string;
+  exported_at?: Timestamp;
+  error?: string;
+  updated_at?: Timestamp;
+}
+
 export interface Paper {
   id: string;
   user_id: string;
@@ -69,6 +78,7 @@ export interface Paper {
   related_papers: RelatedPaper[] | null;
   error_message?: string;
   progress?: number; // 処理進捗率（0-100）
+  obsidian?: ObsidianState; // Obsidian連携状態
 }
 
 // Cloud Functionsへのリクエスト型
@@ -214,7 +224,8 @@ export const getUserPapers = async (userId: string): Promise<Paper[]> => {
         translated_text_path: data.translated_text_path,
         related_papers: data.related_papers,
         progress: data.progress,
-        error_message: data.error_message
+        error_message: data.error_message,
+        obsidian: data.obsidian // Obsidian連携状態を追加
       });
     });
     
@@ -248,7 +259,8 @@ export const getPaper = async (paperId: string): Promise<Paper> => {
         translated_text_path: data.translated_text_path,
         related_papers: data.related_papers,
         progress: data.progress,
-        error_message: data.error_message
+        error_message: data.error_message,
+        obsidian: data.obsidian // Obsidian連携状態を追加
       };
     } else {
       throw new Error('論文が見つかりません');
@@ -389,7 +401,8 @@ export const watchPaperStatus = (
         translated_text_path: data.translated_text_path,
         related_papers: data.related_papers,
         progress: data.progress, // 進捗フィールドを追加
-        error_message: data.error_message // エラーメッセージも追加
+        error_message: data.error_message, // エラーメッセージも追加
+        obsidian: data.obsidian // Obsidian連携状態を追加
       });
     }
   }, (error) => {
@@ -397,6 +410,23 @@ export const watchPaperStatus = (
   });
   
   return unsubscribe;
+};
+
+// 論文のObsidian連携状態を更新
+export const updatePaperObsidianState = async (paperId: string, obsidianState: Partial<ObsidianState>): Promise<void> => {
+  try {
+    const paperRef = doc(db, 'papers', paperId);
+    
+    await updateDoc(paperRef, {
+      obsidian: {
+        ...obsidianState,
+        updated_at: Timestamp.now()
+      }
+    });
+  } catch (error) {
+    console.error('Update Obsidian state error:', error);
+    throw error;
+  }
 };
 
 // 論文を削除（サブスクリプションによる制限内の場合のみ）

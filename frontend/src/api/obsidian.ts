@@ -1,5 +1,10 @@
+// ~/Desktop/smart-paper-v2/frontend/src/api/obsidian.ts
 import { Paper, TranslatedChapter } from './papers';
 import { MarkdownExporter } from '../utils/MarkdownExporter';
+import { doc, updateDoc, getDoc, Timestamp } from 'firebase/firestore';
+import { db } from './firebase';
+import { ref, getDownloadURL } from 'firebase/storage';
+import { storage } from './firebase';
 
 // Obsidian関連の型定義
 export interface ObsidianSettings {
@@ -14,6 +19,14 @@ export interface ObsidianSettings {
   auto_export: boolean;
   created_at: Date;
   updated_at: Date;
+}
+
+// Obsidian連携状態の型定義
+export interface ObsidianState {
+  exported: boolean;
+  export_path?: string;
+  exported_at?: Date;
+  error?: string;
 }
 
 /**
@@ -34,18 +47,58 @@ export const selectObsidianVault = async (): Promise<{ dirPath: string; vaultNam
   try {
     // フォルダ選択ダイアログを表示
     const handle = await window.showDirectoryPicker({
-      mode: 'read',
+      mode: 'readwrite',
     });
     
     // 選択されたフォルダのパスを取得
     const dirPath = handle.name;
     const vaultName = extractVaultName(dirPath);
     
+    // ハンドルをセッションストレージに保存
+    sessionStorage.setItem('obsidian_vault_handle', JSON.stringify({
+      name: handle.name,
+      kind: handle.kind
+    }));
+    
+    // FileSystemHandleはシリアライズできないため、グローバル変数に保存
+    if (!window.obsidianHandles) {
+      window.obsidianHandles = new Map();
+    }
+    window.obsidianHandles.set('vault', handle);
+    
     return { dirPath, vaultName };
   } catch (error) {
     console.error('Error selecting Obsidian vault:', error);
     return null;
   }
+};
+
+/**
+ * フォルダパスからディレクトリツリーを作成
+ * @param rootHandle ルートディレクトリハンドル
+ * @param path 作成するパス (例: "folder1/folder2/folder3")
+ * @returns 作成したディレクトリのハンドル
+ */
+export const createDirectoryPath = async (rootHandle: FileSystemDirectoryHandle, path: string): Promise<FileSystemDirectoryHandle> => {
+  const folders = path.split('/').filter(f => f);
+  let currentHandle = rootHandle;
+  
+  for (const folderName of folders) {
+    try {
+      // フォルダが存在するか確認
+      try {
+        currentHandle = await currentHandle.getDirectoryHandle(folderName);
+      } catch (e) {
+        // フォルダが存在しない場合は作成
+        currentHandle = await currentHandle.getDirectoryHandle(folderName, { create: true });
+      }
+    } catch (error) {
+      console.error(`Error creating directory: ${folderName}`, error);
+      throw new Error(`Failed to create directory: ${folderName}`);
+    }
+  }
+  
+  return currentHandle;
 };
 
 /**
@@ -147,50 +200,174 @@ export const openInObsidian = (vaultName: string, filePath: string): void => {
 };
 
 /**
- * 論文をObsidianにエクスポートする
+ * PDF URLをダウンロードしてファイルとして保存
+ * @param pdfUrl PDFのURL
+ * @param directoryHandle 保存先ディレクトリハンドル
+ * @param fileName ファイル名
+ */
+const savePdfToDirectory = async (pdfUrl: string, directoryHandle: FileSystemDirectoryHandle, fileName: string): Promise<void> => {
+  try {
+    // PDFをフェッチ
+    const response = await fetch(pdfUrl);
+    if (!response.ok) throw new Error('PDF fetch failed');
+    
+    const blob = await response.blob();
+    
+    // ファイル書き込み
+    const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    
+    console.log(`PDF saved successfully: ${fileName}`);
+  } catch (error) {
+    console.error('Error saving PDF:', error);
+    throw error;
+  }
+};
+
+/**
+ * Firestore上の論文のObsidian連携状態を更新
+ * @param paperId 論文ID
+ * @param state 連携状態
+ */
+export const updateObsidianState = async (paperId: string, state: Partial<ObsidianState>): Promise<void> => {
+  try {
+    const paperRef = doc(db, 'papers', paperId);
+    await updateDoc(paperRef, {
+      obsidian: {
+        ...state,
+        updated_at: Timestamp.now()
+      }
+    });
+  } catch (error) {
+    console.error('Error updating Obsidian state:', error);
+    throw error;
+  }
+};
+
+/**
+ * 論文をObsidianに直接エクスポートする
  * @param paper 論文データ
  * @param chapters 翻訳された章データ
  * @param settings Obsidian設定
+ * @returns エクスポート結果情報
  */
 export const exportToObsidian = async (
-  paper: Paper,
+  paper: Paper, 
   chapters: TranslatedChapter[],
   settings: ObsidianSettings
-): Promise<void> => {
+): Promise<ObsidianState> => {
   try {
+    // 結果を初期化
+    const result: ObsidianState = {
+      exported: false
+    };
+    
     // ファイル名の生成
     const fileName = formatFileName(settings.file_name_format, paper);
     const extension = settings.file_type === 'md' ? '.md' : '.txt';
     const fullFileName = fileName.endsWith(extension) ? fileName : fileName + extension;
-
-    // Markdown生成
-    const markdown = MarkdownExporter.generateObsidianMarkdown(paper, chapters);
     
-    // マークダウンファイルのダウンロード
-    const blob = new Blob([markdown], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fullFileName;
-    document.body.appendChild(a);
-    a.click();
-    URL.revokeObjectURL(url);
-    document.body.removeChild(a);
-
+    // vaultハンドルを取得
+    let vaultHandle = window.obsidianHandles?.get('vault') as FileSystemDirectoryHandle;
+    
+    // vaultハンドルがない場合は選択を促す
+    if (!vaultHandle) {
+      const result = await selectObsidianVault();
+      if (!result) {
+        throw new Error('Obsidian vaultが選択されていません');
+      }
+      vaultHandle = window.obsidianHandles?.get('vault') as FileSystemDirectoryHandle;
+    }
+    
+    // 権限を確認
+    const permission = await vaultHandle.queryPermission({ mode: 'readwrite' });
+    if (permission !== 'granted') {
+      const newPermission = await vaultHandle.requestPermission({ mode: 'readwrite' });
+      if (newPermission !== 'granted') {
+        throw new Error('Obsidian vaultへの書き込み権限がありません');
+      }
+    }
+    
+    // フォルダパスがある場合は作成
+    let targetDirHandle = vaultHandle;
+    if (settings.folder_path) {
+      targetDirHandle = await createDirectoryPath(vaultHandle, settings.folder_path);
+    }
+    
+    // Markdown生成
+    const pdfFileName = paper.file_path ? paper.file_path.split('/').pop() : '';
+    let markdown = '';
+    
+    if (settings.file_type === 'md') {
+      markdown = MarkdownExporter.generateObsidianMarkdown(paper, chapters, pdfFileName);
+    } else {
+      markdown = MarkdownExporter.generateFullMarkdown(paper, chapters);
+    }
+    
+    // ファイル書き込み
+    const fileHandle = await targetDirHandle.getFileHandle(fullFileName, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(new Blob([markdown], { type: settings.file_type === 'md' ? 'text/markdown' : 'text/plain' }));
+    await writable.close();
+    
+    // PDF連携処理
+    if (settings.include_pdf && paper.file_path) {
+      try {
+        // PDFのURLを取得
+        const storage_ref = ref(storage, paper.file_path.replace('gs://', ''));
+        const pdfUrl = await getDownloadURL(storage_ref);
+        
+        // 埋め込みフォルダを作成
+        let embedDirHandle = targetDirHandle;
+        if (settings.create_embed_folder) {
+          embedDirHandle = await createDirectoryPath(vaultHandle, 'Embed Documents');
+        }
+        
+        // PDFを保存
+        await savePdfToDirectory(pdfUrl, embedDirHandle, pdfFileName || `paper_${paper.id}.pdf`);
+      } catch (pdfError) {
+        console.error('PDF save error:', pdfError);
+        // PDFの保存に失敗してもMarkdownの保存は成功とみなす
+      }
+    }
+    
+    // 結果を更新
+    result.exported = true;
+    result.export_path = settings.folder_path ? `${settings.folder_path}/${fullFileName}` : fullFileName;
+    result.exported_at = new Date();
+    
+    // Firestoreに保存状態を更新
+    if (paper.id) {
+      await updateObsidianState(paper.id, result);
+    }
+    
     // Obsidianで開く（設定されている場合）
     if (settings.open_after_export && settings.vault_name) {
-      // フォルダパスがある場合は結合
-      let filePath = fullFileName;
-      if (settings.folder_path) {
-        filePath = `${settings.folder_path}/${fullFileName}`;
-      }
-      
       setTimeout(() => {
-        openInObsidian(settings.vault_name, filePath);
+        openInObsidian(settings.vault_name, result.export_path || '');
       }, 500);
     }
+    
+    return result;
   } catch (error) {
     console.error('Error exporting to Obsidian:', error);
+    // Firestoreにエラー状態を保存
+    if (paper.id) {
+      await updateObsidianState(paper.id, {
+        exported: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
     throw error;
   }
 };
+
+// 将来のためにWindow型を拡張して、obsidianHandlesプロパティを追加
+declare global {
+  interface Window {
+    obsidianHandles?: Map<string, FileSystemDirectoryHandle>;
+    showDirectoryPicker(options?: { mode?: 'read' | 'readwrite' }): Promise<FileSystemDirectoryHandle>;
+  }
+}

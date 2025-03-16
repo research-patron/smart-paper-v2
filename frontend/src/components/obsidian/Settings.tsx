@@ -20,7 +20,8 @@ import {
   Divider,
   Grid,
   Chip,
-  Switch
+  Switch,
+  TextField
 } from '@mui/material';
 import HelpIcon from '@mui/icons-material/Help';
 import InfoIcon from '@mui/icons-material/Info';
@@ -66,6 +67,7 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
   ];
   
   const [selectedPreset, setSelectedPreset] = useState(fileNameFormatPresets[0].value);
+  const [customFormat, setCustomFormat] = useState('');
   
   // ユーザーの既存設定を読み込む
   useEffect(() => {
@@ -94,7 +96,12 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
           
           // プリセットの選択を更新
           const matchingPreset = fileNameFormatPresets.find(p => p.value === data.file_name_format);
-          setSelectedPreset(matchingPreset ? matchingPreset.value : 'custom');
+          if (matchingPreset) {
+            setSelectedPreset(matchingPreset.value);
+          } else {
+            setSelectedPreset('custom');
+            setCustomFormat(data.file_name_format);
+          }
         }
       } catch (err) {
         console.error('Error loading Obsidian settings:', err);
@@ -129,11 +136,17 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
       setIsLoading(true);
       setError(null);
       
+      // カスタムフォーマットを使用する場合
+      let finalFileNameFormat = fileNameFormat;
+      if (selectedPreset === 'custom' && customFormat) {
+        finalFileNameFormat = customFormat;
+      }
+      
       const settingsData = {
         vault_dir: vaultDir,
         vault_name: vaultName,
         folder_path: folderPath,
-        file_name_format: fileNameFormat,
+        file_name_format: finalFileNameFormat,
         file_type: fileType,
         open_after_export: openAfterExport,
         include_pdf: includePdf,
@@ -177,6 +190,29 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
     if (preset !== 'custom') {
       setFileNameFormat(preset);
     }
+  };
+  
+  // カスタムフォーマット変更時の処理
+  const handleCustomFormatChange = (format: string) => {
+    setCustomFormat(format);
+    if (selectedPreset === 'custom') {
+      setFileNameFormat(format);
+    }
+  };
+  
+  // フォルダパス変更時の処理
+  const handleFolderPathChange = (path: string) => {
+    // 先頭のスラッシュを削除
+    if (path.startsWith('/')) {
+      path = path.substring(1);
+    }
+    
+    // 末尾のスラッシュを削除
+    if (path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
+    
+    setFolderPath(path);
   };
   
   // Obsidianの連携状態を判定
@@ -259,6 +295,19 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
         </Grid>
         
         <Grid item xs={12}>
+          <FormControl fullWidth margin="normal">
+            <TextField
+              label="保存先フォルダパス (オプション)"
+              value={folderPath}
+              onChange={(e) => handleFolderPathChange(e.target.value)}
+              placeholder="例: Papers/Research"
+              helperText="論文を保存するVault内のフォルダパスを入力してください。空の場合はVaultのルートに保存されます。"
+              disabled={isLoading}
+            />
+          </FormControl>
+        </Grid>
+        
+        <Grid item xs={12}>
           <FormControl fullWidth>
             <InputLabel id="file-name-format-preset-label">ファイル名フォーマットのプリセット</InputLabel>
             <Select
@@ -276,6 +325,21 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
             </Select>
           </FormControl>
         </Grid>
+        
+        {selectedPreset === 'custom' && (
+          <Grid item xs={12}>
+            <FormControl fullWidth margin="normal">
+              <TextField
+                label="カスタムフォーマット"
+                value={customFormat}
+                onChange={(e) => handleCustomFormatChange(e.target.value)}
+                placeholder="{authors}_{title}_{year}"
+                helperText="利用可能なプレースホルダー: {authors}, {title}, {year}, {journal}, {doi}, {date}"
+                disabled={isLoading}
+              />
+            </FormControl>
+          </Grid>
+        )}
         
         <Grid item xs={12}>
           <FormControl component="fieldset">
@@ -352,7 +416,7 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
                 label="埋め込み書類フォルダを作成"
               />
               <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4 }}>
-                オンにすると、PDFは「埋め込み書類」フォルダに保存され、Markdownからリンクされます
+                オンにすると、PDFは「Embed Documents」フォルダに保存され、Markdownからリンクされます
               </Typography>
             </Box>
           )}
