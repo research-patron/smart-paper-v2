@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/pages/ProfilePage.tsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -18,7 +18,9 @@ import {
   DialogActions,
   DialogContent,
   DialogContentText,
-  DialogTitle
+  DialogTitle,
+  Tabs,
+  Tab
 } from '@mui/material';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import EditIcon from '@mui/icons-material/Edit';
@@ -28,9 +30,35 @@ import LockIcon from '@mui/icons-material/Lock';
 import SecurityIcon from '@mui/icons-material/Security';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import LogoutIcon from '@mui/icons-material/Logout';
+import BookIcon from '@mui/icons-material/Book';
 import { useAuthStore } from '../store/authStore';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../api/firebase';
+import ObsidianSettings from '../components/obsidian/Settings';
+
+// タブパネルの型定義
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+// タブパネルコンポーネント
+const TabPanel = (props: TabPanelProps) => {
+  const { children, value, index, ...other } = props;
+
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`profile-tabpanel-${index}`}
+      aria-labelledby={`profile-tab-${index}`}
+      {...other}
+    >
+      {value === index && <Box sx={{ py: 3 }}>{children}</Box>}
+    </div>
+  );
+};
 
 const ProfilePage = () => {
   const { user, userData, logout, updateUserData, loading } = useAuthStore();
@@ -42,6 +70,12 @@ const ProfilePage = () => {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateSuccess, setUpdateSuccess] = useState(false);
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
+  const [tabValue, setTabValue] = useState(0);
+  
+  // タブの切り替え
+  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
+    setTabValue(newValue);
+  };
   
   // ユーザー名を更新
   const handleUpdateUserName = async () => {
@@ -145,6 +179,7 @@ const ProfilePage = () => {
               <Chip 
                 label={getSubscriptionText()} 
                 color={userData?.subscription_status === 'paid' ? 'primary' : 'default'}
+                variant="outlined" 
                 sx={{ mr: 1 }}
               />
             </Box>
@@ -164,154 +199,180 @@ const ProfilePage = () => {
           
           <Divider sx={{ my: 3 }} />
           
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={6}>
-              <Typography variant="h6" gutterBottom>
-                基本情報
-              </Typography>
-              
-              <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  メールアドレス
-                </Typography>
-                <Typography variant="body1" sx={{ mb: 2 }}>
-                  {user.email}
+          {/* タブナビゲーション */}
+          <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+            <Tabs value={tabValue} onChange={handleTabChange} aria-label="プロフィール設定タブ">
+              <Tab label="基本情報" id="profile-tab-0" />
+              <Tab label="セキュリティ" id="profile-tab-1" />
+              <Tab
+                label="Obsidian連携"
+                id="profile-tab-2"
+                icon={<BookIcon sx={{ fontSize: 18 }} />}
+                iconPosition="end"
+                onClick={(e) => e.stopPropagation()} // Prevent any default navigation
+              />
+            </Tabs>
+          </Box>
+          
+          {/* 基本情報タブ */}
+          <TabPanel value={tabValue} index={0}>
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <Typography variant="h6" gutterBottom>
+                  基本情報
                 </Typography>
                 
-                {editMode ? (
-                  <Box sx={{ mb: 2 }}>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      ユーザー名
-                    </Typography>
-                    <TextField
-                      value={userName}
-                      onChange={(e) => setUserName(e.target.value)}
-                      fullWidth
-                      margin="dense"
-                      variant="outlined"
-                      size="small"
-                    />
-                    
-                    <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
-                      <Button
-                        variant="contained"
-                        color="primary"
-                        size="small"
-                        startIcon={<SaveIcon />}
-                        onClick={handleUpdateUserName}
-                        disabled={updateLoading}
-                      >
-                        {updateLoading ? <CircularProgress size={24} /> : '保存'}
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        color="secondary"
-                        size="small"
-                        startIcon={<CancelIcon />}
-                        onClick={() => {
-                          setEditMode(false);
-                          setUserName(userData?.name || user.displayName || '');
-                        }}
-                      >
-                        キャンセル
-                      </Button>
-                    </Box>
-                  </Box>
-                ) : (
-                  <Box sx={{ mb: 2 }}>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      ユーザー名
-                    </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Typography variant="body1" sx={{ flex: 1 }}>
-                        {userData?.name || user.displayName || user.email?.split('@')[0]}
+                <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    メールアドレス
+                  </Typography>
+                  <Typography variant="body1" sx={{ mb: 2 }}>
+                    {user.email}
+                  </Typography>
+                  
+                  {editMode ? (
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        ユーザー名
                       </Typography>
-                      <Button
+                      <TextField
+                        value={userName}
+                        onChange={(e) => setUserName(e.target.value)}
+                        fullWidth
+                        margin="dense"
                         variant="outlined"
                         size="small"
-                        startIcon={<EditIcon />}
-                        onClick={() => setEditMode(true)}
-                      >
-                        編集
-                      </Button>
+                      />
+                      
+                      <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
+                        <Button
+                          variant="contained"
+                          color="primary"
+                          size="small"
+                          startIcon={<SaveIcon />}
+                          onClick={handleUpdateUserName}
+                          disabled={updateLoading}
+                        >
+                          {updateLoading ? <CircularProgress size={24} /> : '保存'}
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          color="secondary"
+                          size="small"
+                          startIcon={<CancelIcon />}
+                          onClick={() => {
+                            setEditMode(false);
+                            setUserName(userData?.name || user.displayName || '');
+                          }}
+                        >
+                          キャンセル
+                        </Button>
+                      </Box>
                     </Box>
-                  </Box>
-                )}
+                  ) : (
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        ユーザー名
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        <Typography variant="body1" sx={{ flex: 1 }}>
+                          {userData?.name || user.displayName || user.email?.split('@')[0]}
+                        </Typography>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          startIcon={<EditIcon />}
+                          onClick={() => setEditMode(true)}
+                        >
+                          編集
+                        </Button>
+                      </Box>
+                    </Box>
+                  )}
+                  
+                  <Typography variant="subtitle2" color="text.secondary">
+                    アカウント作成日
+                  </Typography>
+                  <Typography variant="body1">
+                    {userData?.created_at ? 
+                      userData.created_at.toDate().toLocaleDateString('ja-JP') : 
+                      '不明'}
+                  </Typography>
+                </Paper>
+              </Grid>
+              
+              <Grid item xs={12} md={6}>
+                <Typography variant="h6" gutterBottom>
+                  サブスクリプション情報
+                </Typography>
                 
-                <Typography variant="subtitle2" color="text.secondary">
-                  アカウント作成日
-                </Typography>
-                <Typography variant="body1">
-                  {userData?.created_at ? 
-                    userData.created_at.toDate().toLocaleDateString('ja-JP') : 
-                    '不明'}
-                </Typography>
-              </Paper>
+                <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    現在のプラン
+                  </Typography>
+                  <Typography variant="body1" sx={{ mb: 2 }}>
+                    {getSubscriptionText()}
+                  </Typography>
+                  
+                  {userData?.subscription_status === 'paid' && (
+                    <>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        有効期限
+                      </Typography>
+                      <Typography variant="body1" sx={{ mb: 2 }}>
+                        {getSubscriptionEndDate()}
+                      </Typography>
+                    </>
+                  )}
+                  
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={() => navigate('/subscription')}
+                    fullWidth
+                  >
+                    {userData?.subscription_status === 'paid' ? 
+                      'プランを管理する' : 
+                      'プランをアップグレードする'}
+                  </Button>
+                </Paper>
+              </Grid>
             </Grid>
+          </TabPanel>
+          
+          {/* セキュリティタブ */}
+          <TabPanel value={tabValue} index={1}>
+            <Typography variant="h6" gutterBottom>
+              セキュリティ設定
+            </Typography>
             
-            <Grid item xs={12} md={6}>
-              <Typography variant="h6" gutterBottom>
-                サブスクリプション情報
-              </Typography>
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Button
+                variant="outlined"
+                startIcon={<LockIcon />}
+                fullWidth
+                sx={{ mb: 1 }}
+                onClick={() => navigate('/reset-password')}
+              >
+                パスワードを変更
+              </Button>
               
-              <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  現在のプラン
-                </Typography>
-                <Typography variant="body1" sx={{ mb: 2 }}>
-                  {getSubscriptionText()}
-                </Typography>
-                
-                {userData?.subscription_status === 'paid' && (
-                  <>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      有効期限
-                    </Typography>
-                    <Typography variant="body1" sx={{ mb: 2 }}>
-                      {getSubscriptionEndDate()}
-                    </Typography>
-                  </>
-                )}
-                
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={() => navigate('/subscription')}
-                  fullWidth
-                >
-                  {userData?.subscription_status === 'paid' ? 
-                    'プランを管理する' : 
-                    'プランをアップグレードする'}
-                </Button>
-              </Paper>
-              
-              <Typography variant="h6" gutterBottom>
-                セキュリティ
-              </Typography>
-              
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                <Button
-                  variant="outlined"
-                  startIcon={<LockIcon />}
-                  fullWidth
-                  sx={{ mb: 1 }}
-                  onClick={() => navigate('/reset-password')}
-                >
-                  パスワードを変更
-                </Button>
-                
-                <Button
-                  variant="outlined"
-                  color="error"
-                  startIcon={<LogoutIcon />}
-                  fullWidth
-                  onClick={() => setLogoutDialogOpen(true)}
-                >
-                  ログアウト
-                </Button>
-              </Paper>
-            </Grid>
-          </Grid>
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<LogoutIcon />}
+                fullWidth
+                onClick={() => setLogoutDialogOpen(true)}
+              >
+                ログアウト
+              </Button>
+            </Paper>
+          </TabPanel>
+          
+          {/* Obsidian連携タブ */}
+          <TabPanel value={tabValue} index={2}>
+            <ObsidianSettings onSaved={() => setUpdateSuccess(true)} />
+          </TabPanel>
         </Paper>
       </Box>
       

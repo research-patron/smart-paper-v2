@@ -12,13 +12,20 @@ import {
   AlertTitle,
   CircularProgress,
   Tooltip,
-  Link
+  Link,
+  Checkbox,
+  FormControlLabel,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  ListItemText
 } from '@mui/material';
 import BookIcon from '@mui/icons-material/Book';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../api/firebase';
 import { useAuthStore } from '../../store/authStore';
-import { Paper, TranslatedChapter } from '../../api/papers';
+import { Paper, TranslatedChapter, getPaperPdfUrl } from '../../api/papers';
 import { formatFileName, openInObsidian } from '../../api/obsidian';
 import { MarkdownExporter } from '../../utils/MarkdownExporter';
 
@@ -39,8 +46,12 @@ const ObsidianExport: React.FC<ObsidianExportProps> = ({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [fileName, setFileName] = useState('');
   const [vaultName, setVaultName] = useState('');
+  const [folderPath, setFolderPath] = useState('');
   const [fileType, setFileType] = useState<'md' | 'txt'>('md');
   const [openAfterExport, setOpenAfterExport] = useState(true);
+  const [includePdf, setIncludePdf] = useState(true);
+  const [createEmbedFolder, setCreateEmbedFolder] = useState(true);
+  const [pdfUrl, setPdfUrl] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -61,8 +72,11 @@ const ObsidianExport: React.FC<ObsidianExportProps> = ({
         if (settingsSnap.exists()) {
           const data = settingsSnap.data();
           setVaultName(data.vault_path || '');
+          setFolderPath(data.folder_path || '');
           setFileType(data.file_type || 'md');
           setOpenAfterExport(data.open_after_export !== false);
+          setIncludePdf(data.include_pdf !== false);
+          setCreateEmbedFolder(data.create_embed_folder !== false);
           
           // 設定があることを記録
           setSettingsExist(true);
@@ -73,11 +87,11 @@ const ObsidianExport: React.FC<ObsidianExportProps> = ({
             setFileName(formattedName);
           } else {
             // デフォルトのファイル名
-            setFileName(`paper_${Date.now()}`);
+            setFileName(MarkdownExporter.generateSafeFileName(paper));
           }
         } else {
           // 設定がない場合はデフォルト値を使用
-          setFileName(`paper_${Date.now()}`);
+          setFileName(MarkdownExporter.generateSafeFileName(paper));
           setSettingsExist(false);
         }
       } catch (err) {
@@ -88,31 +102,69 @@ const ObsidianExport: React.FC<ObsidianExportProps> = ({
       }
     };
     
+    // PDFのURLを取得
+    const fetchPdfUrl = async () => {
+      if (paper && paper.file_path) {
+        try {
+          const url = await getPaperPdfUrl(paper);
+          setPdfUrl(url);
+        } catch (err) {
+          console.error('Error fetching PDF URL:', err);
+        }
+      }
+    };
+    
     if (dialogOpen) {
       loadSettings();
+      fetchPdfUrl();
     }
   }, [user, dialogOpen, paper]);
   
   // Obsidianへのエクスポート処理
-  const handleExport = () => {
+  const handleExport = async () => {
     try {
       setIsLoading(true);
       setError(null);
       
-      // ファイル名に拡張子を追加
+      // 1. PDFファイルのダウンロード（オプション）
+      let pdfFileName = '';
+      if (includePdf && pdfUrl) {
+        // PDFの名前を設定
+        pdfFileName = `${fileName}.pdf`;
+        
+        try {
+          // PDFのダウンロード
+          const response = await fetch(pdfUrl);
+          const blob = await response.blob();
+          const pdfDownloadUrl = URL.createObjectURL(blob);
+          
+          const a = document.createElement('a');
+          a.href = pdfDownloadUrl;
+          a.download = pdfFileName;
+          document.body.appendChild(a);
+          a.click();
+          URL.revokeObjectURL(pdfDownloadUrl);
+          document.body.removeChild(a);
+        } catch (err) {
+          console.error('Error downloading PDF:', err);
+          setError('PDFのダウンロードに失敗しました');
+          setIsLoading(false);
+          return;
+        }
+      }
+      
+      // 2. Markdown生成
+      const markdown = MarkdownExporter.generateObsidianMarkdown(
+        paper, 
+        translatedChapters,
+        includePdf ? pdfFileName : undefined
+      );
+      
+      // 3. マークダウンファイルのダウンロード
       const extension = fileType === 'md' ? '.md' : '.txt';
       const fullFileName = fileName.endsWith(extension) ? fileName : fileName + extension;
       
-      // Markdown生成
-      let content = '';
-      if (fileType === 'md') {
-        content = MarkdownExporter.generateObsidianMarkdown(paper, translatedChapters);
-      } else {
-        content = MarkdownExporter.generateFullMarkdown(paper, translatedChapters);
-      }
-      
-      // ダウンロード
-      const blob = new Blob([content], { type: 'text/plain' });
+      const blob = new Blob([markdown], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -122,15 +174,21 @@ const ObsidianExport: React.FC<ObsidianExportProps> = ({
       URL.revokeObjectURL(url);
       document.body.removeChild(a);
       
-      // 成功メッセージを表示
-      setSuccess(true);
-      
-      // Obsidianで開く
+      // 4. Obsidianで開く（設定されている場合）
       if (openAfterExport && vaultName) {
+        // フォルダパスがある場合は結合
+        let filePath = fullFileName;
+        if (folderPath) {
+          filePath = `${folderPath}/${fullFileName}`;
+        }
+        
         setTimeout(() => {
-          openInObsidian(vaultName, fullFileName);
+          openInObsidian(vaultName, filePath);
         }, 500);
       }
+      
+      // 成功メッセージを表示
+      setSuccess(true);
       
       // ダイアログを閉じる（少し遅延）
       setTimeout(() => {
@@ -215,6 +273,16 @@ const ObsidianExport: React.FC<ObsidianExportProps> = ({
             />
             
             <TextField
+              label="保存先フォルダパス（省略可）"
+              value={folderPath}
+              onChange={(e) => setFolderPath(e.target.value)}
+              fullWidth
+              margin="normal"
+              disabled={isLoading}
+              helperText="例: Papers/AI 省略した場合はvaultのルートに保存されます"
+            />
+            
+            <TextField
               label="ファイル名"
               value={fileName}
               onChange={(e) => setFileName(e.target.value)}
@@ -226,17 +294,69 @@ const ObsidianExport: React.FC<ObsidianExportProps> = ({
               helperText={!fileName ? "ファイル名は必須です" : `拡張子 ${fileType === 'md' ? '.md' : '.txt'} が自動的に追加されます`}
             />
             
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              ファイル形式: {fileType === 'md' ? 'Markdown' : 'プレーンテキスト'}
-              {openAfterExport && (
-                <> • エクスポート後にObsidianで開く</>
-              )}
-            </Typography>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={includePdf}
+                  onChange={(e) => setIncludePdf(e.target.checked)}
+                  disabled={isLoading}
+                />
+              }
+              label="原文PDFも埋め込む"
+            />
+            
+            {includePdf && (
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={createEmbedFolder}
+                    onChange={(e) => setCreateEmbedFolder(e.target.checked)}
+                    disabled={isLoading}
+                  />
+                }
+                label="埋め込み書類フォルダを作成"
+              />
+            )}
+            
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={openAfterExport}
+                  onChange={(e) => setOpenAfterExport(e.target.checked)}
+                  disabled={isLoading}
+                />
+              }
+              label="エクスポート後にObsidianで開く"
+            />
+            
+            <FormControl fullWidth margin="normal">
+              <InputLabel id="file-type-label">ファイル形式</InputLabel>
+              <Select
+                labelId="file-type-label"
+                value={fileType}
+                onChange={(e) => setFileType(e.target.value as 'md' | 'txt')}
+                disabled={isLoading}
+                label="ファイル形式"
+              >
+                <MenuItem value="md">
+                  <ListItemText 
+                    primary="Markdown (.md)" 
+                    secondary="Obsidianの全機能が使えます"
+                  />
+                </MenuItem>
+                <MenuItem value="txt">
+                  <ListItemText 
+                    primary="プレーンテキスト (.txt)" 
+                    secondary="Obsidianの検索機能を使うときに便利です"
+                  />
+                </MenuItem>
+              </Select>
+            </FormControl>
           </Box>
           
           <Typography variant="body2" color="text.secondary">
-            エクスポートすると、翻訳されたテキストがダウンロードされ、設定に応じてObsidianで開かれます。
-            ファイル形式や自動で開く設定を変更するには、プロフィールページのObsidian設定を編集してください。
+            エクスポートすると、翻訳されたテキストとメタデータがダウンロードされ、ローカルのObsidianに保存することができます。
+            PDFの埋め込みを選択した場合は、PDFもダウンロードされ、設定に応じて埋め込み書類フォルダに保存するよう案内されます。
           </Typography>
         </DialogContent>
         

@@ -2,11 +2,49 @@ import { Paper } from './papers';
 
 // Obsidian関連の型定義
 export interface ObsidianSettings {
-  vault_path: string;
+  vault_dir: string; // Vault のディレクトリパス
+  vault_name: string; // Vault の名前
+  folder_path: string; // Vault 内のサブフォルダパス
   file_name_format: string;
+  file_type: 'md' | 'txt';
+  open_after_export: boolean;
+  include_pdf: boolean;
+  create_embed_folder: boolean;
   created_at: Date;
   updated_at: Date;
 }
+
+/**
+ * 選択されたフォルダからVault名を抽出する
+ * @param dirPath フォルダのパス
+ * @returns Vault名
+ */
+export const extractVaultName = (dirPath: string): string => {
+  // パスの最後のディレクトリ名をVault名として使用
+  return dirPath.split('/').pop() || dirPath.split('\\').pop() || 'vault';
+};
+
+/**
+ * ユーザーにフォルダを選択させる
+ * @returns 選択されたフォルダのパスとVault名
+ */
+export const selectObsidianVault = async (): Promise<{ dirPath: string; vaultName: string } | null> => {
+  try {
+    // フォルダ選択ダイアログを表示
+    const handle = await window.showDirectoryPicker({
+      mode: 'read',
+    });
+    
+    // 選択されたフォルダのパスを取得
+    const dirPath = handle.name;
+    const vaultName = extractVaultName(dirPath);
+    
+    return { dirPath, vaultName };
+  } catch (error) {
+    console.error('Error selecting Obsidian vault:', error);
+    return null;
+  }
+};
 
 /**
  * Obsidian URIを生成する
