@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
-  TextField,
   Button,
   Paper,
   FormControl,
@@ -20,16 +19,18 @@ import {
   Link,
   Divider,
   Grid,
-  Chip
+  Chip,
+  Switch
 } from '@mui/material';
 import HelpIcon from '@mui/icons-material/Help';
 import InfoIcon from '@mui/icons-material/Info';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../../api/firebase';
 import { useAuthStore } from '../../store/authStore';
-import { generateObsidianURI, checkObsidianInstallation } from '../../api/obsidian';
+import { selectObsidianVault } from '../../api/obsidian';
 
 interface ObsidianSettingsProps {
   onSaved?: () => void;
@@ -39,16 +40,20 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
   const { user } = useAuthStore();
   
   // 設定値の状態管理
+  const [vaultDir, setVaultDir] = useState('');
   const [vaultName, setVaultName] = useState('');
+  const [folderPath, setFolderPath] = useState('');
   const [fileNameFormat, setFileNameFormat] = useState('{authors}_{title}_{year}');
   const [fileType, setFileType] = useState<'md' | 'txt'>('md');
   const [openAfterExport, setOpenAfterExport] = useState(true);
+  const [includePdf, setIncludePdf] = useState(true);
+  const [createEmbedFolder, setCreateEmbedFolder] = useState(true);
   
   // UI状態の管理
   const [isLoading, setIsLoading] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isObsidianInstalled, setIsObsidianInstalled] = useState<boolean | null>(null);
+  const isObsidianInstalled = true; // デフォルトで連携可能とする
   
   // プリセットのファイル名フォーマット
   const fileNameFormatPresets = [
@@ -62,14 +67,6 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
   const [selectedPreset, setSelectedPreset] = useState(fileNameFormatPresets[0].value);
   
   // Obsidianのインストール確認
-  useEffect(() => {
-    const checkInstallation = async () => {
-      const result = await checkObsidianInstallation();
-      setIsObsidianInstalled(result);
-    };
-    
-    checkInstallation();
-  }, []);
   
   // ユーザーの既存設定を読み込む
   useEffect(() => {
@@ -86,10 +83,14 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
         
         if (settingsSnap.exists()) {
           const data = settingsSnap.data();
-          setVaultName(data.vault_path || '');
+          setVaultDir(data.vault_dir || '');
+          setVaultName(data.vault_name || '');
+          setFolderPath(data.folder_path || '');
           setFileNameFormat(data.file_name_format || '{authors}_{title}_{year}');
           setFileType(data.file_type || 'md');
-          setOpenAfterExport(data.open_after_export !== false); // デフォルトはtrue
+          setOpenAfterExport(data.open_after_export !== false);
+          setIncludePdf(data.include_pdf !== false);
+          setCreateEmbedFolder(data.create_embed_folder !== false);
           
           // プリセットの選択を更新
           const matchingPreset = fileNameFormatPresets.find(p => p.value === data.file_name_format);
@@ -106,6 +107,20 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
     loadSettings();
   }, [user]);
   
+  // フォルダ選択ハンドラー
+  const handleSelectVault = async () => {
+    try {
+      const result = await selectObsidianVault();
+      if (result) {
+        setVaultDir(result.dirPath);
+        setVaultName(result.vaultName);
+      }
+    } catch (err) {
+      console.error('Error selecting Obsidian vault:', err);
+      setError('Obsidian vaultの選択に失敗しました。');
+    }
+  };
+  
   // 設定を保存
   const handleSave = async () => {
     if (!user) return;
@@ -115,10 +130,14 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
       setError(null);
       
       const settingsData = {
-        vault_path: vaultName,
+        vault_dir: vaultDir,
+        vault_name: vaultName,
+        folder_path: folderPath,
         file_name_format: fileNameFormat,
         file_type: fileType,
         open_after_export: openAfterExport,
+        include_pdf: includePdf,
+        create_embed_folder: createEmbedFolder,
         updated_at: Timestamp.now()
       };
       
@@ -159,6 +178,9 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
     }
   };
   
+  // Obsidianの連携状態を判定
+  const isVaultLinked = vaultDir !== '' && vaultName !== '';
+  
   return (
     <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
       <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 2 }}>
@@ -166,26 +188,24 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
           Obsidian 連携設定
         </Typography>
         
-        {isObsidianInstalled === true ? (
+        {isVaultLinked ? (
           <Chip
             icon={<CheckCircleIcon />}
-            label="Obsidianが利用可能です"
+            label="Obsidianが連携済み"
             color="success"
             variant="outlined"
           />
-        ) : isObsidianInstalled === false ? (
-          <Tooltip title="Obsidianをインストールしてください">
-            <Chip
-              icon={<ErrorIcon />}
-              label="Obsidianが見つかりません"
-              color="warning"
-              variant="outlined"
-            />
-          </Tooltip>
+        ) : isObsidianInstalled ? (
+          <Chip
+            icon={<ErrorIcon />}
+            label="Obsidianが連携されていません"
+            color="warning"
+            variant="outlined"
+          />
         ) : null}
       </Box>
       
-      {!isObsidianInstalled && (
+      {!isObsidianInstalled && !isVaultLinked && (
         <Alert severity="info" sx={{ mb: 3 }}>
           <AlertTitle>Obsidianがインストールされていないようです</AlertTitle>
           <Typography variant="body2">
@@ -211,16 +231,22 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
       
       <Grid container spacing={3}>
         <Grid item xs={12}>
-          <TextField
-            label="Vault名"
-            fullWidth
-            value={vaultName}
-            onChange={(e) => setVaultName(e.target.value)}
-            helperText="Obsidianで使用しているVault名を入力してください"
-            required
-            variant="outlined"
-            disabled={isLoading}
-          />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Button
+              variant="outlined"
+              startIcon={<FolderOpenIcon />}
+              onClick={handleSelectVault}
+              disabled={isLoading}
+              sx={{ minWidth: 200 }}
+            >
+              Vault フォルダを選択
+            </Button>
+            {vaultName && (
+              <Typography variant="body2" color="text.secondary">
+                選択中: {vaultName}
+              </Typography>
+            )}
+          </Box>
         </Grid>
         
         <Grid item xs={12}>
@@ -240,26 +266,6 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
               ))}
             </Select>
           </FormControl>
-        </Grid>
-        
-        <Grid item xs={12}>
-          <TextField
-            label="カスタムファイル名フォーマット"
-            fullWidth
-            value={fileNameFormat}
-            onChange={(e) => setFileNameFormat(e.target.value)}
-            helperText={
-              <span>
-                使用可能な変数: {'{authors}'}, {'{title}'}, {'{year}'}, {'{journal}'}, {'{doi}'}, {'{date}'}
-                <Tooltip title="変数は論文のメタデータで置き換えられます。例: {authors}_{title}_{year} → Smith_AI研究の最前線_2023">
-                  <IconButton size="small">
-                    <HelpIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              </span>
-            }
-            disabled={isLoading || selectedPreset !== 'custom'}
-          />
         </Grid>
         
         <Grid item xs={12}>
@@ -287,9 +293,13 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
         </Grid>
         
         <Grid item xs={12}>
+          <Typography variant="subtitle2" gutterBottom>
+            詳細設定
+          </Typography>
+          
           <FormControlLabel
             control={
-              <Radio
+              <Switch
                 checked={openAfterExport}
                 onChange={(e) => setOpenAfterExport(e.target.checked)}
                 disabled={isLoading}
@@ -297,6 +307,35 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
             }
             label="エクスポート後にObsidianで開く"
           />
+          
+          <FormControlLabel
+            control={
+              <Switch
+                checked={includePdf}
+                onChange={(e) => setIncludePdf(e.target.checked)}
+                disabled={isLoading}
+              />
+            }
+            label="原文PDFも埋め込む"
+          />
+          
+          {includePdf && (
+            <Box sx={{ ml: 4 }}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={createEmbedFolder}
+                    onChange={(e) => setCreateEmbedFolder(e.target.checked)}
+                    disabled={isLoading || !includePdf}
+                  />
+                }
+                label="埋め込み書類フォルダを作成"
+              />
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4 }}>
+                オンにすると、PDFは「埋め込み書類」フォルダに保存され、Markdownからリンクされます
+              </Typography>
+            </Box>
+          )}
         </Grid>
         
         <Grid item xs={12}>

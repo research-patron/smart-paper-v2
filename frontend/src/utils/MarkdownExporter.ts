@@ -22,6 +22,11 @@ export class MarkdownExporter {
       markdown += `\n## 要約\n\n${this.cleanHtml(paper.summary)}\n\n`;
     }
     
+    // 必要な知識（新規追加）
+    if (paper.required_knowledge) {
+      markdown += `\n## この分野の研究を行うために必要な知識\n\n${this.cleanHtml(paper.required_knowledge)}\n\n`;
+    }
+    
     // 翻訳テキスト
     markdown += `\n## 翻訳\n\n`;
     
@@ -178,23 +183,29 @@ export class MarkdownExporter {
   /**
    * Obsidianスタイルのフロントマターを含むMarkdownを生成
    * @param paper 論文データ
+   * @param translatedChapters 翻訳された章データ
+   * @param pdfFileName PDFファイル名（オプション）
    * @returns Markdown文字列
    */
-  static generateObsidianMarkdown(paper: Paper, translatedChapters?: TranslatedChapter[]): string {
+  static generateObsidianMarkdown(
+    paper: Paper, 
+    translatedChapters?: TranslatedChapter[], 
+    pdfFileName?: string
+  ): string {
     let markdown = '';
     
     // Obsidianフロントマター
     markdown += '---\n';
     
     if (paper.metadata) {
-      markdown += `title: ${paper.metadata.title}\n`;
+      markdown += `title: "${paper.metadata.title.replace(/"/g, '\\"')}"\n`;
       
       if (paper.metadata.authors && paper.metadata.authors.length > 0) {
-        markdown += `authors: [${paper.metadata.authors.map(a => `"${a.name}"`).join(', ')}]\n`;
+        markdown += `authors: [${paper.metadata.authors.map(a => `"${a.name.replace(/"/g, '\\"')}"`).join(', ')}]\n`;
       }
       
       if (paper.metadata.journal) {
-        markdown += `journal: "${paper.metadata.journal}"\n`;
+        markdown += `journal: "${paper.metadata.journal.replace(/"/g, '\\"')}"\n`;
       }
       
       if (paper.metadata.year) {
@@ -206,16 +217,65 @@ export class MarkdownExporter {
       }
       
       if (paper.metadata.keywords && paper.metadata.keywords.length > 0) {
-        markdown += `tags: [${paper.metadata.keywords.map(k => `"${k}"`).join(', ')}]\n`;
+        markdown += `tags: [${paper.metadata.keywords.map(k => `"${k.replace(/"/g, '\\"')}"`).join(', ')}]\n`;
       }
     }
     
     markdown += `date: "${new Date().toISOString().split('T')[0]}"\n`;
+    markdown += `type: "research-paper"\n`;
     markdown += '---\n\n';
     
     // 通常のMarkdownコンテンツを追加
     markdown += this.generateFullMarkdown(paper, translatedChapters);
     
+    // PDFへのリンクを追加（埋め込み書類フォルダへのリンク）
+    if (pdfFileName) {
+      markdown += '\n\n## 原文PDF\n\n';
+      markdown += `![[埋め込み書類/${pdfFileName}]]\n`;
+    }
+    
     return markdown;
+  }
+  
+  /**
+   * 安全なファイル名を生成
+   * @param paper 論文データ
+   * @returns 安全なファイル名
+   */
+  static generateSafeFileName(paper: Paper): string {
+    if (!paper.metadata) {
+      return `paper_${new Date().toISOString().slice(0, 10)}`;
+    }
+    
+    let fileName = '';
+    
+    // 著者名（最初の著者のみ）
+    if (paper.metadata.authors && paper.metadata.authors.length > 0) {
+      const authorName = paper.metadata.authors[0].name.split(' ')[0]; // 姓のみを使用
+      fileName += authorName ? `${authorName}_` : '';
+    }
+    
+    // 論文タイトル
+    if (paper.metadata.title) {
+      // タイトルから特殊文字を除去し、短く切り詰める
+      const safeTitle = paper.metadata.title
+        .replace(/[<>:"/\\|?*]/g, '')  // ファイル名に使えない文字を除去
+        .replace(/\s+/g, '_')           // スペースをアンダースコアに置換
+        .substring(0, 50);              // 長すぎる場合は切り詰め
+      
+      fileName += safeTitle;
+    }
+    
+    // 出版年
+    if (paper.metadata.year) {
+      fileName += `_${paper.metadata.year}`;
+    }
+    
+    // ファイル名がない場合はデフォルト値を使用
+    if (!fileName) {
+      fileName = `paper_${new Date().toISOString().slice(0, 10)}`;
+    }
+    
+    return fileName;
   }
 }

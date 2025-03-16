@@ -48,6 +48,7 @@ import ErrorMessage from '../components/common/ErrorMessage';
 import SplitView from '../components/papers/SplitView';
 import Summary from '../components/papers/Summary';
 import { MarkdownExporter } from '../utils/MarkdownExporter';
+import ObsidianExport from '../components/obsidian/Export';
 import { 
   getPaperPdfUrl, 
   getPaperTranslatedText, 
@@ -392,39 +393,42 @@ const PaperViewPage: React.FC = () => {
           {renderProgress()}
           
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {currentPaper.status === 'completed' && (
-              <>
-                <Button 
-                  variant="outlined" 
-                  size="small" 
-                  startIcon={<DownloadIcon />}
-                  onClick={handleOpenDownloadMenu}
-                  disabled={!currentPaper.translated_text && !localTranslatedText}
-                >
-                  ダウンロード
-                </Button>
-                
-                <Menu
-                  anchorEl={downloadMenuAnchor}
-                  open={Boolean(downloadMenuAnchor)}
-                  onClose={handleCloseDownloadMenu}
-                >
-                  <MenuItem onClick={handleDownloadPlainText}>
-                    <SaveAltIcon fontSize="small" sx={{ mr: 1 }} />
-                    プレーンテキスト (.txt)
-                  </MenuItem>
-                  <MenuItem onClick={handleDownloadMarkdown}>
-                    <BookIcon fontSize="small" sx={{ mr: 1 }} />
-                    標準Markdown (.md)
-                  </MenuItem>
-                  <MenuItem onClick={handleOpenObsidianDialog}>
-                    <LibraryBooksIcon fontSize="small" sx={{ mr: 1 }} />
-                    Obsidian形式 (.md)
-                  </MenuItem>
-                </Menu>
-              </>
-            )}
-          </Box>
+          {currentPaper.status === 'completed' && (
+            <>
+              <Button 
+                variant="outlined" 
+                size="small" 
+                startIcon={<DownloadIcon />}
+                onClick={handleOpenDownloadMenu}
+                disabled={!currentPaper.translated_text && !localTranslatedText}
+              >
+                ダウンロード
+              </Button>
+              
+              {/* Obsidianエクスポートボタンを追加 */}
+              <ObsidianExport 
+                paper={currentPaper} 
+                translatedChapters={currentPaperChapters}
+                disabled={!currentPaper.translated_text && !localTranslatedText}
+              />
+              
+              <Menu
+                anchorEl={downloadMenuAnchor}
+                open={Boolean(downloadMenuAnchor)}
+                onClose={handleCloseDownloadMenu}
+              >
+                <MenuItem onClick={handleDownloadPlainText}>
+                  <SaveAltIcon fontSize="small" sx={{ mr: 1 }} />
+                  プレーンテキスト (.txt)
+                </MenuItem>
+                <MenuItem onClick={handleDownloadMarkdown}>
+                  <BookIcon fontSize="small" sx={{ mr: 1 }} />
+                  Markdown (.md)
+                </MenuItem>
+              </Menu>
+            </>
+          )}
+        </Box>
         </Paper>
         
         {error && (
