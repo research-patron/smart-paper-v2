@@ -1,15 +1,17 @@
-import { Paper } from './papers';
+import { Paper, TranslatedChapter } from './papers';
+import { MarkdownExporter } from '../utils/MarkdownExporter';
 
 // Obsidian関連の型定義
 export interface ObsidianSettings {
-  vault_dir: string; // Vault のディレクトリパス
-  vault_name: string; // Vault の名前
-  folder_path: string; // Vault 内のサブフォルダパス
+  vault_dir: string;
+  vault_name: string;
+  folder_path: string;
   file_name_format: string;
   file_type: 'md' | 'txt';
   open_after_export: boolean;
   include_pdf: boolean;
   create_embed_folder: boolean;
+  auto_export: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -145,37 +147,50 @@ export const openInObsidian = (vaultName: string, filePath: string): void => {
 };
 
 /**
- * Obsidianがインストールされているか確認
- * (完全に信頼性の高い方法ではありませんが、URI schemeの処理確認として使用可能)
- * @returns 確認結果のメッセージ
+ * 論文をObsidianにエクスポートする
+ * @param paper 論文データ
+ * @param chapters 翻訳された章データ
+ * @param settings Obsidian設定
  */
-export const checkObsidianInstallation = async (): Promise<boolean> => {
+export const exportToObsidian = async (
+  paper: Paper,
+  chapters: TranslatedChapter[],
+  settings: ObsidianSettings
+): Promise<void> => {
   try {
-    // iframe を使用してobsidian://プロトコルを検出する試み
-    const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    document.body.appendChild(iframe);
+    // ファイル名の生成
+    const fileName = formatFileName(settings.file_name_format, paper);
+    const extension = settings.file_type === 'md' ? '.md' : '.txt';
+    const fullFileName = fileName.endsWith(extension) ? fileName : fileName + extension;
+
+    // Markdown生成
+    const markdown = MarkdownExporter.generateObsidianMarkdown(paper, chapters);
     
-    // タイムアウト設定（ユーザーがダイアログを閉じない場合に備えて）
-    const timeout = new Promise<boolean>((resolve) => {
-      setTimeout(() => resolve(false), 1000);
-    });
-    
-    // obsidianプロトコルを開こうとする
-    const checkProtocol = new Promise<boolean>((resolve) => {
-      iframe.onload = () => resolve(true);
-      iframe.onerror = () => resolve(false);
-      // 空のVaultを開こうとする（単にプロトコルハンドラーのチェック）
-      iframe.src = 'obsidian://open';
-    });
-    
-    // タイムアウトか応答のどちらか早い方を待つ
-    const result = await Promise.race([checkProtocol, timeout]);
-    document.body.removeChild(iframe);
-    
-    return result;
-  } catch (e) {
-    console.error('Error checking Obsidian installation:', e);
-    return false;
+    // マークダウンファイルのダウンロード
+    const blob = new Blob([markdown], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fullFileName;
+    document.body.appendChild(a);
+    a.click();
+    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+
+    // Obsidianで開く（設定されている場合）
+    if (settings.open_after_export && settings.vault_name) {
+      // フォルダパスがある場合は結合
+      let filePath = fullFileName;
+      if (settings.folder_path) {
+        filePath = `${settings.folder_path}/${fullFileName}`;
+      }
+      
+      setTimeout(() => {
+        openInObsidian(settings.vault_name, filePath);
+      }, 500);
+    }
+  } catch (error) {
+    console.error('Error exporting to Obsidian:', error);
+    throw error;
   }
 };
