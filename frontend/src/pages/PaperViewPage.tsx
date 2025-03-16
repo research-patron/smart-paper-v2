@@ -26,7 +26,8 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  TextField
+  TextField,
+  Drawer
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -38,6 +39,9 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SaveAltIcon from '@mui/icons-material/SaveAlt';
 import BookIcon from '@mui/icons-material/Book';
 import LibraryBooksIcon from '@mui/icons-material/LibraryBooks';
+import MenuIcon from '@mui/icons-material/Menu';
+import MenuOpenIcon from '@mui/icons-material/MenuOpen';
+import TocIcon from '@mui/icons-material/Toc';
 import { usePaperStore } from '../store/paperStore';
 import { useAuthStore } from '../store/authStore';
 import ErrorMessage from '../components/common/ErrorMessage';
@@ -101,6 +105,8 @@ const PaperViewPage: React.FC = () => {
   // Obsidianエクスポートダイアログ
   const [obsidianDialogOpen, setObsidianDialogOpen] = useState(false);
   const [obsidianFilename, setObsidianFilename] = useState('');
+  // 目次ドロワーの表示状態
+  const [drawerOpen, setDrawerOpen] = useState(false);
   // エラー状態
   const [error, setError] = useState<string | null>(null);
   
@@ -155,6 +161,14 @@ const PaperViewPage: React.FC = () => {
     fetchTranslatedText();
   }, [currentPaper]);
   
+  // タブ切り替え時に目次の表示状態をリセット
+  useEffect(() => {
+    // 翻訳タブ以外では目次を非表示に
+    if (tabValue !== 0) {
+      setDrawerOpen(false);
+    }
+  }, [tabValue]);
+  
   // デフォルトのObsidianファイル名を設定
   useEffect(() => {
     if (currentPaper?.metadata) {
@@ -185,6 +199,19 @@ const PaperViewPage: React.FC = () => {
   // 章の選択処理
   const handleChapterSelect = (chapterNumber: number) => {
     setSelectedChapter(chapterNumber);
+    // 選択後はドロワーを閉じる
+    setDrawerOpen(false);
+  };
+  
+  // 目次ドロワーの切り替え
+  const toggleDrawer = () => {
+    setDrawerOpen(!drawerOpen);
+  };
+  
+  // 目次をリセット（全文表示）
+  const resetChapter = () => {
+    setSelectedChapter(null);
+    setDrawerOpen(false);
   };
   
   // ダウンロードメニューを開く
@@ -302,6 +329,45 @@ const PaperViewPage: React.FC = () => {
       chapter_number: chapter.chapter_number
     };
   };
+  
+  // 目次コンポーネント
+  const TableOfContents = () => (
+    <Paper 
+      sx={{ 
+        width: '100%',
+        height: '100%',
+        p: 1, 
+        overflow: 'auto',
+      }}
+      variant="outlined"
+    >
+      <Typography variant="subtitle2" gutterBottom>
+        章の選択
+      </Typography>
+      <List dense disablePadding>
+        <ListItem
+          button
+          selected={selectedChapter === null}
+          onClick={resetChapter}
+        >
+          <ListItemText primary="全文" />
+        </ListItem>
+        {currentPaper?.chapters?.map((chapter) => (
+          <ListItem
+            key={chapter.chapter_number}
+            button
+            selected={selectedChapter === chapter.chapter_number}
+            onClick={() => handleChapterSelect(chapter.chapter_number)}
+          >
+            <ListItemText 
+              primary={`${chapter.chapter_number}. ${chapter.title}`}
+              secondary={`P${chapter.start_page}-${chapter.end_page}`}
+            />
+          </ListItem>
+        ))}
+      </List>
+    </Paper>
+  );
   
   // ローディング表示
   if (currentPaperLoading) {
@@ -441,12 +507,39 @@ const PaperViewPage: React.FC = () => {
           <ErrorMessage message={error} onRetry={() => setError(null)} />
         )}
         
-        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tabs value={tabValue} onChange={handleTabChange} aria-label="論文タブ">
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderBottom: 1, 
+          borderColor: 'divider' 
+        }}>
+          <Tabs 
+            value={tabValue} 
+            onChange={handleTabChange} 
+            aria-label="論文タブ"
+            sx={{ flex: 1 }}
+          >
             <Tab icon={<TranslateIcon />} label="翻訳" id="paper-tab-0" />
             <Tab icon={<SummarizeIcon />} label="要約" id="paper-tab-1" />
             <Tab icon={<InfoIcon />} label="メタデータ" id="paper-tab-2" />
           </Tabs>
+          
+          {/* 目次トグルボタン - 翻訳タブがアクティブな場合のみ表示 */}
+          {tabValue === 0 && currentPaper.chapters && currentPaper.chapters.length > 0 && (
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<TocIcon />}
+                onClick={toggleDrawer}
+                color={drawerOpen ? 'primary' : 'inherit'}
+                sx={{ mr: 1 }}
+              >
+                目次
+              </Button>
+            </Box>
+          )}
         </Box>
         
         <Box sx={{ height: 'calc(100vh - 350px)', minHeight: '600px' }}>
@@ -461,48 +554,27 @@ const PaperViewPage: React.FC = () => {
               </Box>
             ) : (
               <Box sx={{ height: '100%', display: 'flex' }}>
-                {/* 章選択サイドバー */}
-                {currentPaper.chapters && currentPaper.chapters.length > 0 && (
-                  <Paper 
-                    sx={{ 
-                      width: '200px', 
-                      mr: 2, 
-                      p: 1, 
-                      overflow: 'auto', 
-                      display: { xs: 'none', md: 'block' } 
-                    }}
-                    variant="outlined"
-                  >
-                    <Typography variant="subtitle2" gutterBottom>
-                      章の選択
+                {/* 統一された目次ドロワー - すべての画面サイズで同じ挙動に */}
+                <Drawer
+                  anchor="left"
+                  open={drawerOpen}
+                  onClose={toggleDrawer}
+                  sx={{ 
+                    '& .MuiDrawer-paper': { width: '80%', maxWidth: '300px' }
+                  }}
+                >
+                  <Box sx={{ p: 2 }}>
+                    <Typography variant="h6" gutterBottom>
+                      目次
                     </Typography>
-                    <List dense disablePadding>
-                      <ListItem
-                        button
-                        selected={selectedChapter === null}
-                        onClick={() => setSelectedChapter(null)}
-                      >
-                        <ListItemText primary="全文" />
-                      </ListItem>
-                      {currentPaper.chapters.map((chapter) => (
-                        <ListItem
-                          key={chapter.chapter_number}
-                          button
-                          selected={selectedChapter === chapter.chapter_number}
-                          onClick={() => handleChapterSelect(chapter.chapter_number)}
-                        >
-                          <ListItemText 
-                            primary={`${chapter.chapter_number}. ${chapter.title}`}
-                            secondary={`P${chapter.start_page}-${chapter.end_page}`}
-                          />
-                        </ListItem>
-                      ))}
-                    </List>
-                  </Paper>
-                )}
+                    <Divider sx={{ mb: 2 }} />
+                    <TableOfContents />
+                  </Box>
+                </Drawer>
                 
-                {/* メインコンテンツ */}
-                <Box sx={{ flex: 1, height: '100%' }}>
+                {/* メインコンテンツ - ドロワーの状態に関わらず安定したレイアウト */}
+                <Box sx={{ flex: 1, height: '100%' }}
+                >
                   {pdfUrl && (
                     <SplitView
                       pdfUrl={pdfUrl}
