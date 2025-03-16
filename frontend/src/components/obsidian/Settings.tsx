@@ -48,6 +48,7 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
   const [openAfterExport, setOpenAfterExport] = useState(true);
   const [includePdf, setIncludePdf] = useState(true);
   const [createEmbedFolder, setCreateEmbedFolder] = useState(true);
+  const [autoExport, setAutoExport] = useState(true);
   
   // UI状態の管理
   const [isLoading, setIsLoading] = useState(false);
@@ -65,8 +66,6 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
   ];
   
   const [selectedPreset, setSelectedPreset] = useState(fileNameFormatPresets[0].value);
-  
-  // Obsidianのインストール確認
   
   // ユーザーの既存設定を読み込む
   useEffect(() => {
@@ -91,6 +90,7 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
           setOpenAfterExport(data.open_after_export !== false);
           setIncludePdf(data.include_pdf !== false);
           setCreateEmbedFolder(data.create_embed_folder !== false);
+          setAutoExport(data.auto_export !== false);
           
           // プリセットの選択を更新
           const matchingPreset = fileNameFormatPresets.find(p => p.value === data.file_name_format);
@@ -138,6 +138,7 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
         open_after_export: openAfterExport,
         include_pdf: includePdf,
         create_embed_folder: createEmbedFolder,
+        auto_export: autoExport,
         updated_at: Timestamp.now()
       };
       
@@ -228,6 +229,14 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
           設定を保存しました
         </Alert>
       )}
+
+      <Alert severity="info" sx={{ mb: 3 }}>
+        <AlertTitle>自動保存機能について</AlertTitle>
+        <Typography variant="body2">
+          Obsidianと連携すると、論文の翻訳後に自動的にObsidianに保存されます。
+          自動保存を有効にすることで、「Obsidianへエクスポート」ボタンをクリックする必要がなくなります。
+        </Typography>
+      </Alert>
       
       <Grid container spacing={3}>
         <Grid item xs={12}>
@@ -296,6 +305,17 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
           <Typography variant="subtitle2" gutterBottom>
             詳細設定
           </Typography>
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={autoExport}
+                onChange={(e) => setAutoExport(e.target.checked)}
+                disabled={isLoading}
+              />
+            }
+            label="翻訳完了後に自動的にObsidianに保存"
+          />
           
           <FormControlLabel
             control={
@@ -305,7 +325,7 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
                 disabled={isLoading}
               />
             }
-            label="エクスポート後にObsidianで開く"
+            label="保存後にObsidianで開く"
           />
           
           <FormControlLabel

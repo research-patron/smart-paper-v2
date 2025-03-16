@@ -1,4 +1,3 @@
-// ~/Desktop/smart-paper-v2/frontend/src/pages/PaperViewPage.tsx
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -19,28 +18,15 @@ import {
   LinearProgress,
   Menu,
   MenuItem,
-  IconButton,
-  Tooltip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogContentText,
-  DialogTitle,
-  TextField,
   Drawer
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DownloadIcon from '@mui/icons-material/Download';
-import ArticleIcon from '@mui/icons-material/Article';
 import TranslateIcon from '@mui/icons-material/Translate';
 import SummarizeIcon from '@mui/icons-material/Summarize';
 import InfoIcon from '@mui/icons-material/Info';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SaveAltIcon from '@mui/icons-material/SaveAlt';
 import BookIcon from '@mui/icons-material/Book';
-import LibraryBooksIcon from '@mui/icons-material/LibraryBooks';
-import MenuIcon from '@mui/icons-material/Menu';
-import MenuOpenIcon from '@mui/icons-material/MenuOpen';
 import TocIcon from '@mui/icons-material/Toc';
 import { usePaperStore } from '../store/paperStore';
 import { useAuthStore } from '../store/authStore';
@@ -48,12 +34,31 @@ import ErrorMessage from '../components/common/ErrorMessage';
 import SplitView from '../components/papers/SplitView';
 import Summary from '../components/papers/Summary';
 import { MarkdownExporter } from '../utils/MarkdownExporter';
-import ObsidianExport from '../components/obsidian/Export';
+import { doc, getDoc, DocumentData } from 'firebase/firestore';
+import { db } from '../api/firebase';
+import { exportToObsidian, ObsidianSettings } from '../api/obsidian';
 import { 
   getPaperPdfUrl, 
   getPaperTranslatedText, 
   Paper as PaperType
 } from '../api/papers';
+
+// FirestoreのデータをObsidianSettingsに変換する関数
+const convertToObsidianSettings = (data: DocumentData): ObsidianSettings => {
+  return {
+    vault_dir: data.vault_dir || '',
+    vault_name: data.vault_name || '',
+    folder_path: data.folder_path || '',
+    file_name_format: data.file_name_format || '{authors}_{title}_{year}',
+    file_type: data.file_type || 'md',
+    open_after_export: data.open_after_export !== false,
+    include_pdf: data.include_pdf !== false,
+    create_embed_folder: data.create_embed_folder !== false,
+    auto_export: data.auto_export !== false,
+    created_at: data.created_at?.toDate() || new Date(),
+    updated_at: data.updated_at?.toDate() || new Date()
+  };
+};
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -98,11 +103,10 @@ const PaperViewPage: React.FC = () => {
   const [pdfUrl, setPdfUrl] = useState<string>("");
   const [localTranslatedText, setLocalTranslatedText] = useState<string | null>(null);
   const [downloadMenuAnchor, setDownloadMenuAnchor] = useState<null | HTMLElement>(null);
-  const [obsidianDialogOpen, setObsidianDialogOpen] = useState(false);
-  const [obsidianFilename, setObsidianFilename] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+  const [exportAttempted, setExportAttempted] = useState(false);
+
   useEffect(() => {
     if (id && user) {
       fetchPaper(id);
@@ -112,6 +116,34 @@ const PaperViewPage: React.FC = () => {
       setLocalTranslatedText(null);
     };
   }, [id, user, fetchPaper, clearCurrentPaper]);
+
+  // 自動エクスポートの実行
+  useEffect(() => {
+    const autoExportToObsidian = async () => {
+      if (!user || !currentPaper || exportAttempted || 
+          currentPaper.status !== 'completed') return;
+
+      try {
+        setExportAttempted(true);
+        
+        // Obsidian設定を取得
+        const settingsRef = doc(db, `users/${user.uid}/obsidian_settings/default`);
+        const settingsSnap = await getDoc(settingsRef);
+        
+        if (settingsSnap.exists()) {
+          const settings = convertToObsidianSettings(settingsSnap.data());
+          if (settings.auto_export && settings.vault_name) {
+            await exportToObsidian(currentPaper, currentPaperChapters, settings);
+          }
+        }
+      } catch (error) {
+        console.error('Error auto-exporting to Obsidian:', error);
+        setError('Obsidianへの自動保存に失敗しました');
+      }
+    };
+
+    autoExportToObsidian();
+  }, [user, currentPaper, currentPaperChapters, exportAttempted]);
   
   useEffect(() => {
     const fetchPaperResources = async () => {
@@ -150,22 +182,6 @@ const PaperViewPage: React.FC = () => {
     }
   }, [tabValue]);
   
-  useEffect(() => {
-    if (currentPaper?.metadata) {
-      const { title, authors, year } = currentPaper.metadata;
-      const authorName = authors && authors.length > 0 ? authors[0].name.split(' ')[0] : '';
-      let filename = '';
-      if (authorName) filename += `${authorName}_`;
-      if (title) filename += `${title}`;
-      if (year) filename += `_${year}`;
-      filename = filename.replace(/[<>:"/\\|?*]/g, '');
-      if (filename.length > 50) {
-        filename = filename.substring(0, 47) + '...';
-      }
-      setObsidianFilename(filename);
-    }
-  }, [currentPaper]);
-
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
@@ -218,22 +234,6 @@ const PaperViewPage: React.FC = () => {
     const fileName = currentPaper.metadata?.title || 'translation';
     MarkdownExporter.downloadMarkdown(markdown, fileName);
     handleCloseDownloadMenu();
-  };
-  
-  const handleOpenObsidianDialog = () => {
-    setObsidianDialogOpen(true);
-    handleCloseDownloadMenu();
-  };
-  
-  const handleCloseObsidianDialog = () => {
-    setObsidianDialogOpen(false);
-  };
-  
-  const handleExportToObsidian = () => {
-    if (!currentPaper || !obsidianFilename) return;
-    const markdown = MarkdownExporter.generateObsidianMarkdown(currentPaper, currentPaperChapters);
-    MarkdownExporter.downloadMarkdown(markdown, obsidianFilename);
-    handleCloseObsidianDialog();
   };
   
   const getSelectedChapterText = () => {
@@ -297,7 +297,7 @@ const PaperViewPage: React.FC = () => {
       </List>
     </Paper>
   );
-
+  
   const renderProgress = () => {
     if (!currentPaper) return null;
     
@@ -405,13 +405,6 @@ const PaperViewPage: React.FC = () => {
                 ダウンロード
               </Button>
               
-              {/* Obsidianエクスポートボタンを追加 */}
-              <ObsidianExport 
-                paper={currentPaper} 
-                translatedChapters={currentPaperChapters}
-                disabled={!currentPaper.translated_text && !localTranslatedText}
-              />
-              
               <Menu
                 anchorEl={downloadMenuAnchor}
                 open={Boolean(downloadMenuAnchor)}
@@ -428,7 +421,7 @@ const PaperViewPage: React.FC = () => {
               </Menu>
             </>
           )}
-        </Box>
+          </Box>
         </Paper>
         
         {error && (
@@ -498,8 +491,7 @@ const PaperViewPage: React.FC = () => {
                   </Box>
                 </Drawer>
                 
-                <Box sx={{ flex: 1, height: '100%' }}
-                >
+                <Box sx={{ flex: 1, height: '100%' }}>
                   {pdfUrl && (
                     <SplitView
                       pdfUrl={pdfUrl}
@@ -614,35 +606,6 @@ const PaperViewPage: React.FC = () => {
           </TabPanel>
         </Box>
       </Box>
-      
-      <Dialog open={obsidianDialogOpen} onClose={handleCloseObsidianDialog}>
-        <DialogTitle>Obsidian形式でエクスポート</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            ファイル名を入力してください。Obsidianフロントマター形式でMarkdownファイルを生成します。
-          </DialogContentText>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="ファイル名"
-            fullWidth
-            variant="outlined"
-            value={obsidianFilename}
-            onChange={(e) => setObsidianFilename(e.target.value)}
-            helperText="拡張子(.md)は自動的に追加されます"
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseObsidianDialog}>キャンセル</Button>
-          <Button 
-            onClick={handleExportToObsidian} 
-            variant="contained" 
-            disabled={!obsidianFilename}
-          >
-            エクスポート
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Container>
   );
 };
