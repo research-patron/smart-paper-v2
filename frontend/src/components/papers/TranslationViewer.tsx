@@ -252,11 +252,14 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
       {/* コントロールバー */}
       <Paper
         elevation={1}
+        square
         sx={{
           p: 1,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          borderBottom: 1,
+          borderColor: 'divider'
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -309,7 +312,7 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
         sx={{
           flex: 1,
           overflow: 'auto',
-          p: 3,
+          p: 4,
           bgcolor: 'background.paper',
           fontSize: `${fontSize}px`,
           lineHeight: 1.6,

@@ -54,7 +54,6 @@ import {
   Paper as PaperType
 } from '../api/papers';
 
-// タブパネルコンポーネント
 interface TabPanelProps {
   children?: React.ReactNode;
   index: number;
@@ -72,7 +71,7 @@ const TabPanel: React.FC<TabPanelProps> = ({ children, value, index, ...other })
       style={{ height: '100%' }}
     >
       {value === index && (
-        <Box sx={{ p: 3, height: '100%' }}>
+        <Box sx={{ p: { xs: 0, sm: '0 0 24px 0' }, height: '100%' }}>
           {children}
         </Box>
       )}
@@ -94,41 +93,29 @@ const PaperViewPage: React.FC = () => {
   } = usePaperStore();
   
   const [tabValue, setTabValue] = useState(0);
-  // 選択された章番号
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
-  // PDFの署名付きURL
   const [pdfUrl, setPdfUrl] = useState<string>("");
-  // ローカルに保存された翻訳テキスト（Storageから取得した場合）
   const [localTranslatedText, setLocalTranslatedText] = useState<string | null>(null);
-  // ダウンロードメニュー
   const [downloadMenuAnchor, setDownloadMenuAnchor] = useState<null | HTMLElement>(null);
-  // Obsidianエクスポートダイアログ
   const [obsidianDialogOpen, setObsidianDialogOpen] = useState(false);
   const [obsidianFilename, setObsidianFilename] = useState('');
-  // 目次ドロワーの表示状態
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // エラー状態
   const [error, setError] = useState<string | null>(null);
   
-  // 論文データを取得
   useEffect(() => {
     if (id && user) {
       fetchPaper(id);
     }
-    
-    // クリーンアップ
     return () => {
       clearCurrentPaper();
-      setLocalTranslatedText(null); // ローカルステートもクリア
+      setLocalTranslatedText(null);
     };
   }, [id, user, fetchPaper, clearCurrentPaper]);
   
-  // PDFのURLを設定
   useEffect(() => {
     const fetchPaperResources = async () => {
       if (currentPaper && currentPaper.file_path) {
         try {
-          // getPaperPdfUrl 関数を使用してPDFの署名付きURLを取得
           const url = await getPaperPdfUrl(currentPaper);
           setPdfUrl(url);
         } catch (error) {
@@ -137,19 +124,15 @@ const PaperViewPage: React.FC = () => {
         }
       }
     };
-
     fetchPaperResources();
   }, [currentPaper]);
   
-  // 翻訳テキストの取得（大きなファイルの場合はStorageから取得する）
   useEffect(() => {
     const fetchTranslatedText = async () => {
       if (currentPaper && currentPaper.status === 'completed' && 
           !currentPaper.translated_text && currentPaper.translated_text_path) {
         try {
-          // Storageから翻訳テキストを取得
           const text = await getPaperTranslatedText(currentPaper);
-          // ローカルステートを更新
           setLocalTranslatedText(text);
         } catch (error) {
           console.error('Error fetching translated text:', error);
@@ -157,180 +140,125 @@ const PaperViewPage: React.FC = () => {
         }
       }
     };
-
     fetchTranslatedText();
   }, [currentPaper]);
   
-  // タブ切り替え時に目次の表示状態をリセット
   useEffect(() => {
-    // 翻訳タブ以外では目次を非表示に
     if (tabValue !== 0) {
       setDrawerOpen(false);
     }
   }, [tabValue]);
   
-  // デフォルトのObsidianファイル名を設定
   useEffect(() => {
     if (currentPaper?.metadata) {
       const { title, authors, year } = currentPaper.metadata;
       const authorName = authors && authors.length > 0 ? authors[0].name.split(' ')[0] : '';
-      
       let filename = '';
       if (authorName) filename += `${authorName}_`;
       if (title) filename += `${title}`;
       if (year) filename += `_${year}`;
-      
-      // ファイル名に使えない文字を除去
       filename = filename.replace(/[<>:"/\\|?*]/g, '');
-      // 長すぎる場合は切り詰め
       if (filename.length > 50) {
         filename = filename.substring(0, 47) + '...';
       }
-      
       setObsidianFilename(filename);
     }
   }, [currentPaper]);
-  
-  // タブ切り替え処理
+
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
   
-  // 章の選択処理
   const handleChapterSelect = (chapterNumber: number) => {
     setSelectedChapter(chapterNumber);
-    // 選択後はドロワーを閉じる
     setDrawerOpen(false);
   };
   
-  // 目次ドロワーの切り替え
   const toggleDrawer = () => {
     setDrawerOpen(!drawerOpen);
   };
   
-  // 目次をリセット（全文表示）
   const resetChapter = () => {
     setSelectedChapter(null);
     setDrawerOpen(false);
   };
   
-  // ダウンロードメニューを開く
   const handleOpenDownloadMenu = (event: React.MouseEvent<HTMLElement>) => {
     setDownloadMenuAnchor(event.currentTarget);
   };
   
-  // ダウンロードメニューを閉じる
   const handleCloseDownloadMenu = () => {
     setDownloadMenuAnchor(null);
   };
   
-  // プレーンテキストをダウンロード
   const handleDownloadPlainText = () => {
     if (!currentPaper) return;
-    
     let text = currentPaper.translated_text || localTranslatedText;
-    
     if (!text) {
       setError('翻訳テキストがありません');
       return;
     }
-    
     const fileName = `${currentPaper.metadata?.title || 'translation'}.txt`;
     const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
-    
     const a = document.createElement('a');
     a.href = url;
     a.download = fileName;
     document.body.appendChild(a);
     a.click();
-    
     URL.revokeObjectURL(url);
     document.body.removeChild(a);
     handleCloseDownloadMenu();
   };
   
-  // 標準Markdownをダウンロード
   const handleDownloadMarkdown = () => {
     if (!currentPaper) return;
-    
     const markdown = MarkdownExporter.generateFullMarkdown(currentPaper, currentPaperChapters);
     const fileName = currentPaper.metadata?.title || 'translation';
-    
     MarkdownExporter.downloadMarkdown(markdown, fileName);
     handleCloseDownloadMenu();
   };
   
-  // Obsidianダイアログを開く
   const handleOpenObsidianDialog = () => {
     setObsidianDialogOpen(true);
     handleCloseDownloadMenu();
   };
   
-  // Obsidianダイアログを閉じる
   const handleCloseObsidianDialog = () => {
     setObsidianDialogOpen(false);
   };
   
-  // Obsidian形式でダウンロード
   const handleExportToObsidian = () => {
     if (!currentPaper || !obsidianFilename) return;
-    
     const markdown = MarkdownExporter.generateObsidianMarkdown(currentPaper, currentPaperChapters);
     MarkdownExporter.downloadMarkdown(markdown, obsidianFilename);
-    
     handleCloseObsidianDialog();
   };
   
-  // 選択された章の翻訳テキストを取得
   const getSelectedChapterText = () => {
-    if (!currentPaper) {
-      return null;
-    }
-
-    // ローカルに保存された翻訳テキストがあればそれを優先
-    if (localTranslatedText && !selectedChapter) {
-      return localTranslatedText;
-    }
+    if (!currentPaper) return null;
+    if (localTranslatedText && !selectedChapter) return localTranslatedText;
+    if (!selectedChapter) return currentPaper?.translated_text;
     
-    if (!selectedChapter) {
-      return currentPaper?.translated_text; // 全文を表示
-    }
-    
-    // 特定の章を表示する場合は、その章のデータを探す
     const chapter = currentPaperChapters.find(c => c.chapter_number === selectedChapter);
+    if (chapter && chapter.translated_text) return chapter.translated_text;
     
-    // 章が見つかった場合、その翻訳を表示
-    if (chapter && chapter.translated_text) {
-      return chapter.translated_text;
-    }
-    
-    // 章が見つからないか翻訳がない場合は、全体の翻訳から推定
     if (currentPaper?.translated_text || localTranslatedText) {
-      const fullText = currentPaper?.translated_text || localTranslatedText;
-      
-      // 強引だが章タイトルなどをもとに該当箇所を探す方法も検討できる
-      // 今回は単純に全体を返す
-      return fullText;
+      return currentPaper?.translated_text || localTranslatedText;
     }
-    
     return null;
   };
   
-  // 選択された章の情報を取得
   const getSelectedChapterInfo = () => {
     if (!selectedChapter) return undefined;
-    
     const chapter = currentPaperChapters.find(c => c.chapter_number === selectedChapter);
     if (!chapter) return undefined;
-    
     return {
       title: chapter.title,
       chapter_number: chapter.chapter_number
     };
   };
   
-  // 目次コンポーネント
   const TableOfContents = () => (
     <Paper 
       sx={{ 
@@ -368,44 +296,10 @@ const PaperViewPage: React.FC = () => {
       </List>
     </Paper>
   );
-  
-  // ローディング表示
-  if (currentPaperLoading) {
-    return (
-      <Container maxWidth="lg">
-        <Box sx={{ my: 4, textAlign: 'center' }}>
-          <CircularProgress />
-          <Typography sx={{ mt: 2 }}>論文情報を読み込み中...</Typography>
-        </Box>
-      </Container>
-    );
-  }
-  
-  // エラー表示
-  if (currentPaperError || !currentPaper) {
-    return (
-      <Container maxWidth="lg">
-        <Box sx={{ my: 4 }}>
-          <Button 
-            startIcon={<ArrowBackIcon />} 
-            onClick={() => navigate('/')}
-            sx={{ mb: 2 }}
-          >
-            マイ論文に戻る
-          </Button>
-          
-          <ErrorMessage 
-            title="論文の読み込みに失敗しました"
-            message={currentPaperError || "論文が見つかりません"}
-            onRetry={id ? () => fetchPaper(id) : undefined}
-          />
-        </Box>
-      </Container>
-    );
-  }
-  
-  // 進捗表示
+
   const renderProgress = () => {
+    if (!currentPaper) return null;
+    
     if (currentPaper.status === 'completed') {
       return <Chip label="翻訳完了" color="success" />;
     } else if (currentPaper.status === 'error') {
@@ -413,7 +307,6 @@ const PaperViewPage: React.FC = () => {
     } else {
       let progress = currentPaper.progress || 0;
       let statusText = '';
-      
       switch (currentPaper.status) {
         case 'pending':
           statusText = '処理を準備中...';
@@ -425,7 +318,6 @@ const PaperViewPage: React.FC = () => {
           statusText = `翻訳中... (${progress}%)`;
           break;
       }
-      
       return (
         <Box sx={{ width: '100%', mb: 2 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
@@ -438,9 +330,41 @@ const PaperViewPage: React.FC = () => {
     }
   };
   
+  if (currentPaperLoading) {
+    return (
+      <Container maxWidth={false} sx={{ px: { xs: 1, sm: 2 } }}>
+        <Box sx={{ my: 4, textAlign: 'center' }}>
+          <CircularProgress />
+          <Typography sx={{ mt: 2 }}>論文情報を読み込み中...</Typography>
+        </Box>
+      </Container>
+    );
+  }
+  
+  if (currentPaperError || !currentPaper) {
+    return (
+      <Container maxWidth={false} sx={{ px: { xs: 1, sm: 2 } }}>
+        <Box sx={{ my: 4 }}>
+          <Button 
+            startIcon={<ArrowBackIcon />} 
+            onClick={() => navigate('/')}
+            sx={{ mb: 2 }}
+          >
+            マイ論文に戻る
+          </Button>
+          <ErrorMessage 
+            title="論文の読み込みに失敗しました"
+            message={currentPaperError || "論文が見つかりません"}
+            onRetry={id ? () => fetchPaper(id) : undefined}
+          />
+        </Box>
+      </Container>
+    );
+  }
+  
   return (
-    <Container maxWidth="lg">
-      <Box sx={{ my: 2 }}>
+    <Container maxWidth={false} sx={{ px: { xs: 1, sm: 2 } }}>
+      <Box sx={{ my: 1 }}>
         <Button 
           startIcon={<ArrowBackIcon />} 
           onClick={() => navigate('/')}
@@ -525,7 +449,6 @@ const PaperViewPage: React.FC = () => {
             <Tab icon={<InfoIcon />} label="メタデータ" id="paper-tab-2" />
           </Tabs>
           
-          {/* 目次トグルボタン - 翻訳タブがアクティブな場合のみ表示 */}
           {tabValue === 0 && currentPaper.chapters && currentPaper.chapters.length > 0 && (
             <Box sx={{ display: 'flex', alignItems: 'center' }}>
               <Button
@@ -554,7 +477,6 @@ const PaperViewPage: React.FC = () => {
               </Box>
             ) : (
               <Box sx={{ height: '100%', display: 'flex' }}>
-                {/* 統一された目次ドロワー - すべての画面サイズで同じ挙動に */}
                 <Drawer
                   anchor="left"
                   open={drawerOpen}
@@ -572,7 +494,6 @@ const PaperViewPage: React.FC = () => {
                   </Box>
                 </Drawer>
                 
-                {/* メインコンテンツ - ドロワーの状態に関わらず安定したレイアウト */}
                 <Box sx={{ flex: 1, height: '100%' }}
                 >
                   {pdfUrl && (
@@ -690,7 +611,6 @@ const PaperViewPage: React.FC = () => {
         </Box>
       </Box>
       
-      {/* Obsidianエクスポートダイアログ */}
       <Dialog open={obsidianDialogOpen} onClose={handleCloseObsidianDialog}>
         <DialogTitle>Obsidian形式でエクスポート</DialogTitle>
         <DialogContent>

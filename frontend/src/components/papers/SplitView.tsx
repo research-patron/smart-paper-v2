@@ -210,11 +210,11 @@ const SplitView: React.FC<SplitViewProps> = ({
       <Paper
         sx={{
           position: 'absolute',
-          top: 10,
-          right: 10,
+          top: 4,
+          right: 4,
           zIndex: 10,
-          py: 0.5,
-          px: 1,
+          py: 0.25,
+          px: 0.5,
           display: 'flex',
           alignItems: 'center',
           gap: 0.5,
