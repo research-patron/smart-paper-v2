@@ -46,7 +46,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
   const [pageNumber, setPageNumber] = useState<number>(1);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [scale, setScale] = useState<number>(1.0);
+  const [scale, setScale] = useState<number>(1.4);
   const [fullscreen, setFullscreen] = useState<boolean>(false);
   
   // PDFのロード完了時
@@ -180,13 +180,14 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
       {/* コントロールバー */}
       <Paper
         elevation={1}
+        square
         sx={{
           p: 1,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          borderTopLeftRadius: fullscreen ? 0 : undefined,
-          borderTopRightRadius: fullscreen ? 0 : undefined,
+          borderBottom: 1,
+          borderColor: 'divider'
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -251,11 +252,12 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
         sx={{
           flex: 1,
           overflow: 'auto',
-          backgroundColor: '#f5f5f5',
+          overflowX: 'hidden',
+          backgroundColor: 'background.paper',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'flex-start',
-          p: 2,
+          p: 0.5,
         }}
       >
         {loading && (
