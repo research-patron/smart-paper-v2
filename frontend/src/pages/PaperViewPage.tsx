@@ -49,6 +49,8 @@ import {
   isVaultSelected,
   getVault
 } from '../api/obsidian';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../api/firebase';
 import { 
   getPaperPdfUrl, 
   getPaperTranslatedText, 
@@ -141,27 +143,64 @@ const PaperViewPage: React.FC = () => {
     };
   }, [id, user, fetchPaper, clearCurrentPaper]);
   
-  // Obsidian設定の読み込み（ローカルストレージから）
+  // Obsidian設定の読み込み（Firestoreから）
   useEffect(() => {
-    const loadObsidianSettings = () => {
+    const loadObsidianSettings = async () => {
+      if (!user) return;
+      
       try {
-        // ローカルストレージからObsidian設定を取得
-        const savedSettings = localStorage.getItem('obsidian_settings');
+        // まずFirestoreからユーザーの設定を取得
+        const settingsRef = doc(db, `users/${user.uid}/obsidian_settings/default`);
+        const settingsSnap = await getDoc(settingsRef);
         
-        if (savedSettings) {
-          const parsedSettings = JSON.parse(savedSettings);
-          // 日付文字列をDateオブジェクトに変換
-          if (parsedSettings.created_at) {
-            parsedSettings.created_at = new Date(parsedSettings.created_at);
-          }
-          if (parsedSettings.updated_at) {
-            parsedSettings.updated_at = new Date(parsedSettings.updated_at);
-          }
+        if (settingsSnap.exists()) {
+          const data = settingsSnap.data();
+          // Timestampを日付に変換し、ObsidianSettings型に合わせる
+          const settings: ObsidianSettings = {
+            vault_dir: data.vault_dir || '',
+            vault_name: data.vault_name || '',
+            folder_path: data.folder_path || 'smart-paper-v2/' + new Date().toISOString().split('T')[0],
+            file_name_format: data.file_name_format || '{authors}_{title}_{year}',
+            file_type: data.file_type || 'md',
+            open_after_export: data.open_after_export !== false,
+            include_pdf: data.include_pdf !== false,
+            create_embed_folder: data.create_embed_folder !== false,
+            auto_export: data.auto_export !== false,
+            created_at: data.created_at?.toDate() || new Date(),
+            updated_at: data.updated_at?.toDate() || new Date()
+          };
           
-          setObsidianSettings(parsedSettings);
+          setObsidianSettings(settings);
+          console.log('Firestoreから設定を読み込みました:', settings);
+          
+          // 既存の動作との互換性のためにローカルストレージにも保存
+          const localStorageSettings = {
+            ...settings,
+            created_at: settings.created_at.toISOString(),
+            updated_at: settings.updated_at.toISOString()
+          };
+          localStorage.setItem('obsidian_settings', JSON.stringify(localStorageSettings));
         } else {
-          // デフォルト設定を使用
-          setObsidianSettings(DEFAULT_OBSIDIAN_SETTINGS);
+          // Firestoreに設定がない場合はローカルストレージをチェック
+          const savedSettings = localStorage.getItem('obsidian_settings');
+          
+          if (savedSettings) {
+            const parsedSettings = JSON.parse(savedSettings);
+            // 日付文字列をDateオブジェクトに変換
+            if (parsedSettings.created_at) {
+              parsedSettings.created_at = new Date(parsedSettings.created_at);
+            }
+            if (parsedSettings.updated_at) {
+              parsedSettings.updated_at = new Date(parsedSettings.updated_at);
+            }
+            
+            setObsidianSettings(parsedSettings);
+            console.log('ローカルストレージから設定を読み込みました:', parsedSettings);
+          } else {
+            // デフォルト設定を使用
+            setObsidianSettings(DEFAULT_OBSIDIAN_SETTINGS);
+            console.log('デフォルト設定を使用します');
+          }
         }
       } catch (error) {
         console.error('Error loading Obsidian settings:', error);
@@ -171,7 +210,7 @@ const PaperViewPage: React.FC = () => {
     };
     
     loadObsidianSettings();
-  }, []);
+  }, [user]);
   
   // PDFのキャッシュ状態を追跡するステート
   const [pdfCached, setPdfCached] = useState<boolean>(false);
@@ -193,6 +232,18 @@ const PaperViewPage: React.FC = () => {
       // 設定がある場合のみ自動エクスポートを試みる
       if (!obsidianSettings) return;
       
+      // 自動保存が有効になっているかチェック
+      if (!obsidianSettings.auto_export) {
+        console.log('自動保存が無効化されているため、自動エクスポートをスキップします。');
+        return;
+      }
+      
+      // Vault設定が保存されているかチェック
+      if (!obsidianSettings.vault_name || !obsidianSettings.vault_dir) {
+        console.log('Obsidian Vaultが設定されていないため、自動エクスポートをスキップします。手動で「Obsidianに保存」ボタンをクリックしてください。');
+        return;
+      }
+      
       try {
         console.log('自動エクスポートを開始します...');
         setExportAttempted(true);
@@ -206,6 +257,10 @@ const PaperViewPage: React.FC = () => {
         
         if (!vaultHandle) {
           console.log('Obsidian Vaultが取得できないため、自動エクスポートをスキップします。');
+          // 権限がない場合はユーザーに通知
+          setSnackbarMessage('Obsidian Vaultへのアクセス権限がありません。「Obsidianに保存」ボタンをクリックして権限を付与してください。');
+          setSnackbarOpen(true);
+          setObsidianExportStatus('error');
           return;
         }
         
