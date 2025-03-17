@@ -31,10 +31,13 @@ import SecurityIcon from '@mui/icons-material/Security';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import LogoutIcon from '@mui/icons-material/Logout';
 import BookIcon from '@mui/icons-material/Book';
+import StarIcon from '@mui/icons-material/Star';
+import PaymentIcon from '@mui/icons-material/Payment';
 import { useAuthStore } from '../store/authStore';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../api/firebase';
 import ObsidianSettings from '../components/obsidian/Settings';
+import SubscriptionInfoCard from '../components/subscription/SubscriptionInfoCard';
 
 // タブパネルの型定義
 interface TabPanelProps {
@@ -65,13 +68,20 @@ const ProfilePage = () => {
   const navigate = useNavigate();
   
   const [editMode, setEditMode] = useState(false);
-  const [userName, setUserName] = useState(userData?.name || user?.displayName || '');
+  const [userName, setUserName] = useState(user?.displayName || '');
   const [updateLoading, setUpdateLoading] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateSuccess, setUpdateSuccess] = useState(false);
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
   const [tabValue, setTabValue] = useState(0);
   
+  // userDataが変更されたらuserNameも更新
+  useEffect(() => {
+    if (userData) {
+      setUserName(userData.name || user?.displayName || '');
+    }
+  }, [userData, user]);
+
   // タブの切り替え
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -117,9 +127,7 @@ const ProfilePage = () => {
   
   // サブスクリプションの表示テキストを取得
   const getSubscriptionText = () => {
-    if (!userData) return 'データがありません';
-    
-    switch (userData.subscription_status) {
+    switch (effectiveUserData.subscription_status) {
       case 'paid':
         return '有料会員';
       case 'free':
@@ -131,9 +139,21 @@ const ProfilePage = () => {
   
   // サブスクリプションの期限を表示
   const getSubscriptionEndDate = () => {
-    if (!userData?.subscription_end_date) return '無期限';
+    if (!effectiveUserData.subscription_end_date) return '無期限';
     
-    const date = userData.subscription_end_date.toDate();
+    // Firestoreの Timestamp 型を適切に処理
+    let date;
+    if (typeof effectiveUserData.subscription_end_date.toDate === 'function') {
+      // Firestoreの Timestamp オブジェクトの場合
+      date = effectiveUserData.subscription_end_date.toDate();
+    } else if (effectiveUserData.subscription_end_date instanceof Date) {
+      // JavaScript の Date オブジェクトの場合
+      date = effectiveUserData.subscription_end_date;
+    } else {
+      // 文字列や数値の場合
+      date = new Date(effectiveUserData.subscription_end_date as any);
+    }
+      
     return date.toLocaleDateString('ja-JP', {
       year: 'numeric',
       month: 'long',
@@ -141,7 +161,7 @@ const ProfilePage = () => {
     });
   };
   
-  if (loading || !user) {
+  if (loading) {
     return (
       <Container maxWidth="md">
         <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
@@ -150,6 +170,34 @@ const ProfilePage = () => {
       </Container>
     );
   }
+  
+  if (!user) {
+    return (
+      <Container maxWidth="md">
+        <Box sx={{ my: 4, textAlign: 'center' }}>
+          <Typography variant="h5" gutterBottom>ログインが必要です</Typography>
+          <Typography paragraph>このページにアクセスするにはログインが必要です。</Typography>
+          <Button 
+            variant="contained" 
+            color="primary"
+            onClick={() => navigate('/login')}
+          >
+            ログインページへ
+          </Button>
+        </Box>
+      </Container>
+    );
+  }
+  
+  // userDataがない場合は、デフォルト値を使用
+  const effectiveUserData = userData || {
+    subscription_status: 'free',
+    subscription_end_date: null,
+    name: user.displayName || user.email?.split('@')[0] || 'ユーザー',
+    email: user.email,
+    created_at: null,
+    updated_at: null
+  };
   
   return (
     <Container maxWidth="md">
@@ -173,12 +221,12 @@ const ProfilePage = () => {
             
             <Box>
               <Typography variant="h4" gutterBottom>
-                {userData?.name || user.displayName || user.email?.split('@')[0]}
+                {effectiveUserData.name || user.displayName || user.email?.split('@')[0]}
               </Typography>
               
               <Chip 
                 label={getSubscriptionText()} 
-                color={userData?.subscription_status === 'paid' ? 'primary' : 'default'}
+                color={effectiveUserData.subscription_status === 'paid' ? 'primary' : 'default'}
                 variant="outlined" 
                 sx={{ mr: 1 }}
               />
@@ -209,7 +257,12 @@ const ProfilePage = () => {
                 id="profile-tab-2"
                 icon={<BookIcon sx={{ fontSize: 18 }} />}
                 iconPosition="end"
-                onClick={(e) => e.stopPropagation()} // Prevent any default navigation
+              />
+              <Tab
+                label="サブスクリプション"
+                id="profile-tab-3"
+                icon={<PaymentIcon sx={{ fontSize: 18 }} />}
+                iconPosition="end"
               />
             </Tabs>
           </Box>
@@ -276,7 +329,7 @@ const ProfilePage = () => {
                       </Typography>
                       <Box sx={{ display: 'flex', alignItems: 'center' }}>
                         <Typography variant="body1" sx={{ flex: 1 }}>
-                          {userData?.name || user.displayName || user.email?.split('@')[0]}
+                          {effectiveUserData.name || user.displayName || user.email?.split('@')[0]}
                         </Typography>
                         <Button
                           variant="outlined"
@@ -294,8 +347,12 @@ const ProfilePage = () => {
                     アカウント作成日
                   </Typography>
                   <Typography variant="body1">
-                    {userData?.created_at ? 
-                      userData.created_at.toDate().toLocaleDateString('ja-JP') : 
+                    {effectiveUserData.created_at ? 
+                      (typeof effectiveUserData.created_at.toDate === 'function' 
+                        ? effectiveUserData.created_at.toDate().toLocaleDateString('ja-JP') 
+                        : effectiveUserData.created_at instanceof Date
+                          ? effectiveUserData.created_at.toLocaleDateString('ja-JP')
+                          : new Date(effectiveUserData.created_at as any).toLocaleDateString('ja-JP')) : 
                       '不明'}
                   </Typography>
                 </Paper>
@@ -306,36 +363,7 @@ const ProfilePage = () => {
                   サブスクリプション情報
                 </Typography>
                 
-                <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    現在のプラン
-                  </Typography>
-                  <Typography variant="body1" sx={{ mb: 2 }}>
-                    {getSubscriptionText()}
-                  </Typography>
-                  
-                  {userData?.subscription_status === 'paid' && (
-                    <>
-                      <Typography variant="subtitle2" color="text.secondary">
-                        有効期限
-                      </Typography>
-                      <Typography variant="body1" sx={{ mb: 2 }}>
-                        {getSubscriptionEndDate()}
-                      </Typography>
-                    </>
-                  )}
-                  
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    onClick={() => navigate('/subscription')}
-                    fullWidth
-                  >
-                    {userData?.subscription_status === 'paid' ? 
-                      'プランを管理する' : 
-                      'プランをアップグレードする'}
-                  </Button>
-                </Paper>
+                <SubscriptionInfoCard userData={effectiveUserData} />
               </Grid>
             </Grid>
           </TabPanel>
@@ -372,6 +400,97 @@ const ProfilePage = () => {
           {/* Obsidian連携タブ */}
           <TabPanel value={tabValue} index={2}>
             <ObsidianSettings onSaved={() => setUpdateSuccess(true)} />
+          </TabPanel>
+          
+          {/* サブスクリプションタブ（新規追加） */}
+          <TabPanel value={tabValue} index={3}>
+            <Typography variant="h6" gutterBottom>
+              サブスクリプション管理
+            </Typography>
+            
+            <Box sx={{ mb: 4 }}>
+              <SubscriptionInfoCard userData={effectiveUserData} />
+              
+              {effectiveUserData.subscription_status === 'paid' && (
+                <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+                  <Typography variant="h6" gutterBottom>
+                    利用状況
+                  </Typography>
+                  
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                      今月の翻訳数
+                    </Typography>
+                    <Typography variant="h5">
+                      無制限
+                    </Typography>
+                  </Box>
+                  
+                  <Box>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                      保存された論文
+                    </Typography>
+                    <Typography variant="h5">
+                      12 / 無制限
+                    </Typography>
+                  </Box>
+                </Paper>
+              )}
+              
+              <Button
+                variant="contained"
+                color="primary"
+                fullWidth
+                onClick={() => navigate('/subscription')}
+                sx={{ mt: 3 }}
+              >
+                サブスクリプション詳細ページへ
+              </Button>
+            </Box>
+            
+            <Paper variant="outlined" sx={{ p: 2, mt: 3 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <StarIcon color="primary" sx={{ mr: 1 }} />
+                <Typography variant="h6">
+                  プレミアム特典
+                </Typography>
+              </Box>
+              
+              <Typography variant="body2" paragraph>
+                プレミアムプランでは以下の特典が利用できます：
+              </Typography>
+              
+              <ul>
+                <li>
+                  <Typography variant="body2">
+                    <strong>翻訳数無制限：</strong> 1日あたりの翻訳制限がなくなります
+                  </Typography>
+                </li>
+                <li>
+                  <Typography variant="body2">
+                    <strong>保存期間延長：</strong> 翻訳済み論文を1ヶ月間保存
+                  </Typography>
+                </li>
+                <li>
+                  <Typography variant="body2">
+                    <strong>関連論文推薦数無制限：</strong> 制限なく関連論文を表示
+                  </Typography>
+                </li>
+              </ul>
+              
+              {effectiveUserData.subscription_status !== 'paid' && (
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  fullWidth
+                  onClick={() => navigate('/subscription')}
+                  sx={{ mt: 2 }}
+                  startIcon={<StarIcon />}
+                >
+                  プレミアムにアップグレード
+                </Button>
+              )}
+            </Paper>
           </TabPanel>
         </Paper>
       </Box>
