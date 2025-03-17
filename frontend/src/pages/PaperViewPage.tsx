@@ -38,6 +38,7 @@ import { useAuthStore } from '../store/authStore';
 import ErrorMessage from '../components/common/ErrorMessage';
 import SplitView from '../components/papers/SplitView';
 import Summary from '../components/papers/Summary';
+import ZoteroExport from '../components/zotero/Export';
 import { MarkdownExporter } from '../utils/MarkdownExporter';
 import { 
   exportToObsidian, 
@@ -726,6 +727,11 @@ const PaperViewPage: React.FC = () => {
                   )}
                 </Button>
               )}
+              
+              {/* Zoteroエクスポートボタン */}
+              {currentPaper.metadata?.doi && (
+                <ZoteroExport paper={currentPaper} />
+              )}
             </>
           )}
           </Box>
@@ -873,7 +879,19 @@ const PaperViewPage: React.FC = () => {
                   <Divider component="li" />
                   
                   <ListItem>
-                    <ListItemText primary="DOI" secondary={currentPaper.metadata.doi || '不明'} />
+                    <ListItemText 
+                      primary="DOI" 
+                      secondary={
+                        <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
+                          <Typography variant="body2" sx={{ mr: 2 }}>
+                            {currentPaper.metadata.doi || '不明'}
+                          </Typography>
+                          {currentPaper.metadata.doi && (
+                            <ZoteroExport paper={currentPaper} />
+                          )}
+                        </Box>
+                      } 
+                    />
                   </ListItem>
                   <Divider component="li" />
                   

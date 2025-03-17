@@ -118,7 +118,7 @@ const ZoteroSettings: React.FC = () => {
           <AlertTitle>Zotero Connectorが見つかりません</AlertTitle>
           <Typography variant="body2" paragraph>
             Zotero ConnectorはブラウザからZoteroに論文を簡単に追加するためのブラウザ拡張機能です。
-            Smart Paper v2では、Zotero Connectorを使用してDOI情報から論文をZoteroに追加します。
+            すでにインストールしている場合は、Zoteroアプリを起動してからブラウザを再起動すると検出される場合があります。
           </Typography>
           <Button
             variant="outlined"
