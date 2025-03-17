@@ -79,7 +79,7 @@ export class MarkdownExporter {
     }
     
     if (metadata.keywords && metadata.keywords.length > 0) {
-      header += `keywords: [${metadata.keywords.map(k => `"${k.replace(/"/g, '\\"')}"`).join(', ')}]\n`;
+      header += `tags: [${metadata.keywords.map(k => `"${k.replace(/"/g, '\\"')}"`).join(', ')}]\n`;
     }
     
     // プロパティセクションを閉じる

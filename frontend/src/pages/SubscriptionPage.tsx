@@ -54,6 +54,7 @@ const SubscriptionPage = () => {
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
 
   // userDataがない場合は、無料プランとして扱う
   // 必要な型定義の追加
@@ -81,20 +82,50 @@ const SubscriptionPage = () => {
   const steps = ['プラン選択', '支払い情報', '完了'];
   
   useEffect(() => {
-    // 未認証ユーザーはログインページにリダイレクト
-    if (!user) {
+    // ステップが支払いか完了の場合に未認証ユーザーはログインページにリダイレクト
+    if (activeStep > 0 && !user) {
       navigate('/login', { state: { returnUrl: '/subscription' } });
     }
-  }, [user, navigate]);
+  }, [user, navigate, activeStep]);
   
-  const handleSelectPlan = (planId: string) => {
+  const handleSelectPlan = (planId: string, requiresPayment: boolean) => {
     setSelectedPlan(planId);
-    // 無料プランの場合は確認ダイアログを表示
+    
+    // 未ログインユーザーが無料会員を選択した場合、ログインを促す
+    if (!user && planId === 'free') {
+      setRegisterDialogOpen(true);
+      return;
+    }
+    
+    // 未ログインユーザーがプレミアムプランを選択した場合、ログインを促す
+    if (!user && requiresPayment) {
+      setRegisterDialogOpen(true);
+      return;
+    }
+    
+    // 有料会員が無料プランを選択した場合、解約確認ダイアログを表示
     if (planId === 'free' && isPaid) {
       setCancelDialogOpen(true);
-    } else {
-      // 有料プランの場合は支払いステップへ
+      return;
+    } 
+    
+    // 有料プランが選択された場合、支払い画面に進む
+    if (requiresPayment) {
       setActiveStep(1);
+      return;
+    }
+    
+    // 非会員または無料会員がプランを選択した場合
+    if (planId === 'free') {
+      if (!userData || userData.subscription_status === 'none') {
+        // 非会員→無料会員の場合、すでにログイン済みなら直接完了画面へ
+        setActiveStep(2);
+        setPaymentSuccess(true);
+      } else {
+        // すでに無料会員ならメッセージだけ表示（または何もしない）
+        // すでにボタンがdisabledになっているはずなので、ここには来ないはず
+      }
+      return;
     }
   };
   
@@ -103,6 +134,12 @@ const SubscriptionPage = () => {
     // ダウングレード完了
     setActiveStep(2);
     setPaymentSuccess(true);
+  };
+  
+  const handleRegisterConfirm = () => {
+    setRegisterDialogOpen(false);
+    // ログインページにリダイレクト
+    navigate('/login', { state: { returnUrl: '/subscription' } });
   };
   
   const handlePaymentComplete = () => {
@@ -119,26 +156,6 @@ const SubscriptionPage = () => {
     navigate('/');
   };
   
-  // ユーザーが認証されていない場合はログインページにリダイレクト
-  if (!user) {
-    return (
-      <Container maxWidth="md">
-        <Box sx={{ my: 4, textAlign: 'center' }}>
-          <Typography>ログインが必要です。ログインページにリダイレクトします...</Typography>
-          <Box sx={{ mt: 2 }}>
-            <Button 
-              variant="contained" 
-              color="primary"
-              onClick={() => navigate('/login')}
-            >
-              ログインページへ
-            </Button>
-          </Box>
-        </Box>
-      </Container>
-    );
-  }
-  
   return (
     <Container maxWidth="md">
       <Box sx={{ my: 4 }}>
@@ -152,13 +169,17 @@ const SubscriptionPage = () => {
               ? subscriptionEnd.toLocaleDateString('ja-JP', {year: 'numeric', month: 'long', day: 'numeric'}) 
               : '無期限'}
           </Alert>
-        ) : (
+        ) : user ? (
           <Alert severity="info" sx={{ mb: 4 }}>
             現在、無料プランをご利用中です。機能をフル活用するにはプレミアムプランへのアップグレードをご検討ください。
           </Alert>
+        ) : (
+          <Alert severity="info" sx={{ mb: 4 }}>
+            非会員としてご利用中です。無料会員になるには会員登録が必要です。プレミアム機能を利用するには有料プランへのアップグレードをご検討ください。
+          </Alert>
         )}
         
-        {/* 現在のプラン情報 */}
+        {/* 現在のプラン情報 - 有料会員の場合のみ表示 */}
         {isPaid && (
           <Card variant="outlined" sx={{ mb: 4 }}>
             <CardContent>
@@ -263,7 +284,7 @@ const SubscriptionPage = () => {
             <Typography variant="h5" gutterBottom sx={{ mb: 3 }}>
               プラン選択
             </Typography>
-                          <Plans 
+            <Plans 
               onSelectPlan={handleSelectPlan}
               selectedPlan={selectedPlan || undefined}
             />
@@ -305,13 +326,15 @@ const SubscriptionPage = () => {
             
             <Typography variant="h5" gutterBottom>
               {selectedPlan === 'free' 
-                ? 'プランを変更しました'
+                ? (isPaid ? 'プランを変更しました' : '無料会員プランにアップグレードしました')
                 : 'プレミアムプランへのアップグレードが完了しました！'}
             </Typography>
             
             <Typography variant="body1" paragraph>
               {selectedPlan === 'free'
-                ? '無料プランに変更されました。サブスクリプションは現在の期間の終了時に終了します。'
+                ? (isPaid 
+                   ? '無料プランに変更されました。サブスクリプションは現在の期間の終了時に終了します。' 
+                   : '無料会員プランへアップグレードされました。より多くの機能をご利用いただけます。')
                 : 'おめでとうございます！すべての機能を無制限でご利用いただけるようになりました。'}
             </Typography>
             
@@ -369,6 +392,29 @@ const SubscriptionPage = () => {
             </Button>
             <Button onClick={handleConfirmCancel} color="error">
               解約する
+            </Button>
+          </DialogActions>
+        </Dialog>
+        
+        {/* 会員登録促進ダイアログ */}
+        <Dialog
+          open={registerDialogOpen}
+          TransitionComponent={Transition}
+          keepMounted
+          onClose={() => setRegisterDialogOpen(false)}
+        >
+          <DialogTitle>会員登録が必要です</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              このプランを利用するには会員登録が必要です。登録またはログインして続行しますか？
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setRegisterDialogOpen(false)}>
+              キャンセル
+            </Button>
+            <Button onClick={handleRegisterConfirm} color="primary">
+              登録/ログインへ進む
             </Button>
           </DialogActions>
         </Dialog>
