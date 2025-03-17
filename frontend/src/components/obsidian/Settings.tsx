@@ -272,6 +272,11 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
           Obsidianと連携すると、論文の翻訳後に自動的にObsidianに保存されます。
           自動保存を有効にすることで、「Obsidianへエクスポート」ボタンをクリックする必要がなくなります。
         </Typography>
+        <Typography variant="body2" sx={{ mt: 1 }}>
+          <strong>注意：</strong> ブラウザのセキュリティ制限により、ブラウザを再起動すると権限が失われます。
+          その場合は、一度「Obsidianに保存」ボタンをクリックして権限を再付与する必要があります。
+          その後の自動保存は同じブラウザセッション中であれば正常に機能します。
+        </Typography>
       </Alert>
       
       <Grid container spacing={3}>
