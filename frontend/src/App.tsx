@@ -22,18 +22,11 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import TermsPage from './pages/LegalPages/TermsPage';
 import PrivacyPage from './pages/LegalPages/PrivacyPage';
 import CommercePage from './pages/LegalPages/CommercePage';
+import SubscriptionPage from './pages/SubscriptionPage';
 
 // Firebase
 import { auth, db } from './api/firebase';
 import { useAuthStore } from './store/authStore';
-
-// サブスクリプションページの仮実装
-const SubscriptionPage = () => (
-  <Box sx={{ p: 4 }}>
-    <h1>サブスクリプションページ</h1>
-    <p>このページは現在開発中です。</p>
-  </Box>
-);
 
 // 認証が必要なルートのラッパーコンポーネント
 // 認証なしでもアクセス可能に変更（開発中のため）
@@ -162,7 +155,11 @@ function App() {
                   <ProfilePage />
                 </ProtectedRoute>
               } />
-              <Route path="/subscription" element={<SubscriptionPage />} />
+              <Route path="/subscription" element={
+                <ProtectedRoute>
+                  <SubscriptionPage />
+                </ProtectedRoute>
+              } />
               <Route path="/terms" element={<TermsPage />} />
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/commerce" element={<CommercePage />} />

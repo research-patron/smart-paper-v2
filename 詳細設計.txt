@@ -1,0 +1,1023 @@
+# 詳細設計書 (修正版)
+
+**0. Vertex AI (Gemini API) 連携設計**
+
+**0.1 コンテキストキャッシュ生成**
+
+-   **Python実装**:
+
+```python
+import vertexai
+import datetime
+from vertexai.generative_models import Part
+from vertexai.preview import caching
+
+def create_cached_content(pdf_gs_path: str, file_name: str) -> str:
+    """
+    PDFファイルからコンテキストキャッシュを生成する
+
+    Args:
+        pdf_gs_path: FirebaseのCloud Storage上のPDFファイルパス (gs://で始まる)
+        file_name: ファイル名
+
+    Returns:
+        str: キャッシュID
+    """
+    contents = [
+        Part.from_uri(
+            pdf_gs_path,
+            mime_type="application/pdf",
+        )
+    ]
+
+    # キャッシュIDを生成 (ファイル名 + タイムスタンプ)
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
+    cache_id = f"{file_name}_{timestamp}"
+
+    cached_content = caching.CachedContent.create(
+        model_name="gemini-1.5-flash-002",
+        contents=contents,
+        ttl=None,  # TTLは設定しない
+        display_name=cache_id  # キャッシュ名としてファイル名とタイムスタンプを使用
+    )
+
+    return cached_content.name
+
+def cleanup_cache(cache_id: str):
+    """
+    コンテキストキャッシュを削除する
+
+    Args:
+        cache_id: キャッシュID
+    """
+    cached_content = caching.CachedContent(cached_content_name=cache_id)
+    cached_content.delete()
+```
+
+**0.2 翻訳・要約・メタデータ抽出・章構成抽出処理**
+
+- **Python実装**:
+
+```python
+from vertexai.preview.generative_models import GenerativeModel
+from vertexai.preview import caching
+import json
+from google.api_core import exceptions
+#from google.api_core import retry # リトライしない
+import vertexai
+import logging
+
+# プロンプトファイルの読み込み
+def load_prompt(filename: str) -> str:
+    """
+    JSONファイルからプロンプトを読み込む
+
+    Args:
+        filename: プロンプトファイル名 (例: "translation_prompt.json")
+
+    Returns:
+        str: プロンプト文字列
+    """
+    with open(filename, "r", encoding="utf-8") as f:
+        prompt = json.load(f)
+    return prompt["prompt"]  # プロンプトはJSONの "prompt" キーに格納
+
+# 0.2 翻訳・要約・メタデータ抽出・章構成抽出処理
+
+# 使用するプロンプトファイルのバージョンを定数として定義
+TRANSLATION_PROMPT_FILE = "./prompts/translation_prompt_v1.json"
+SUMMARY_PROMPT_FILE = "./prompts/summary_prompt_v1.json"
+METADATA_AND_CHAPTER_PROMPT_FILE = "./prompts/metadata_and_chapter_prompt_v1.json" # 統合
+
+def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None) -> dict:
+    """
+    コンテキストキャッシュを使用して翻訳・要約・メタデータ抽出を行う
+
+    Args:
+        cache_id: コンテキストキャッシュID
+        operation: 処理内容 ('translate', 'summarize', 'extract_metadata_and_chapters')
+        chapter_info: 章情報（章番号、開始ページ、終了ページ）。translate, summarize の場合に必要。
+
+    Returns:
+        dict: 処理結果（JSON形式）
+    """
+    cached_content = caching.CachedContent(cached_content_name=cache_id)
+    model = GenerativeModel.from_cached_content(cached_content=cached_content)
+
+    # 処理内容に応じてプロンプトを選択
+    if operation == "translate":
+        prompt = load_prompt(TRANSLATION_PROMPT_FILE)
+        # プロンプトに章情報を追加
+        prompt += f"\n\nChapter Number: {chapter_info['chapter_number']}"
+        prompt += f"\nStart Page: {chapter_info['start_page']}"
+        prompt += f"\nEnd Page: {chapter_info['end_page']}"
+    elif operation == "summarize":
+        prompt = load_prompt(SUMMARY_PROMPT_FILE)
+        # プロンプトに章情報を追加
+        prompt += f"\n\nChapter Number: {chapter_info['chapter_number']}"
+        prompt += f"\nStart Page: {chapter_info['start_page']}"
+        prompt += f"\nEnd Page: {chapter_info['end_page']}"
+    elif operation == "extract_metadata_and_chapters":
+        prompt = load_prompt(METADATA_AND_CHAPTER_PROMPT_FILE) # 統合されたプロンプト
+    else:
+        raise ValueError(f"Invalid operation: {operation}")
+
+    response = generate_content_with_retry(model, prompt)
+
+    try:
+        result = json.loads(response.text)
+        #翻訳結果のHTMLをサニタイズ
+        if operation == "translate":
+            if 'chapters' in result: #チャプターで分割
+                for chapter in result["chapters"]:
+                    chapter["translated_text"] = sanitize_html(chapter["translated_text"])
+            else: #チャプターがない場合
+                result["translated_text"] = sanitize_html(result["translated_text"])
+        return result
+    except json.JSONDecodeError as e:
+        log_error("JSONDecodeError", "Invalid JSON response from Vertex AI", {"response_text": response.text})
+        raise
+
+```
+**0.3 エラーハンドリング**
+
+- **標準エラー出力**:
+```python
+import sys
+import json
+import traceback
+import logging
+import datetime
+
+def log_error(error_type: str, message: str, details: dict = None):
+    """
+    エラー情報を構造化ログとして標準エラー出力に出力
+
+    Args:
+        error_type: エラーの種類
+        message: エラーメッセージ
+        details: エラーの詳細情報（オプション）
+    """
+    # Cloud Logging で認識される形式でログを出力
+    logging.error(json.dumps({
+        "severity": "ERROR",  # Cloud Logging でエラーとして認識される
+        "error_type": error_type,
+        "message": message,
+        "timestamp": datetime.datetime.now().isoformat(),
+        "stack_trace": traceback.format_exc(),
+        "details": details,
+    }))
+```
+**0.4 Cloud Functions統合**
+
+- **Pythonスクリプト呼び出し (Cloud Tasks)**:
+```python
+# Cloud Functions (Python) - メイン関数
+
+import functions_framework
+from flask import jsonify, Request
+from google.cloud import firestore
+from google.cloud import storage
+from google.cloud import tasks_v2
+from google.protobuf import timestamp_pb2
+import datetime
+import json
+import os
+
+# 他のモジュールの関数
+from .process_pdf import (
+    create_cached_content,
+    process_with_cache,
+    cleanup_cache,
+    log_error
+)
+
+db = firestore.Client()
+storage_client = storage.Client()
+tasks_client = tasks_v2.CloudTasksClient()
+
+PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT")  # 環境変数からプロジェクトIDを取得
+LOCATION = "us-central1"  # Cloud Functions, Cloud Tasks のリージョン
+QUEUE = "translate-pdf-queue"  # Cloud Tasks キュー名
+CLOUD_FUNCTIONS_URL = f"https://{LOCATION}-{PROJECT_ID}.cloudfunctions.net"
+
+def create_task(payload: dict, task_name: str = None, delay_seconds: int = 0) -> str:
+    """Cloud Tasks キューにタスクを追加する
+
+    Args:
+        payload: タスクのペイロード
+        task_name: タスク名（ユニークである必要がある）
+        delay_seconds: タスクの実行を遅延させる秒数
+
+    Returns:
+        str: タスク名
+    """
+    parent = tasks_client.queue_path(PROJECT_ID, LOCATION, QUEUE)
+
+    task = {
+        "http_request": {
+            "http_method": tasks_v2.HttpMethod.POST,
+            "url": f"{CLOUD_FUNCTIONS_URL}/process_pdf_task",  # Cloud Functions (Python) の URL
+            "oidc_token": {
+                "service_account_email": os.environ.get("CLOUD_FUNCTIONS_SA"),  # 環境変数からサービスアカウントを取得
+            },
+            "headers": {
+                "Content-Type": "application/json",
+            },
+            "body": json.dumps(payload).encode(),
+        },
+        "dispatch_deadline": {"seconds": 9 * 60} # タイムアウト時間を設定
+    }
+
+    if task_name:
+        task["name"] = f"{parent}/tasks/{task_name}"
+
+    if delay_seconds > 0:
+        # タスクの実行を遅延させる時間を設定
+        execution_time = datetime.datetime.utcnow() + datetime.timedelta(seconds=delay_seconds)
+        timestamp = timestamp_pb2.Timestamp()
+        timestamp.FromDatetime(execution_time)
+        task["schedule_time"] = timestamp
+
+    response = tasks_client.create_task(parent=parent, task=task)
+    return response.name
+
+@functions_framework.http
+def process_pdf(request: Request):
+    """
+    PDFアップロードを受け付け、FirebaseのFirebaseのCloud Storageへの保存、メタデータ抽出、Cloud Tasksへのタスク追加を行う
+    """
+    try:
+        # 1. リクエストのバリデーション
+        if not request.method == "POST":
+            return jsonify({"error": "Method not allowed"}), 405
+        if not request.files or "file" not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+
+        pdf_file = request.files["file"]
+        if not pdf_file.filename.lower().endswith(".pdf"):
+            return jsonify({"error": "Invalid file type"}), 400
+        if pdf_file.content_length > 20 * 1024 * 1024:  # 20MB limit
+            return jsonify({"error": "File too large"}), 400
+
+        # 2. FirebaseのFirebaseのCloud StorageにPDFを保存
+        bucket_name = os.environ.get("BUCKET_NAME")  # 環境変数からバケット名を取得
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
+        file_name = f"{timestamp}_{pdf_file.filename}"
+        blob = storage_client.bucket(bucket_name).blob(f"papers/{file_name}")
+        blob.upload_from_file(pdf_file, content_type="application/pdf")
+        pdf_gs_path = f"gs://{bucket_name}/papers/{file_name}"
+
+        # 3. FirebaseのFirestoreにドキュメントを作成 (初期ステータス: pending)
+        doc_ref = db.collection("papers").add({
+            "user_id": request.auth.uid if request.auth else None,  # 認証情報はリクエストヘッダーから取得
+            "file_path": pdf_gs_path,
+            "cache_id": None,  # 後で更新
+            "status": "pending",
+            "uploaded_at": datetime.datetime.now(),
+            "translated_text_path": None, #翻訳結果保存用
+            "translated_text": None #翻訳結果保存用
+        })
+        paper_id = doc_ref[1].id
+
+        # 4. メタデータ抽出タスクをCloud Tasksに追加
+        cache_id = f"{file_name}_{timestamp}"
+        payload = {
+            "pdf_gs_path": pdf_gs_path,
+            "cache_id": cache_id,
+            "paper_id": paper_id,
+            "operation": "extract_metadata",
+        }
+        create_task(payload, task_name=f"extract_metadata_{paper_id}")
+
+        # 5. クライアントにレスポンスを返す (FirebaseのFirestoreドキュメントID)
+        return jsonify({"paper_id": paper_id}), 200
+
+    except Exception as e:
+        log_error("CloudFunctionsError", "An error occurred in process_pdf", {"error": str(e)})
+        return jsonify({"error": "An internal server error occurred."}), 500
+```
+
+```python
+# Cloud Functions (Python) - Cloud Tasksからトリガーされる関数
+
+@functions_framework.http
+def process_pdf_task(request: Request):
+    """
+    Cloud Tasksからトリガーされ、実際のPDF処理（翻訳、要約、メタデータ抽出、章構成抽出）を行う
+    """
+    try:
+        request_json = request.get_json(silent=True)
+        pdf_gs_path = request_json["pdf_gs_path"]
+        cache_id = request_json["cache_id"]
+        paper_id = request_json["paper_id"]
+        operation = request_json["operation"]
+
+        # メタデータ抽出タスク
+        if operation == "extract_metadata":
+            # 初回のみコンテキストキャッシュを作成
+            file_name = pdf_gs_path.split("/")[-1].split(".")[0]
+            create_cached_content(pdf_gs_path, file_name)
+
+            # メタデータ抽出
+            metadata_result = process_with_cache(cache_id, "extract_metadata")
+            # 章構成抽出
+            chapter_result = process_with_cache(cache_id, "extract_chapters")
+
+            # FirebaseのFirestoreに結果を保存
+            doc_ref = db.collection("papers").document(paper_id)
+            doc_ref.update({
+                "cache_id": cache_id,
+                "metadata": metadata_result["metadata"],
+                "chapters": chapter_result["chapters"],
+                "status": "metadata_extracted",
+            })
+
+            # 各章の翻訳タスクをCloud Tasksに追加
+            for chapter in chapter_result["chapters"]:
+                payload = {
+                    "pdf_gs_path": pdf_gs_path,
+                    "cache_id": cache_id,
+                    "paper_id": paper_id,
+                    "operation": "translate",
+                    "chapter_info": chapter,  # 章情報をペイロードに追加
+                }
+                task_name = f"translate_chapter_{paper_id}_{chapter['chapter_number']}"
+                create_task(payload, task_name=task_name)
+
+            # 関連論文推薦タスクをCloud Tasksに追加
+            payload = {
+                "pdf_gs_path": pdf_gs_path,
+                "cache_id": cache_id,
+                "paper_id": paper_id,
+                "operation": "recommend_related_papers",
+            }
+            create_task(payload, task_name=f"recommend_{paper_id}")
+
+        # 各章の翻訳タスク
+        elif operation == "translate":
+            chapter_info = request_json["chapter_info"]
+            # 翻訳処理
+            translate_result = process_with_cache(cache_id, "translate", chapter_info)
+
+            # FirebaseのFirestore (translated_chapters サブコレクション) に結果を保存
+            doc_ref = db.collection("papers").document(paper_id)
+            doc_ref.collection("translated_chapters").add(translate_result)
+
+            # 要約タスクをCloud Tasksに追加
+            payload = {
+                "pdf_gs_path": pdf_gs_path,
+                "cache_id": cache_id,
+                "paper_id": paper_id,
+                "operation": "summarize",
+                "chapter_info": chapter_info,
+            }
+            task_name = f"summarize_chapter_{paper_id}_{chapter_info['chapter_number']}"
+            create_task(payload, task_name=task_name)
+
+        # 各章の要約タスク
+        elif operation == "summarize":
+            chapter_info = request_json["chapter_info"]
+            # 要約処理
+            summary_result = process_with_cache(cache_id, "summarize", chapter_info)
+
+            # FirebaseのFirestoreに結果を保存
+            doc_ref = db.collection("papers").document(paper_id)
+            # 各章の要約を結合して、論文全体の要約とする
+            current_summary = doc_ref.get().to_dict().get("summary", "")
+            updated_summary = f"{current_summary}\n\n**Chapter {chapter_info['chapter_number']}:**\n{summary_result['summary']}"
+            doc_ref.update({"summary": updated_summary})
+
+            # 全ての章の翻訳・要約が完了したか確認
+            # (Cloud Tasksの仕様上、順序は保証されないため、translated_chaptersの数とchaptersの数を比較)
+            translated_chapters_count = len(list(doc_ref.collection("translated_chapters").get()))
+            chapters_count = len(doc_ref.get().to_dict().get("chapters", []))
+            if translated_chapters_count == chapters_count:
+                # 論文全体の翻訳結果を結合
+                all_translated_text = ""
+                for chapter_doc in doc_ref.collection("translated_chapters").get():
+                    all_translated_text += f"\n\n{chapter_doc.to_dict()['translated_text']}"
+
+                # 文字数に応じて保存先を決定
+                if len(all_translated_text) > 800000:
+                    # FirebaseのFirebaseのCloud Storageに保存
+                    bucket_name = os.environ.get("BUCKET_NAME")
+                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
+                    file_name = f"translated_text_{timestamp}_{paper_id}.txt"
+                    blob = storage_client.bucket(bucket_name).blob(f"papers/{file_name}")
+                    blob.upload_from_string(all_translated_text, content_type="text/plain")
+                    translated_text_path = f"gs://{bucket_name}/papers/{file_name}"
+                    doc_ref.update({"translated_text_path": translated_text_path, "translated_text": None})
+                else:
+                    # FirebaseのFirestoreに保存
+                    doc_ref.update({"translated_text_path": None, "translated_text": all_translated_text})
+
+        # 関連論文推薦タスク
+        elif operation == "recommend_related_papers":
+            # TODO: 関連論文推薦処理 (Connected Papers APIなどを使用)
+            #       結果はFirebaseのFirestoreに保存
+            #       ここでは仮にダミーデータを保存
+            related_papers = [
+                {"title": "Related Paper 1", "doi": "10.xxxx/xxxxx"},
+                {"title": "Related Paper 2", "doi": "10.yyyy/yyyyy"},
+            ]
+            doc_ref = db.collection("papers").document(paper_id)
+            doc_ref.update({"related_papers": related_papers})
+
+            # コンテキストキャッシュの削除 (全ての処理が完了した後)
+            cleanup_cache(cache_id)
+
+            # 最終ステータスを "completed" に更新
+            doc_ref.update({"status": "completed"})
+
+        return jsonify({"message": f"{operation} task completed"}), 200
+
+    except Exception as e:
+        log_error("CloudFunctionsError", "An error occurred in process_pdf_task", {"error": str(e)})
+        # FirebaseのFirestore のステータスを 'error' に更新
+        if "paper_id" in request_json:
+            try:
+                db.collection("papers").document(paper_id).update({"status": "error"})
+            except Exception as db_error:
+                log_error("FirestoreError", "Failed to update Firestore status", {"error": str(db_error)})
+        return jsonify({"error": "An internal server error occurred."}), 500
+```
+
+```python
+# Cloud Functions (Python) - Cloud Tasksからトリガーされる関数
+
+@functions_framework.http
+def process_pdf_task(request: Request):
+    """
+    Cloud Tasksからトリガーされ、実際のPDF処理（翻訳、要約、メタデータ抽出、章構成抽出）を行う
+    """
+    try:
+        request_json = request.get_json(silent=True)
+        pdf_gs_path = request_json["pdf_gs_path"]
+        cache_id = request_json["cache_id"]
+        paper_id = request_json["paper_id"]
+        operation = request_json["operation"]
+
+        # メタデータ抽出タスク
+        if operation == "extract_metadata":
+            # 初回のみコンテキストキャッシュを作成
+            file_name = pdf_gs_path.split("/")[-1].split(".")[0]
+            create_cached_content(pdf_gs_path, file_name)
+
+            # メタデータ抽出
+            metadata_result = process_with_cache(cache_id, "extract_metadata")
+            # 章構成抽出
+            chapter_result = process_with_cache(cache_id, "extract_chapters")
+
+            # FirebaseのFirestoreに結果を保存
+            doc_ref = db.collection("papers").document(paper_id)
+            doc_ref.update({
+                "cache_id": cache_id,
+                "metadata": metadata_result["metadata"],
+                "chapters": chapter_result["chapters"],
+                "status": "metadata_extracted",
+            })
+
+            # 各章の翻訳タスクをCloud Tasksに追加
+            for chapter in chapter_result["chapters"]:
+                payload = {
+                    "pdf_gs_path": pdf_gs_path,
+                    "cache_id": cache_id,
+                    "paper_id": paper_id,
+                    "operation": "translate",
+                    "chapter_info": chapter,  # 章情報をペイロードに追加
+                }
+                task_name = f"translate_chapter_{paper_id}_{chapter['chapter_number']}"
+                create_task(payload, task_name=task_name)
+
+            # 関連論文推薦タスクをCloud Tasksに追加
+            payload = {
+                "pdf_gs_path": pdf_gs_path,
+                "cache_id": cache_id,
+                "paper_id": paper_id,
+                "operation": "recommend_related_papers",
+            }
+            create_task(payload, task_name=f"recommend_{paper_id}")
+
+        # 各章の翻訳タスク
+        elif operation == "translate":
+            chapter_info = request_json["chapter_info"]
+            # 翻訳処理
+            translate_result = process_with_cache(cache_id, "translate", chapter_info)
+
+            # FirebaseのFirestore (translated_chapters サブコレクション) に結果を保存
+            doc_ref = db.collection("papers").document(paper_id)
+            doc_ref.collection("translated_chapters").add(translate_result)
+
+            # 要約タスクをCloud Tasksに追加
+            payload = {
+                "pdf_gs_path": pdf_gs_path,
+                "cache_id": cache_id,
+                "paper_id": paper_id,
+                "operation": "summarize",
+                "chapter_info": chapter_info,
+            }
+            task_name = f"summarize_chapter_{paper_id}_{chapter_info['chapter_number']}"
+            create_task(payload, task_name=task_name)
+
+        # 各章の要約タスク
+        elif operation == "summarize":
+            chapter_info = request_json["chapter_info"]
+            # 要約処理
+            summary_result = process_with_cache(cache_id, "summarize", chapter_info)
+
+            # FirebaseのFirestoreに結果を保存
+            doc_ref = db.collection("papers").document(paper_id)
+            # 各章の要約を結合して、論文全体の要約とする
+            current_summary = doc_ref.get().to_dict().get("summary", "")
+            updated_summary = f"{current_summary}\n\n**Chapter {chapter_info['chapter_number']}:**\n{summary_result['summary']}"
+            doc_ref.update({"summary": updated_summary})
+
+            # 全ての章の翻訳・要約が完了したか確認
+            # (Cloud Tasksの仕様上、順序は保証されないため、translated_chaptersの数とchaptersの数を比較)
+            translated_chapters_count = len(list(doc_ref.collection("translated_chapters").get()))
+            chapters_count = len(doc_ref.get().to_dict().get("chapters", []))
+            if translated_chapters_count == chapters_count:
+                # 論文全体の翻訳結果を結合
+                all_translated_text = ""
+                for chapter_doc in doc_ref.collection("translated_chapters").get():
+                    all_translated_text += f"\n\n{chapter_doc.to_dict()['translated_text']}"
+
+                # 文字数に応じて保存先を決定
+                if len(all_translated_text) > 800000:
+                    # FirebaseのFirebaseのCloud Storageに保存
+                    bucket_name = os.environ.get("BUCKET_NAME")
+                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
+                    file_name = f"translated_text_{timestamp}_{paper_id}.txt"
+                    blob = storage_client.bucket(bucket_name).blob(f"papers/{file_name}")
+                    blob.upload_from_string(all_translated_text, content_type="text/plain")
+                    translated_text_path = f"gs://{bucket_name}/papers/{file_name}"
+                    doc_ref.update({"translated_text_path": translated_text_path, "translated_text": None})
+                else:
+                    # FirebaseのFirestoreに保存
+                    doc_ref.update({"translated_text_path": None, "translated_text": all_translated_text})
+
+        # 関連論文推薦タスク
+        elif operation == "recommend_related_papers":
+            # TODO: 関連論文推薦処理 (Connected Papers APIなどを使用)
+            #       結果はFirebaseのFirestoreに保存
+            #       ここでは仮にダミーデータを保存
+            related_papers = [
+                {"title": "Related Paper 1", "doi": "10.xxxx/xxxxx"},
+                {"title": "Related Paper 2", "doi": "10.yyyy/yyyyy"},
+            ]
+            doc_ref = db.collection("papers").document(paper_id)
+            doc_ref.update({"related_papers": related_papers})
+
+            # コンテキストキャッシュの削除 (全ての処理が完了した後)
+            cleanup_cache(cache_id)
+
+            # 最終ステータスを "completed" に更新
+            doc_ref.update({"status": "completed"})
+
+        return jsonify({"message": f"{operation} task completed"}), 200
+
+    except Exception as e:
+        log_error("CloudFunctionsError", "An error occurred in process_pdf_task", {"error": str(e)})
+        # FirebaseのFirestore のステータスを 'error' に更新
+        if "paper_id" in request_json:
+            try:
+                db.collection("papers").document(paper_id).update({"status": "error"})
+            except Exception as db_error:
+                log_error("FirestoreError", "Failed to update Firestore status", {"error": str(db_error)})
+        return jsonify({"error": "An internal server error occurred."}), 500
+```
+**1. データベース設計 (FirebaseのFirestore)**
+
+**1.1 FirebaseのFirestore (NoSQL)**
+
+FirebaseのFirestore を選択する場合の設計 (スキーマレス):
+
+- **users コレクション**: ユーザー情報を管理
+    
+    - ドキュメントID: Firebase Authentication の UID
+        
+    - フィールド:
+        
+        - email: string (ユーザーのメールアドレス)
+            
+        - name: string (任意。ユーザー名)
+            
+        - created_at: timestamp (ユーザー作成日時)
+            
+        - updated_at: timestamp (ユーザー情報最終更新日時)
+            
+        - subscription_status: string ('free', 'paid', 'none')
+            
+        - subscription_end_date: date (有料会員の場合、サブスクリプション終了日)
+            
+        - obsidian_settings: サブコレクション (後述)
+            
+- **papers コレクション**: 翻訳された論文情報を管理
+    
+    - ドキュメントID: UUID (自動生成)
+        
+    - フィールド:
+        
+        - user_id: string (ユーザーID, Firebase Authentication の UID)
+            
+        - file_path: string (FirebaseのFirebaseのCloud Storage 上の PDF ファイルパス, gs://...)
+            
+        - cache_id: string (コンテキストキャッシュ ID)
+            
+        - status: string ('pending', 'metadata_extracted', 'processing', 'completed', 'error')
+            
+        - uploaded_at: timestamp (アップロード日時)
+            
+        - completed_at: timestamp (処理完了日時)
+            
+        - metadata: object (メタデータ)
+            
+            - title: string (論文タイトル)
+                
+            - authors: array of objects (著者)
+                
+                - name: string (氏名)
+                    
+                - affiliation: string (所属, 任意)
+                    
+            - year: number (出版年)
+                
+            - journal: string (ジャーナル名)
+                
+            - doi: string (DOI)
+                
+            - keywords: array of strings (キーワード)
+                
+            - abstract: string (要約)
+                
+        - chapters: array of objects (章構成)
+            
+            - chapter_number: number (章番号)
+                
+            - title: string (章タイトル)
+                
+            - start_page: number (開始ページ)
+                
+            - end_page: number (終了ページ)
+                
+        - summary: string (論文全体の要約)
+            
+        - translated_text: string (論文全体の翻訳結果, 80万文字以下の場合)
+            
+        - translated_text_path: string (論文全体の翻訳結果のファイルパス, FirebaseのFirebaseのCloud Storage, 80万文字を超える場合)
+            
+        - related_papers: array of objects (関連論文)
+            
+            - title: string
+                
+            - doi: string
+                
+        - obsidian: object (Obsidian 連携情報)
+            
+            - vault_path: string
+                
+            - file_name: string
+                
+            - saved_at: timestamp
+                
+        - zotero: object (Zotero 連携情報)
+            
+            - item_id: string (Zotero アイテム ID)
+                
+            - collection_id: string (Zotero コレクション ID)
+                
+            - added_at: timestamp
+                
+- **translated_chapters サブコレクション (papers コレクション内)**: 章ごとの翻訳結果を管理
+    
+    - ドキュメントID: UUID (自動生成)
+        
+    - フィールド:
+        
+        - chapter_number: number (章番号)
+            
+        - title: string (章タイトル)
+            
+        - original_text: string (原文)
+            
+        - translated_text: string (翻訳文, HTML形式, サニタイズ済)
+            
+        - start_page: number (開始ページ)
+            
+        - end_page: number (終了ページ)
+            
+- **obsidian_settings サブコレクション (users コレクション内)**: Obsidian連携の設定を管理
+    
+    - ドキュメントID: 自動生成
+        
+    - フィールド:
+        
+        - vault_path: string
+            
+        - file_name_format: string
+            
+        - created_at: timestamp
+            
+        - updated_at: timestamp
+            
+
+**インデックス (FirebaseのFirestore)**:
+
+FirebaseのFirestore のクエリ最適化のため、必要に応じてインデックスを設定する。  
+特に、以下のフィールドに対するクエリを考慮する。
+
+- users コレクション: email, created_at, subscription_status
+    
+- papers コレクション: user_id, created_at, status
+    
+- translated_chapters サブコレクション: (paper_id, chapter_number) の複合インデックス (範囲クエリ、並び替えに対応するため)
+    
+
+**データベース運用**:
+
+- **FirebaseのFirestore**:
+    
+    - Google Cloud Console から運用管理
+        
+    - バックアップ、リストア機能利用
+        
+    - セキュリティルール設定
+        
+
+**2. API設計 (Python + Cloud Functions)**
+
+**2.1 APIエンドポイント**:
+
+- POST /process_pdf: PDFアップロード、メタデータ抽出、Cloud Tasksへのタスク追加
+    
+    - リクエスト: multipart/form-data { file (file, required) }
+        
+    - レスポンス: application/json 200 OK { paper_id (string) }, 400 Bad Request, 401 Unauthorized, 500 Internal Server Error
+        
+- POST /process_pdf_task: Cloud Tasksからトリガーされる、実際のPDF処理（翻訳、要約、メタデータ抽出、章構成抽出）
+    
+    - リクエスト: application/json (Cloud Tasksのペイロード)
+        
+    - レスポンス: application/json 200 OK, 500 Internal Server Error
+        
+
+**2.2 エラーハンドリング**:
+
+- HTTPステータスコード: 400, 401, 404, 500 など適切なコードを使用
+    
+- レスポンスボディ: application/json { error: { code (string), message (string), details (object, optional) } }
+    
+    - code: エラー種別を識別するコード (例: "ValidationError", "AuthenticationError", "NotFoundError", "VertexAIError", "FirestoreError", "CloudStorageError")
+        
+    - message: ユーザー向けのエラーメッセージ (日本語、ユーモアのある表現)
+        
+    - details: 開発者向けのデバッグ情報 (例: スタックトレース) 本番環境では出力しない
+        
+- **ユーザー向けエラーメッセージ**:
+    
+    - 日本語でわかりやすくユーモアのあるエラーメッセージを表示
+        
+    - エラーメッセージには、エラーの詳細を表示するトグルを設け、詳細なエラーログをダウンロードできるようにする
+        
+
+**2.3 認証・認可**:
+
+- Firebase Authentication カスタムトークン利用
+    
+- Cloud Functions IAM ロール設定
+    
+
+**2.4 APIバージョン管理**:
+
+- URL Path Based バージョニング (例: /v1/process_pdf) を採用する。
+    
+
+**2.5 ドキュメント**:
+
+- OpenAPI (Swagger) 3.0 でAPI定義書作成
+    
+- Redoc, Swagger UI などでドキュメントUI提供
+    
+
+**2.6 Cloud Functions 設定**:
+
+- **環境変数**:
+    
+    - GOOGLE_CLOUD_PROJECT, BUCKET_NAME, CLOUD_FUNCTIONS_SA などを環境変数として設定する。
+        
+    - データベース接続情報などは、Secret Manager API を利用して管理する。
+        
+- **ロギング**: Cloud Logging へのログ出力設定、ログレベル設定。
+    
+    - 構造化ログ (JSON形式) を採用
+        
+    - エラーログには、severity フィールドを含め、Cloud Logging でエラーとして認識されるようにする
+        
+    - エラーログには、エラーの種類、メッセージ、タイムスタンプ、スタックトレース、関連情報 (ユーザーID, ファイルパスなど) を含める
+        
+- **エラーレポート**: Cloud Error Reporting と連携し、エラー発生時の自動通知を設定する。
+    
+- **リトライ**:
+    
+    - Cloud Tasks のリトライ機能を利用
+        
+        - **最大試行回数: 0回** (リトライしない)
+            
+- **リージョン**: ユーザーの地理的分布、レイテンシ、データ所在地などを考慮して適切なリージョンを選択する (例: us-central1)。
+    
+- **タイムアウト**:
+    
+    - Cloud Functionsのタイムアウト時間を最大（9分）に設定。
+        
+- **Cloud Tasks 連携**:
+    
+    - Cloud Functions (Python) で PDF アップロードを受け付け、FirebaseのFirebaseのCloud Storage に保存後、メタデータ抽出タスクを Cloud Tasks キューに追加する。
+        
+    - メタデータ抽出タスクは、章構成抽出、各章の翻訳/要約タスク、関連論文推薦タスクを Cloud Tasks キューに追加する。
+        
+    - 各タスクは、別の Cloud Functions (Python) インスタンスで非同期に実行される。
+        
+    - 処理完了後、結果を FirebaseのFirestore に保存し、コンテキストキャッシュを削除する。
+        
+        - コンテキストキャッシュ削除は、メタデータ抽出タスク、または、関連論文推薦タスクの完了時に行う。
+            
+    - クライアント (フロントエンド) は、FirebaseのFirestore の papers コレクションの status フィールドを定期的にポーリングし、進捗状況を確認する。
+        
+
+**3. UI設計**
+
+詳細なUI設計はFigmaなどのデザインツールで別途作成。  
+各画面のUI要素とインタラクションは、要件定義書に記載の通り。
+
+**4. 要約生成プロンプト**:
+
+- **プロンプト (JSON):** prompts/summary_prompt_v1.json (内容は要件定義書、または、Cline_task_MainFeatures3.txt 参照)
+    
+
+**5. メタデータ抽出プロンプト**:
+
+- **プロンプト (JSON):** prompts/metadata_prompt_v1.json (内容は要件定義書、または、Cline_task_MainFeatures3.txt 参照)
+    
+
+**6. 章構成抽出プロンプト**
+
+- **プロンプト(JSON):** prompts/chapter_extraction_prompt_v1.json
+```
+{
+    "prompt": "あなたは学術論文のメタデータと章構成を抽出するAIアシスタントです。\n与えられた論文から、以下の情報を抽出してJSON形式で出力してください:\n\n**メタデータ:**\n\n* title (タイトル): 論文のタイトル\n* authors (著者): 著者のリスト\n    * name (氏名): 著者の氏名\n    * affiliation (所属): 著者の所属機関 (可能な場合)\n* year (出版年): 論文の出版年\n* journal (ジャーナル名): 論文が掲載されたジャーナル名\n* doi (DOI): 論文の DOI\n* keywords (キーワード): 論文のキーワード (複数)\n* abstract (要約): 論文の要約\n\n**章構成:**\n\n* chapters (章): 章のリスト\n    * chapter_number (章番号): アラビア数字で表記 (例: 1, 2, 3)。章番号がない場合は、論文の先頭からの通し番号を付与してください。\n    * title (章タイトル): 章のタイトル。タイトルがない場合は、「(章番号) の内容」と記述してください。\n    * start_page (開始ページ): 章の開始ページ番号。\n    * end_page (終了ページ): 章の終了ページ番号。\n\n**出力形式:**\n\n```json\n{\n \"metadata\": {\n \"title\": \"\",\n \"authors\": [\n {\n \"name\": \"\",\n \"affiliation\": \"\"\n }\n ],\n \"year\": 0,\n \"journal\": \"\",\n \"doi\": \"\",\n \"keywords\": [],\n \"abstract\": \"\"\n },\n \"chapters\": [\n {\n \"chapter_number\": 0,\n \"title\": \"\",\n \"start_page\": 0,\n \"end_page\": 0\n }\n ]\n}\n```"
+}
+```
+**7. セキュリティ設計**:
+
+要件定義書3.2項に記載のセキュリティ要件、および、以下を詳細化する。
+
+- **入力バリデーション**:
+    
+    - 全てのAPIエンドポイントでリクエストパラメータのバリデーションを行う (型チェック、必須項目チェック、値の範囲チェック、形式チェックなど)。
+        
+    - フロントエンドでも入力バリデーションを行い、不正なリクエストを未然に防ぐ。
+        
+- **出力エスケープ**:
+    
+    - データベースから取得したデータ、APIからのレスポンスなどをHTMLとして出力する際、XSS対策として必ずエスケープ処理を行う。
+        
+    - Reactなどのフレームワークの標準機能 (例: JSX) を利用してエスケープ処理を自動化する。
+        
+- **Content Security Policy (CSP)**:
+    
+    - HTTPレスポンスヘッダーにCSPを設定し、XSS攻撃のリスクを低減する。
+        
+    - インラインスクリプト、外部リソースの読み込み元などを制限する。
+        
+- **クロスサイトリクエストフォージェリ (CSRF) 対策**:
+    
+    - Cookieベースの認証を使用する場合、CSRFトークンを導入し、CSRF攻撃を防ぐ。
+        
+    - Firebase Authentication を利用する場合は、FirebaseがCSRF対策を自動で行うため、特別な対策は不要 (Firebaseドキュメントを確認)。
+        
+- **セッション管理**:
+    
+    - セッションIDの安全な生成、セッションIDの有効期限設定、セッションハイジャック対策 (HTTP Only, Secure属性の設定)
+        
+- **アクセス制御**:
+    
+    - RBAC (Role-Based Access Control) または ABAC (Attribute-Based Access Control) を検討し、ユーザーのロールまたは属性に基づいてAPIへのアクセス制御を行う。
+        
+    - Cloud Functions の IAM ロール設定を適切に行い、認可を強化する。
+        
+- **FirebaseのFirestore セキュリティルール**:
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // users コレクション: 認証されたユーザーのみが自分のドキュメントを読み書きできる
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // papers コレクション: 認証されたユーザーのみが自分の論文を読み書きできる
+    match /papers/{paperId} {
+      allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
+      allow write: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+
+      // translated_chapters サブコレクション: 認証されたユーザーのみが、自分の論文の章を読み書きできる
+      match /translated_chapters/{chapterId} {
+        allow read, write: if request.auth != null && get(/databases/$(database)/documents/papers/$(paperId)).data.user_id == request.auth.uid;
+      }
+    }
+  }
+}
+```
+
+- **レート制限**:
+    
+    - APIエンドポイントへのリクエスト数を制限し、DoS攻撃、ブルートフォースアタックなどを防御する。
+        
+    - Cloud Functions のレート制限機能、またはAPI Gatewayのレート制限機能を活用する。
+        
+- **脆弱性診断**:
+    
+    - 定期的な脆弱性診断 (ペネトレーションテスト、脆弱性スキャン) を実施し、潜在的な脆弱性を早期に発見・修正する。
+        
+    - 外部のセキュリティ専門業者に依頼することも検討する。
+        
+- **依存関係管理**:
+    
+    - 使用するライブラリ、フレームワークのバージョンを常に最新に保ち、既知の脆弱性に対応する。
+        
+    - 定期的に依存関係の脆弱性スキャンツール (例: npm audit, Snyk) を実行し、脆弱性のある依存関係をアップデートまたは削除する。
+        
+- **HTTPS**:
+    
+    - 全ての通信経路をHTTPSで暗号化する。
+        
+    - TLS証明書を適切に管理し、有効期限切れに注意する。
+        
+- **個人情報保護**:
+    
+    - 個人情報保護法、GDPR、CCPAなどの関連法規を遵守したプライバシーポリシーを策定・公開する。
+        
+    - 個人情報の収集、利用、保管、削除に関するプロセスを明確化し、セキュリティ対策を徹底する。
+        
+    - Cookieポリシーを策定し、Cookieの使用目的、種類、有効期限などを明記する。
+        
+
+**8. 運用・監視設計**:
+
+- **モニタリング**:
+    
+    - Cloud Monitoring (または Sentry, Datadog など) を導入し、システム全体のパフォーマンス、エラー率、リソース使用率などを監視する。
+        
+    - 主要なメトリクス (APIレスポンスタイム, エラー率, CPU使用率, メモリ使用率, データベースクエリ時間など) を監視対象とする。
+        
+        - 例:
+            
+            - APIレスポンスタイム (平均、95パーセンタイル、最大)
+                
+            - Cloud Functionsの実行時間、エラー率、メモリ使用量
+                
+            - FirebaseのFirestoreの読み取り/書き込み/削除操作の回数、レイテンシ
+                
+    - ダッシュボードを作成し、リアルタイムで監視状況を可視化する。
+        
+    - ユーザー数、翻訳数、サブスクリプション数などのビジネスメトリクスも監視対象とする。
+        
+- **ロギング**:
+    
+    - Cloud Logging (または Fluentd, Elasticsearch など) を導入し、アプリケーションログ、アクセスログ、エラーログなどを集約・管理する。
+        
+    - ログレベル (DEBUG, INFO, WARNING, ERROR) を適切に設定し、必要な情報をログ出力する。
+        
+    - 構造化ログ (JSON形式など) を採用し、ログの検索・分析を容易にする。
+        
+        - 例: Cloud Functions での構造化ログ出力 (上記コード参照)
+            
+- **FirebaseのFirebaseのCloud Storage アクセス制御**:
+    
+    - **IAM ロール**:
+        
+        - Cloud Functions (Python) のサービスアカウント: Storage Object Creator, Storage Object Viewer ロールを付与。
+            
+        - ユーザー: 直接アクセスは許可しない。署名付き URL を使用して、一時的に PDF,翻訳結果テキストをダウンロードできるようにする。
+            
+- **署名付き URL**:
+    
+    - 有効期限: 短時間 (例: 5分) に設定する。
+        
+    - 署名: Cloud Functions (Python) で、サービスアカウントキーを使用して署名付き URL を生成する。
+        
+    - 管理: 署名に使用するキーは Secret Manager で管理する。
+        
+
+**9. キャッシュ戦略**
+
+- **Vertex AI コンテキストキャッシュ**:
+    
+    - コンテキストキャッシュは、ファイル名とタイムスタンプを組み合わせたキャッシュ ID を使用して管理。
+        
+    - キャッシュは、関連する全ての処理（メタデータ抽出、章構成抽出、翻訳、要約、関連論文推薦）が完了し、FirebaseのFirestore への保存が成功した後に削除。
+        
+    - キャッシュの有効期限は設定しない (明示的に削除するまで保持)。
+        
+- **フロントエンドでのキャッシュ**: 今回は見送り
