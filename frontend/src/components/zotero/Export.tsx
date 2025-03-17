@@ -142,7 +142,7 @@ const ZoteroExport: React.FC<ZoteroExportProps> = ({ paper, disabled = false }) 
               <AlertTitle>Zotero Connectorが見つかりません</AlertTitle>
               <Typography variant="body2" paragraph>
                 Zotero ConnectorはブラウザからZoteroに論文を簡単に追加するためのブラウザ拡張機能です。
-                Smart Paper v2では、Zotero Connectorを使用してDOI情報から論文をZoteroに追加します。
+                Connectorをインストール済みの場合は、Zoteroアプリを起動してからブラウザを再起動してください。
               </Typography>
               <Button
                 variant="outlined"
@@ -225,29 +225,33 @@ const ZoteroExport: React.FC<ZoteroExportProps> = ({ paper, disabled = false }) 
               </FormControl>
             )}
             
-            {!hasDOI && (
-              <>
-                <Typography variant="subtitle2" gutterBottom>
-                  手動コピー用テキスト
+            {/* 常に手動コピーオプションを表示（DOIの有無に関わらず） */}
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="subtitle2" gutterBottom>
+                手動コピー用テキスト
+              </Typography>
+              <Box sx={{ bgcolor: 'background.default', p: 2, borderRadius: 1 }}>
+                <Typography variant="body2" sx={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                  {generateCitationText()}
                 </Typography>
-                <Box sx={{ bgcolor: 'background.default', p: 2, borderRadius: 1 }}>
-                  <Typography variant="body2" sx={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
-                    {generateCitationText()}
-                  </Typography>
-                </Box>
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                  このテキストをコピーして、Zoteroに手動で追加してください。
-                </Typography>
-              </>
-            )}
+              </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                {!hasDOI ? 
+                  "このテキストをコピーして、Zoteroに手動で追加してください。" : 
+                  "Connectorが動作しない場合は、このテキストをコピーして手動で追加できます。"
+                }
+              </Typography>
+            </Box>
           </Box>
           
           <Divider sx={{ my: 2 }} />
           
           <Typography variant="body2" color="text.secondary">
-            {hasDOI
-              ? 'DOIを使用して論文をZoteroに追加します。「Zoteroに追加」ボタンをクリックすると、Zotero Connectorが起動します。'
-              : 'DOIがない場合、手動でZoteroに追加してください。上記の情報をコピーして、Zoteroの「新規アイテム」から追加できます。'}
+            {!isConnectorAvailable 
+              ? 'Zotero Connectorが見つかりません。Zoteroをインストールして起動した後、上記の情報をコピーして手動で追加できます。'
+              : hasDOI
+                ? 'DOIを使用して論文をZoteroに追加します。「Zoteroに追加」ボタンをクリックすると、Zotero Connectorが起動します。Connectorが動作しない場合は、上記の情報をコピーして手動で追加できます。'
+                : 'DOIがない場合、手動でZoteroに追加してください。上記の情報をコピーして、Zoteroの「新規アイテム」から追加できます。'}
           </Typography>
         </DialogContent>
         

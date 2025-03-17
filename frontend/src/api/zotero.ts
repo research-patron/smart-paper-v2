@@ -30,8 +30,8 @@ export const addToZoteroByDOI = async (doi: string): Promise<boolean> => {
     // ZoteroコネクタのURLを生成
     const url = generateZoteroTranslatorUrl(doi);
     
-    // iframe内で開いてZotero Connectorを起動するか、新しいタブで開く
-    window.location.href = url;
+    // 新しいタブでZotero Connector URLを開く (現在のページは保持)
+    window.open(url, '_blank');
     
     return true;
   } catch (error) {
@@ -42,21 +42,71 @@ export const addToZoteroByDOI = async (doi: string): Promise<boolean> => {
 
 /**
  * Zotero Connectorが利用可能かどうかを確認する
+ * より信頼性の高いWeb Extension Content Script APIを使用して検出
  * @returns Zotero Connectorが利用可能な場合はtrue
  */
 export const checkZoteroConnector = async (): Promise<boolean> => {
   try {
-    // Zotero Connector APIのpingエンドポイントにリクエストを送信
-    const response = await fetch(`${ZOTERO_CONNECTOR_URL}/connector/ping`, {
-      method: 'GET',
-      mode: 'no-cors' // CORSエラーを回避するためにno-corsモードを使用
+    // Zotero Connector拡張機能が利用できるかどうかをチェック
+    // まず標準的なZotero Object APIをチェック
+    if (typeof window !== 'undefined' && 'Zotero' in window) {
+      console.log('Zotero Connector detected via window.Zotero');
+      return true;
+    }
+
+    // Chrome/Firefox Content Scriptを経由したZotero Connectorをチェック
+    const pingPromise = new Promise<boolean>((resolve) => {
+      // カスタムイベントを作成してZotero Connectorをチェック
+      const event = new CustomEvent('zotero-connector-ping');
+      
+      // レスポンスをリッスン (タイムアウト付き)
+      const timeout = setTimeout(() => {
+        document.removeEventListener('zotero-connector-response', listener);
+        resolve(false);
+      }, 500);
+      
+      const listener = (e: Event) => {
+        clearTimeout(timeout);
+        document.removeEventListener('zotero-connector-response', listener);
+        resolve(true);
+      };
+      
+      document.addEventListener('zotero-connector-response', listener);
+      document.dispatchEvent(event);
     });
-    
-    // no-corsモードではレスポンスの内容を読み取れないため、
-    // エラーが発生しなければZotero Connectorが利用可能と判断する
-    return true;
+
+    // WebSocket経由でZotero Standalone (Connector)をチェック
+    // タイムアウトが短いため、先にチェック
+    const socketPromise = new Promise<boolean>((resolve) => {
+      try {
+        const socket = new WebSocket(`ws://127.0.0.1:23119/connector/`);
+        
+        socket.onopen = () => {
+          socket.close();
+          resolve(true);
+        };
+        
+        socket.onerror = () => {
+          resolve(false);
+        };
+      } catch (error) {
+        resolve(false);
+      }
+    });
+
+    // HTTP経由でのダイレクトチェック (最も信頼性が高い)
+    const httpPromise = new Promise<boolean>((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(true);
+      img.onerror = () => resolve(false);
+      // キャッシュ回避のためタイムスタンプパラメータを追加
+      img.src = `${ZOTERO_CONNECTOR_URL}/connector/ping?t=${new Date().getTime()}`;
+    });
+
+    // 最初に解決されたPromiseを使用
+    return await Promise.race([pingPromise, socketPromise, httpPromise]);
   } catch (error) {
-    console.error('Zotero Connector not available:', error);
+    console.error('Error checking Zotero Connector:', error);
     return false;
   }
 };
@@ -144,37 +194,52 @@ export const convertToZoteroFormat = (paper: Paper, itemType: string = 'journalA
 /**
  * Zotero Web Connector の存在を確認する
  * @returns Zotero Connectorがインストールされている場合はtrue
+ * 
+ * 注: 現代のブラウザではセキュリティ上の理由からprotocolハンドラの検出が
+ * 制限されているため、checkZoteroConnector()を使用することを推奨
  */
-export const isZoteroConnectorInstalled = (): Promise<boolean> => {
-  return new Promise(resolve => {
-    // iframeを使用してzotero://プロトコルを検出する試み
-    const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    document.body.appendChild(iframe);
-    
-    // タイムアウト設定
-    const timeout = setTimeout(() => {
-      document.body.removeChild(iframe);
-      resolve(false);
-    }, 1000);
-    
-    // エラーハンドラを設定
-    iframe.onerror = () => {
-      clearTimeout(timeout);
-      document.body.removeChild(iframe);
-      resolve(true); // エラーが発生した場合はProtocolハンドラが存在する可能性がある
-    };
-    
-    // ロードハンドラを設定
-    iframe.onload = () => {
-      clearTimeout(timeout);
-      document.body.removeChild(iframe);
-      resolve(false); // 正常にロードされた場合はProtocolハンドラが存在しない
-    };
-    
-    // Zoteroプロトコルを使用してテスト
-    iframe.src = 'zotero://';
-  });
+export const isZoteroConnectorInstalled = async (): Promise<boolean> => {
+  // まず標準的な検出方法を試す
+  const connectorDetected = await checkZoteroConnector();
+  if (connectorDetected) {
+    return true;
+  }
+  
+  // 拡張機能がブラウザに存在するかをチェック (Chrome/Firefox固有のAPIの場合)
+  // GoogleのNative Messaging APIを試行
+  if (typeof window !== 'undefined' && 'chrome' in window && 
+      // @ts-ignore - chromiumベースのブラウザでのみ存在する型
+      window.chrome && window.chrome.runtime && window.chrome.runtime.sendMessage) {
+    try {
+      // Zotero Connector拡張機能IDの最初の部分
+      // chromeでは 'ekhagklcjbdpajgpjgmbionohlpdbjgc'
+      return new Promise(resolve => {
+        try {
+          // @ts-ignore - chromiumベースのブラウザAPI
+          window.chrome.runtime.sendMessage('ekhagklcjbdpajgpjgmbionohlpdbjgc', {action: 'ping'}, (response: any) => {
+            // @ts-ignore - chromiumベースのブラウザAPI
+            if (window.chrome.runtime.lastError) {
+              // エラーがあっても表示しない（エラーは通常の拡張が見つからない状態）
+              resolve(false);
+            } else {
+              resolve(true);
+            }
+          });
+          
+          // タイムアウト処理
+          setTimeout(() => resolve(false), 300);
+        } catch (e) {
+          resolve(false);
+        }
+      });
+    } catch (e) {
+      console.log('Chrome extension detection error:', e);
+    }
+  }
+  
+  // 従来のプロトコルハンドラ検出は最新ブラウザではほぼ動作しないため、
+  // 代わりに直接接続チェックを再試行
+  return await checkZoteroConnector();
 };
 
 /**
