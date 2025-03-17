@@ -47,6 +47,8 @@ export const addToZoteroByDOI = async (doi: string): Promise<boolean> => {
  */
 export const checkZoteroConnector = async (): Promise<boolean> => {
   try {
+    console.log('Checking for Zotero Connector availability...');
+    
     // Zotero Connector拡張機能が利用できるかどうかをチェック
     // まず標準的なZotero Object APIをチェック
     if (typeof window !== 'undefined' && 'Zotero' in window) {
@@ -54,20 +56,31 @@ export const checkZoteroConnector = async (): Promise<boolean> => {
       return true;
     }
 
+    // 拡張機能がインストールされているかをチェックする追加手段
+    if (typeof document !== 'undefined') {
+      const zoteroIconElement = document.querySelector('[data-zotero-extension]');
+      if (zoteroIconElement) {
+        console.log('Zotero Connector detected via DOM element');
+        return true;
+      }
+    }
+
     // Chrome/Firefox Content Scriptを経由したZotero Connectorをチェック
     const pingPromise = new Promise<boolean>((resolve) => {
       // カスタムイベントを作成してZotero Connectorをチェック
       const event = new CustomEvent('zotero-connector-ping');
       
-      // レスポンスをリッスン (タイムアウト付き)
+      // レスポンスをリッスン (タイムアウト付き - 延長して信頼性向上)
       const timeout = setTimeout(() => {
         document.removeEventListener('zotero-connector-response', listener);
+        console.log('Zotero Connector event detection timed out');
         resolve(false);
-      }, 500);
+      }, 1000); // 500msから1000msに延長
       
       const listener = (e: Event) => {
         clearTimeout(timeout);
         document.removeEventListener('zotero-connector-response', listener);
+        console.log('Zotero Connector detected via event response');
         resolve(true);
       };
       
@@ -76,35 +89,82 @@ export const checkZoteroConnector = async (): Promise<boolean> => {
     });
 
     // WebSocket経由でZotero Standalone (Connector)をチェック
-    // タイムアウトが短いため、先にチェック
     const socketPromise = new Promise<boolean>((resolve) => {
       try {
         const socket = new WebSocket(`ws://127.0.0.1:23119/connector/`);
         
         socket.onopen = () => {
           socket.close();
+          console.log('Zotero Connector detected via WebSocket');
           resolve(true);
         };
         
         socket.onerror = () => {
+          console.log('Zotero Connector WebSocket detection failed');
           resolve(false);
         };
       } catch (error) {
+        console.log('Zotero Connector WebSocket detection exception:', error);
         resolve(false);
       }
     });
 
-    // HTTP経由でのダイレクトチェック (最も信頼性が高い)
+    // HTTP経由でのダイレクトチェック
     const httpPromise = new Promise<boolean>((resolve) => {
       const img = new Image();
-      img.onload = () => resolve(true);
-      img.onerror = () => resolve(false);
+      img.onload = () => {
+        console.log('Zotero Connector detected via HTTP ping');
+        resolve(true);
+      };
+      img.onerror = () => {
+        console.log('Zotero Connector HTTP ping detection failed');
+        resolve(false);
+      };
       // キャッシュ回避のためタイムスタンプパラメータを追加
       img.src = `${ZOTERO_CONNECTOR_URL}/connector/ping?t=${new Date().getTime()}`;
     });
 
-    // 最初に解決されたPromiseを使用
-    return await Promise.race([pingPromise, socketPromise, httpPromise]);
+    // Chrome拡張機能の直接検出を試みる (最も信頼性が高い方法の一つ)
+    const chromeExtensionPromise = new Promise<boolean>((resolve) => {
+      // 型安全にChrome APIを検出
+      const windowAny = window as any;
+      if (typeof window !== 'undefined' && 'chrome' in window && 
+          windowAny.chrome && windowAny.chrome.runtime && windowAny.chrome.runtime.sendMessage) {
+        try {
+          let hasResponded = false;
+          // タイムアウト処理 - 延長して信頼性向上
+          const timeout = setTimeout(() => {
+            if (!hasResponded) {
+              console.log('Chrome extension detection timed out');
+              resolve(false);
+            }
+          }, 1000);
+          
+          // Chromiumベースのブラウザでのみ存在する型なので型アサーションを使用
+          const chrome = (window as any).chrome;
+          chrome.runtime.sendMessage('ekhagklcjbdpajgpjgmbionohlpdbjgc', {action: 'ping'}, (response: any) => {
+            hasResponded = true;
+            clearTimeout(timeout);
+            
+            if (chrome.runtime.lastError) {
+              console.log('Chrome extension detection failed with error:', chrome.runtime.lastError);
+              resolve(false);
+            } else {
+              console.log('Chrome extension detected successfully with response:', response);
+              resolve(true);
+            }
+          });
+        } catch (e) {
+          console.error('Exception during Chrome extension detection:', e);
+          resolve(false);
+        }
+      } else {
+        resolve(false);
+      }
+    });
+
+    // 検出方法の優先順位を変更: Chrome拡張機能 > HTTP > WebSocket > Content Script
+    return await Promise.race([chromeExtensionPromise, httpPromise, socketPromise, pingPromise]);
   } catch (error) {
     console.error('Error checking Zotero Connector:', error);
     return false;
@@ -199,47 +259,14 @@ export const convertToZoteroFormat = (paper: Paper, itemType: string = 'journalA
  * 制限されているため、checkZoteroConnector()を使用することを推奨
  */
 export const isZoteroConnectorInstalled = async (): Promise<boolean> => {
-  // まず標準的な検出方法を試す
-  const connectorDetected = await checkZoteroConnector();
-  if (connectorDetected) {
-    return true;
+  try {
+    // 改善された検出方法を使用
+    const connectorDetected = await checkZoteroConnector();
+    return connectorDetected;
+  } catch (error) {
+    console.error('Error checking Zotero Connector installation:', error);
+    return false;
   }
-  
-  // 拡張機能がブラウザに存在するかをチェック (Chrome/Firefox固有のAPIの場合)
-  // GoogleのNative Messaging APIを試行
-  if (typeof window !== 'undefined' && 'chrome' in window && 
-      // @ts-ignore - chromiumベースのブラウザでのみ存在する型
-      window.chrome && window.chrome.runtime && window.chrome.runtime.sendMessage) {
-    try {
-      // Zotero Connector拡張機能IDの最初の部分
-      // chromeでは 'ekhagklcjbdpajgpjgmbionohlpdbjgc'
-      return new Promise(resolve => {
-        try {
-          // @ts-ignore - chromiumベースのブラウザAPI
-          window.chrome.runtime.sendMessage('ekhagklcjbdpajgpjgmbionohlpdbjgc', {action: 'ping'}, (response: any) => {
-            // @ts-ignore - chromiumベースのブラウザAPI
-            if (window.chrome.runtime.lastError) {
-              // エラーがあっても表示しない（エラーは通常の拡張が見つからない状態）
-              resolve(false);
-            } else {
-              resolve(true);
-            }
-          });
-          
-          // タイムアウト処理
-          setTimeout(() => resolve(false), 300);
-        } catch (e) {
-          resolve(false);
-        }
-      });
-    } catch (e) {
-      console.log('Chrome extension detection error:', e);
-    }
-  }
-  
-  // 従来のプロトコルハンドラ検出は最新ブラウザではほぼ動作しないため、
-  // 代わりに直接接続チェックを再試行
-  return await checkZoteroConnector();
 };
 
 /**
@@ -263,6 +290,40 @@ export const getZoteroConnectorDownloadLink = (): string => {
   } else {
     // デフォルトはZoteroのダウンロードページ
     return 'https://www.zotero.org/download/connector';
+  }
+};
+
+/**
+ * Zoteroアプリケーションが起動しているかどうかを確認する
+ * @returns Zoteroアプリケーションが起動している可能性が高い場合はtrue
+ */
+export const isZoteroRunning = async (): Promise<boolean> => {
+  try {
+    // Zoteroアプリケーションが起動しているかどうかを確認するために
+    // WebSocketを使用して接続を試みる
+    const socket = new WebSocket(`ws://127.0.0.1:23119/connector/`);
+    
+    return new Promise<boolean>((resolve) => {
+      socket.onopen = () => {
+        socket.close();
+        resolve(true);
+      };
+      
+      socket.onerror = () => {
+        resolve(false);
+      };
+      
+      // タイムアウト処理
+      setTimeout(() => {
+        if (socket.readyState !== WebSocket.CLOSED) {
+          socket.close();
+        }
+        resolve(false);
+      }, 1000);
+    });
+  } catch (error) {
+    console.error('Error checking if Zotero is running:', error);
+    return false;
   }
 };
 

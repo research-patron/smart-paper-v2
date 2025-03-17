@@ -27,6 +27,7 @@ import {
   isValidDOI, 
   checkZoteroConnector,
   getZoteroConnectorDownloadLink,
+  isZoteroRunning,
   ZOTERO_ITEM_TYPES
 } from '../../api/zotero';
 
@@ -39,6 +40,7 @@ const ZoteroExport: React.FC<ZoteroExportProps> = ({ paper, disabled = false }) 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isConnectorAvailable, setIsConnectorAvailable] = useState<boolean | null>(null);
+  const [isZoteroAppRunning, setIsZoteroAppRunning] = useState<boolean | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedItemType, setSelectedItemType] = useState('journalArticle');
@@ -53,15 +55,24 @@ const ZoteroExport: React.FC<ZoteroExportProps> = ({ paper, disabled = false }) 
     }
   }, [dialogOpen]);
   
-  // Zotero Connectorの存在を確認
+  // Zotero Connectorの存在とZoteroアプリケーションの起動状態を確認
   const checkConnector = async () => {
     setIsChecking(true);
     try {
-      const result = await checkZoteroConnector();
-      setIsConnectorAvailable(result);
+      // Zotero Connectorの存在を確認
+      const connectorResult = await checkZoteroConnector();
+      setIsConnectorAvailable(connectorResult);
+      
+      // Zoteroアプリケーションの起動状態を確認
+      const zoteroRunningResult = await isZoteroRunning();
+      setIsZoteroAppRunning(zoteroRunningResult);
+      
+      console.log('Zotero Connector available:', connectorResult);
+      console.log('Zotero application running:', zoteroRunningResult);
     } catch (error) {
-      console.error('Error checking Zotero Connector:', error);
+      console.error('Error checking Zotero status:', error);
       setIsConnectorAvailable(false);
+      setIsZoteroAppRunning(false);
     } finally {
       setIsChecking(false);
     }
@@ -142,17 +153,72 @@ const ZoteroExport: React.FC<ZoteroExportProps> = ({ paper, disabled = false }) 
               <AlertTitle>Zotero Connectorが見つかりません</AlertTitle>
               <Typography variant="body2" paragraph>
                 Zotero ConnectorはブラウザからZoteroに論文を簡単に追加するためのブラウザ拡張機能です。
-                Connectorをインストール済みの場合は、Zoteroアプリを起動してからブラウザを再起動してください。
+                {isZoteroAppRunning === false && 
+                  "Zoteroアプリケーションが起動していないようです。まずZoteroアプリケーションを起動してください。"}
               </Typography>
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<DownloadIcon />}
-                href={getZoteroConnectorDownloadLink()}
-                target="_blank"
-              >
-                Zotero Connectorをダウンロード
-              </Button>
+              
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  トラブルシューティング手順:
+                </Typography>
+                <ol>
+                  <li>
+                    <Typography variant="body2" sx={{ mb: 1 }}>
+                      Zoteroアプリケーションが<strong>インストール済み</strong>で<strong>起動している</strong>ことを確認してください。
+                    </Typography>
+                  </li>
+                  <li>
+                    <Typography variant="body2" sx={{ mb: 1 }}>
+                      Zotero Connectorがブラウザに<strong>インストール済み</strong>であることを確認してください。
+                      {isZoteroAppRunning === true && 
+                        "Zoteroアプリケーションは起動していますが、Connectorが検出されません。ブラウザの拡張機能を確認してください。"}
+                    </Typography>
+                  </li>
+                  <li>
+                    <Typography variant="body2" sx={{ mb: 1 }}>
+                      ブラウザを<strong>再起動</strong>してから再試行してください。
+                    </Typography>
+                  </li>
+                  <li>
+                    <Typography variant="body2">
+                      それでも問題が解決しない場合は、Zoteroアプリケーションを<strong>再起動</strong>してください。
+                    </Typography>
+                  </li>
+                </ol>
+              </Box>
+              
+              <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<DownloadIcon />}
+                  href={getZoteroConnectorDownloadLink()}
+                  target="_blank"
+                  onClick={(e) => {
+                    // 既にインストール済みの場合は拡張機能ページに移動するように提案
+                    if (navigator.userAgent.indexOf('Chrome') > -1 || navigator.userAgent.indexOf('Edg') > -1) {
+                      if (window.confirm('Zotero Connectorがインストール済みの場合は、拡張機能を有効化する必要があるかもしれません。\n\nChromeの拡張機能ページを開きますか？')) {
+                        window.open('chrome://extensions/?id=ekhagklcjbdpajgpjgmbionohlpdbjgc', '_blank');
+                        e.preventDefault();
+                      }
+                    }
+                  }}
+                >
+                  Zotero Connectorを確認・ダウンロード
+                </Button>
+                <Button
+                  variant="text"
+                  size="small"
+                  onClick={() => {
+                    setIsChecking(true);
+                    // 再検査を行い、1秒後に結果を更新
+                    checkConnector();
+                  }}
+                  disabled={isChecking}
+                >
+                  {isChecking ? "確認中..." : "再検査"}
+                </Button>
+              </Box>
             </Alert>
           ) : !hasDOI ? (
             <Alert severity="info" sx={{ mb: 3 }}>
@@ -248,7 +314,11 @@ const ZoteroExport: React.FC<ZoteroExportProps> = ({ paper, disabled = false }) 
           
           <Typography variant="body2" color="text.secondary">
             {!isConnectorAvailable 
-              ? 'Zotero Connectorが見つかりません。Zoteroをインストールして起動した後、上記の情報をコピーして手動で追加できます。'
+              ? isZoteroAppRunning === false
+                ? 'Zotero Connectorが見つからず、Zoteroアプリケーションも起動していないようです。まずZoteroアプリケーションを起動し、必要に応じてConnectorをインストールしてください。'
+                : isZoteroAppRunning === true
+                  ? 'Zoteroアプリケーションは起動していますが、Zotero Connectorが見つかりません。ブラウザの拡張機能を確認してください。'
+                  : 'Zotero Connectorが見つかりません。Zoteroをインストールして起動した後、上記の情報をコピーして手動で追加できます。'
               : hasDOI
                 ? 'DOIを使用して論文をZoteroに追加します。「Zoteroに追加」ボタンをクリックすると、Zotero Connectorが起動します。Connectorが動作しない場合は、上記の情報をコピーして手動で追加できます。'
                 : 'DOIがない場合、手動でZoteroに追加してください。上記の情報をコピーして、Zoteroの「新規アイテム」から追加できます。'}
