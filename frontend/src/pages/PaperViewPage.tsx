@@ -39,13 +39,15 @@ import ErrorMessage from '../components/common/ErrorMessage';
 import SplitView from '../components/papers/SplitView';
 import Summary from '../components/papers/Summary';
 import { MarkdownExporter } from '../utils/MarkdownExporter';
-import { doc, getDoc, DocumentData } from 'firebase/firestore';
-import { db } from '../api/firebase';
 import { 
   exportToObsidian, 
   ObsidianSettings,
   ObsidianState,
-  updateObsidianState
+  cachePdfBlob,
+  getCachedPdfBlob,
+  DEFAULT_OBSIDIAN_SETTINGS,
+  isVaultSelected,
+  getVault
 } from '../api/obsidian';
 import { 
   getPaperPdfUrl, 
@@ -53,22 +55,7 @@ import {
   Paper as PaperType
 } from '../api/papers';
 
-// FirestoreのデータをObsidianSettingsに変換する関数
-const convertToObsidianSettings = (data: DocumentData): ObsidianSettings => {
-  return {
-    vault_dir: data.vault_dir || '',
-    vault_name: data.vault_name || '',
-    folder_path: data.folder_path || '',
-    file_name_format: data.file_name_format || '{authors}_{title}_{year}',
-    file_type: data.file_type || 'md',
-    open_after_export: data.open_after_export !== false,
-    include_pdf: data.include_pdf !== false,
-    create_embed_folder: data.create_embed_folder !== false,
-    auto_export: data.auto_export !== false,
-    created_at: data.created_at?.toDate() || new Date(),
-    updated_at: data.updated_at?.toDate() || new Date()
-  };
-};
+// ObsidianSettings型のデフォルト値は obsidian.ts から importしています
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -121,6 +108,28 @@ const PaperViewPage: React.FC = () => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [obsidianExportStatus, setObsidianExportStatus] = useState<'success' | 'error' | 'pending' | 'none'>('none');
+  
+  // ローカルストレージからObsidian連携状態を読み込む
+  useEffect(() => {
+    if (!currentPaper?.id) return;
+    
+    try {
+      const savedExportStatus = localStorage.getItem('obsidian_export_status');
+      if (savedExportStatus) {
+        const statusData = JSON.parse(savedExportStatus);
+        if (statusData[currentPaper.id]) {
+          const paperStatus = statusData[currentPaper.id];
+          if (paperStatus.exported) {
+            setObsidianExportStatus('success');
+          } else if (paperStatus.error) {
+            setObsidianExportStatus('error');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading Obsidian export status:', error);
+    }
+  }, [currentPaper]);
 
   useEffect(() => {
     if (id && user) {
@@ -132,104 +141,136 @@ const PaperViewPage: React.FC = () => {
     };
   }, [id, user, fetchPaper, clearCurrentPaper]);
   
-  // Obsidian設定の読み込み
+  // Obsidian設定の読み込み（ローカルストレージから）
   useEffect(() => {
-    const loadObsidianSettings = async () => {
-      if (!user) return;
-      
+    const loadObsidianSettings = () => {
       try {
-        const settingsRef = doc(db, `users/${user.uid}/obsidian_settings/default`);
-        const settingsSnap = await getDoc(settingsRef);
+        // ローカルストレージからObsidian設定を取得
+        const savedSettings = localStorage.getItem('obsidian_settings');
         
-        if (settingsSnap.exists()) {
-          const settings = convertToObsidianSettings(settingsSnap.data());
-          setObsidianSettings(settings);
+        if (savedSettings) {
+          const parsedSettings = JSON.parse(savedSettings);
+          // 日付文字列をDateオブジェクトに変換
+          if (parsedSettings.created_at) {
+            parsedSettings.created_at = new Date(parsedSettings.created_at);
+          }
+          if (parsedSettings.updated_at) {
+            parsedSettings.updated_at = new Date(parsedSettings.updated_at);
+          }
+          
+          setObsidianSettings(parsedSettings);
+        } else {
+          // デフォルト設定を使用
+          setObsidianSettings(DEFAULT_OBSIDIAN_SETTINGS);
         }
       } catch (error) {
         console.error('Error loading Obsidian settings:', error);
+        // エラー時はデフォルト設定を使用
+        setObsidianSettings(DEFAULT_OBSIDIAN_SETTINGS);
       }
     };
     
     loadObsidianSettings();
-  }, [user]);
+  }, []);
   
-  // Obsidian連携状態を取得
+  // PDFのキャッシュ状態を追跡するステート
+  const [pdfCached, setPdfCached] = useState<boolean>(false);
+  
+  // PDFのキャッシュ状態を確認
   useEffect(() => {
-    const getObsidianState = () => {
-      if (!currentPaper || !currentPaper.obsidian) {
-        setObsidianExportStatus('none');
-        return;
-      }
-      
-      const obsidian = currentPaper.obsidian;
-      
-      if (obsidian.exported) {
-        setObsidianExportStatus('success');
-      } else if (obsidian.error) {
-        setObsidianExportStatus('error');
-      } else {
-        setObsidianExportStatus('none');
-      }
-    };
-    
-    getObsidianState();
+    if (currentPaper?.id) {
+      const cachedPdf = getCachedPdfBlob(currentPaper.id);
+      setPdfCached(!!cachedPdf);
+    }
   }, [currentPaper]);
 
   // 自動エクスポートの実行
   useEffect(() => {
     const autoExportToObsidian = async () => {
-      if (!user || !currentPaper || !obsidianSettings || exportAttempted || 
-          currentPaper.status !== 'completed' || !obsidianSettings.auto_export) return;
+      // PDFがキャッシュされたらすぐに自動エクスポートを試みる
+      if (!currentPaper || currentPaper.status !== 'completed' || exportAttempted || !pdfCached) return;
+      
+      // 設定がある場合のみ自動エクスポートを試みる
+      if (!obsidianSettings) return;
       
       try {
+        console.log('自動エクスポートを開始します...');
         setExportAttempted(true);
         setObsidianExportStatus('pending');
         
-        // 既に成功している場合はスキップ
-        if (currentPaper.obsidian?.exported) {
-          setObsidianExportStatus('success');
+        // PDFデータを取得
+        const pdfBlob = currentPaper.id ? getCachedPdfBlob(currentPaper.id) : null;
+        
+        // 権限プロンプトをスキップしてVaultを取得（自動実行の場合はプロンプトを表示しない）
+        const vaultHandle = await getVault(true);
+        
+        if (!vaultHandle) {
+          console.log('Obsidian Vaultが取得できないため、自動エクスポートをスキップします。');
           return;
         }
         
-        // Obsidianエクスポート実行
-        const result = await exportToObsidian(currentPaper, currentPaperChapters, obsidianSettings);
+        // Obsidianエクスポート実行（userInitiated=falseで自動実行を示す）
+        const result = await exportToObsidian(
+          currentPaper, 
+          currentPaperChapters, 
+          obsidianSettings,
+          pdfBlob || undefined,
+          false // 自動実行
+        );
         
         if (result.exported) {
           setObsidianExportStatus('success');
-          setSnackbarMessage('Obsidianに論文を保存しました');
+          setSnackbarMessage('Obsidianに論文を自動保存しました');
           setSnackbarOpen(true);
         } else {
-          setObsidianExportStatus('error');
           if (result.error) {
-            setError(result.error);
+            console.log('自動エクスポートに失敗しました:', result.error);
+            // エラーメッセージを表示しない（ユーザーに通知せず、手動エクスポートを促す）
           }
         }
       } catch (error) {
         console.error('Error auto-exporting to Obsidian:', error);
-        setObsidianExportStatus('error');
-        setError('Obsidianへの自動保存に失敗しました');
-        
-        // エラー状態を保存
-        if (id) {
-          await updateObsidianState(id, {
-            exported: false,
-            error: error instanceof Error ? error.message : String(error)
-          });
-        }
+        // 自動エクスポートのエラーは静かに失敗させる（ユーザーエクスペリエンスを妨げないため）
       }
     };
 
     autoExportToObsidian();
-  }, [user, currentPaper, currentPaperChapters, obsidianSettings, exportAttempted, id]);
+  }, [currentPaper, currentPaperChapters, pdfCached, exportAttempted, obsidianSettings]);
   
   useEffect(() => {
     const fetchPaperResources = async () => {
       if (currentPaper && currentPaper.file_path) {
         try {
-          const url = await getPaperPdfUrl(currentPaper);
-          setPdfUrl(url);
+          // まずキャッシュをチェック
+          let cachedPdf = currentPaper.id ? getCachedPdfBlob(currentPaper.id) : null;
+          
+          if (cachedPdf) {
+            // キャッシュがある場合はそれを使用
+            const objectUrl = URL.createObjectURL(cachedPdf);
+            setPdfUrl(objectUrl);
+            setPdfCached(true);
+          } else {
+            // キャッシュがない場合はAPIから取得
+            try {
+              const url = await getPaperPdfUrl(currentPaper);
+              setPdfUrl(url);
+              
+              // PDFをフェッチしてキャッシュに保存
+              const response = await fetch(url);
+              if (response.ok) {
+                const blob = await response.blob();
+                if (currentPaper.id) {
+                  cachePdfBlob(currentPaper.id, blob);
+                  setPdfCached(true);
+                }
+              }
+            } catch (apiError) {
+              console.error('Error fetching PDF from API:', apiError);
+              setError('PDFの読み込みに失敗しました');
+            }
+          }
         } catch (error) {
-          console.error('Error fetching PDF URL:', error);
+          console.error('Error handling PDF resources:', error);
           setError('PDFの読み込みに失敗しました');
         }
       }
@@ -315,27 +356,59 @@ const PaperViewPage: React.FC = () => {
   
   // Obsidianへの手動エクスポート
   const handleExportToObsidian = async () => {
-    if (!currentPaper || !obsidianSettings) {
-      setError('Obsidian設定が見つかりません。プロフィールページで設定してください。');
+    if (!currentPaper) {
+      setError('論文データがありません');
       return;
     }
+    
+    // 設定がない場合はデフォルト設定を使用
+    const settings = obsidianSettings || DEFAULT_OBSIDIAN_SETTINGS;
     
     try {
       setIsExporting(true);
       setObsidianExportStatus('pending');
       
-      const result = await exportToObsidian(currentPaper, currentPaperChapters, obsidianSettings);
+      // PDFデータを取得
+      let pdfBlob = currentPaper.id ? getCachedPdfBlob(currentPaper.id) : null;
+      
+      // PDF未キャッシュの場合、キャッシュを試みる
+      if (!pdfBlob && currentPaper.file_path && pdfUrl) {
+        try {
+          const response = await fetch(pdfUrl);
+          if (response.ok) {
+            pdfBlob = await response.blob();
+            if (currentPaper.id) {
+              cachePdfBlob(currentPaper.id, pdfBlob);
+              setPdfCached(true);
+            }
+          }
+        } catch (pdfError) {
+          console.error('Error caching PDF:', pdfError);
+        }
+      }
+      
+      // Obsidianエクスポート実行（userInitiated=trueでユーザーアクションによる実行を示す）
+      const result = await exportToObsidian(
+        currentPaper, 
+        currentPaperChapters, 
+        settings,
+        pdfBlob || undefined,
+        true // ユーザーが明示的に実行したことを示すフラグ
+      );
       
       if (result.exported) {
         setObsidianExportStatus('success');
         setSnackbarMessage('Obsidianに論文を保存しました');
         setSnackbarOpen(true);
+        setExportAttempted(true);
+      } else if (result.error) {
+        setError(result.error);
       }
       
     } catch (error) {
       console.error('Error exporting to Obsidian:', error);
       setObsidianExportStatus('error');
-      setError('Obsidianへの保存に失敗しました');
+      setError('Obsidianへの保存に失敗しました：' + (error instanceof Error ? error.message : String(error)));
     } finally {
       setIsExporting(false);
     }

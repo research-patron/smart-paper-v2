@@ -58,27 +58,35 @@ export class MarkdownExporter {
     
     const authors = metadata.authors.map(a => a.name).join(', ');
     
-    let header = `# ${metadata.title}\n\n`;
+    // Obsidianのプロパティ形式でメタデータを作成
+    let header = `---\n`;
+    header += `title: "${metadata.title.replace(/"/g, '\\"')}"\n`;
     
     if (authors) {
-      header += `**著者:** ${authors}\n\n`;
+      header += `authors: "${authors.replace(/"/g, '\\"')}"\n`;
     }
     
     if (metadata.journal) {
-      header += `**ジャーナル:** ${metadata.journal}\n\n`;
+      header += `journal: "${metadata.journal.replace(/"/g, '\\"')}"\n`;
     }
     
     if (metadata.year) {
-      header += `**出版年:** ${metadata.year}\n\n`;
+      header += `year: ${metadata.year}\n`;
     }
     
     if (metadata.doi) {
-      header += `**DOI:** ${metadata.doi}\n\n`;
+      header += `doi: "${metadata.doi}"\n`;
     }
     
     if (metadata.keywords && metadata.keywords.length > 0) {
-      header += `**キーワード:** ${metadata.keywords.join(', ')}\n\n`;
+      header += `keywords: [${metadata.keywords.map(k => `"${k.replace(/"/g, '\\"')}"`).join(', ')}]\n`;
     }
+    
+    // プロパティセクションを閉じる
+    header += `---\n\n`;
+    
+    // タイトルを追加
+    header += `# ${metadata.title}\n\n`;
     
     return header;
   }
