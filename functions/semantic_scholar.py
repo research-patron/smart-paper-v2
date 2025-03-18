@@ -1,6 +1,6 @@
 """
-Semantic Scholar API連携モジュール
-論文の関連論文を取得するためのヘルパー関数群
+Semantic Scholar API連携モジュール - シンプル化したバージョン
+論文の関連論文を取得するためのヘルパー関数
 """
 import requests
 import json
@@ -40,12 +40,13 @@ def get_api_key() -> str:
         # エラー時はデフォルトの認証情報を返す（開発環境のフォールバック）
         return None
 
-def get_related_papers_by_doi(doi: str, max_papers: int = 15) -> List[Dict[str, Any]]:
+def get_related_papers_direct(paper_id: str, max_papers: int = 15) -> List[Dict[str, Any]]:
     """
-    Semantic Scholar APIを使用してDOIから関連論文を取得
+    Semantic Scholar APIを使用して論文IDから直接関連論文を取得
+    CloudFunctionsにキャッシュした論文IDを使用する場合に使用
     
     Args:
-        doi: 論文のDOI
+        paper_id: Semantic Scholar論文ID
         max_papers: 取得する論文の最大数 (デフォルト: 15)
         
     Returns:
@@ -55,44 +56,10 @@ def get_related_papers_by_doi(doi: str, max_papers: int = 15) -> List[Dict[str, 
         # APIキーを取得
         api_key = get_api_key()
         
-        # Semantic Scholar APIを呼び出す
+        # APIヘッダー設定
         headers = {
             "x-api-key": api_key
-        }
-        
-        # APIエンドポイント（論文情報取得）
-        paper_url = f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}"
-        paper_params = {
-            "fields": "paperId,title,abstract,authors,year,citationCount"
-        }
-        
-        # レート制限に対応するため少し待機
-        time.sleep(1)
-        
-        # 論文情報の取得
-        paper_response = requests.get(paper_url, headers=headers, params=paper_params)
-        
-        # エラーチェック
-        if paper_response.status_code == 404:
-            log_warning("SemanticScholarAPIError", f"Paper with DOI {doi} not found", 
-                       {"response": paper_response.text})
-            return _get_dummy_related_papers("DOIに一致する論文が見つかりませんでした")
-            
-        if paper_response.status_code != 200:
-            log_error("SemanticScholarAPIError", f"API returned error: {paper_response.status_code}", 
-                     {"response": paper_response.text})
-            return _get_dummy_related_papers()
-        
-        # 論文情報を取得
-        paper_data = paper_response.json()
-        paper_id = paper_data.get("paperId")
-        
-        if not paper_id:
-            log_warning("SemanticScholarAPIError", f"No paperId found for DOI {doi}")
-            return _get_dummy_related_papers("この論文のIDが取得できませんでした")
-        
-        # レート制限に対応するため少し待機
-        time.sleep(1)
+        } if api_key else {}
         
         # 関連論文APIエンドポイント
         related_url = f"https://api.semanticscholar.org/graph/v1/paper/{paper_id}/related"
@@ -101,14 +68,15 @@ def get_related_papers_by_doi(doi: str, max_papers: int = 15) -> List[Dict[str, 
             "limit": max_papers
         }
         
-        # 関連論文の取得
+        # 関連論文のリクエスト
+        log_info("SemanticScholarAPI", f"Requesting related papers for paper_id: {paper_id}")
         related_response = requests.get(related_url, headers=headers, params=related_params)
         
         # エラーチェック
         if related_response.status_code != 200:
             log_error("SemanticScholarAPIError", f"API returned error: {related_response.status_code}", 
                      {"response": related_response.text})
-            return _get_dummy_related_papers()
+            return _get_dummy_related_papers("関連論文の取得に失敗しました。しばらくしてからお試しください。")
         
         # 関連論文データを解析
         related_data = related_response.json()
@@ -131,49 +99,98 @@ def get_related_papers_by_doi(doi: str, max_papers: int = 15) -> List[Dict[str, 
                 "url": paper.get("url", f"https://doi.org/{paper.get('doi')}" if paper.get("doi") else "")
             })
         
-        log_info("SemanticScholarAPI", f"Successfully retrieved {len(related_papers)} related papers for DOI: {doi}")
+        log_info("SemanticScholarAPI", f"Successfully retrieved {len(related_papers)} related papers")
         return related_papers
     except Exception as e:
-        log_error("SemanticScholarAPIError", f"Failed to get related papers: {str(e)}", {"doi": doi})
+        log_error("SemanticScholarAPIError", f"Failed to get related papers: {str(e)}")
         # エラー時はダミーデータを返す
         return _get_dummy_related_papers()
 
-def get_related_papers_by_title(title: str, max_papers: int = 15) -> List[Dict[str, Any]]:
+def get_paper_id_by_doi(doi: str) -> Optional[str]:
     """
-    Semantic Scholar APIを使用してタイトルから関連論文を取得
+    DOIから論文IDを取得する
     
     Args:
-        title: 論文のタイトル
-        max_papers: 取得する論文の最大数 (デフォルト: 15)
+        doi: 論文のDOI
         
     Returns:
-        List[Dict[str, Any]]: 関連論文のリスト
+        Optional[str]: 論文ID (失敗時はNone)
     """
     try:
         # APIキーを取得
         api_key = get_api_key()
         
-        # Semantic Scholar APIを呼び出す
+        # APIヘッダー設定
         headers = {
             "x-api-key": api_key
+        } if api_key else {}
+        
+        # APIエンドポイント（論文情報取得）
+        paper_url = f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}"
+        paper_params = {
+            "fields": "paperId"  # 最小限のフィールドのみ取得
         }
+        
+        # 論文IDのリクエスト
+        log_info("SemanticScholarAPI", f"Requesting paper ID for DOI: {doi}")
+        paper_response = requests.get(paper_url, headers=headers, params=paper_params)
+        
+        # エラーチェック
+        if paper_response.status_code != 200:
+            log_error("SemanticScholarAPIError", f"API returned error: {paper_response.status_code}", 
+                     {"response": paper_response.text})
+            return None
+        
+        # 論文IDを取得
+        paper_data = paper_response.json()
+        paper_id = paper_data.get("paperId")
+        
+        if paper_id:
+            log_info("SemanticScholarAPI", f"Found paper ID: {paper_id} for DOI: {doi}")
+            return paper_id
+        else:
+            log_warning("SemanticScholarAPIError", f"No paperId found for DOI: {doi}")
+            return None
+    except Exception as e:
+        log_error("SemanticScholarAPIError", f"Failed to get paper ID: {str(e)}", {"doi": doi})
+        return None
+
+def get_paper_id_by_title(title: str) -> Optional[str]:
+    """
+    タイトルから論文IDを取得する
+    
+    Args:
+        title: 論文のタイトル
+        
+    Returns:
+        Optional[str]: 論文ID (失敗時はNone)
+    """
+    try:
+        # APIキーを取得
+        api_key = get_api_key()
+        
+        # APIヘッダー設定
+        headers = {
+            "x-api-key": api_key
+        } if api_key else {}
         
         # APIエンドポイント（論文検索）
         search_url = "https://api.semanticscholar.org/graph/v1/paper/search"
         search_params = {
             "query": title,
-            "fields": "paperId,title,abstract,authors,year,citationCount",
+            "fields": "paperId",  # 最小限のフィールドのみ取得
             "limit": 1  # 最も関連性の高い論文を1つだけ取得
         }
         
         # 論文検索
+        log_info("SemanticScholarAPI", f"Searching for paper with title: {title}")
         search_response = requests.get(search_url, headers=headers, params=search_params)
         
         # エラーチェック
         if search_response.status_code != 200:
             log_error("SemanticScholarAPIError", f"API returned error: {search_response.status_code}", 
                      {"response": search_response.text})
-            return _get_dummy_related_papers()
+            return None
         
         # 検索結果を解析
         search_data = search_response.json()
@@ -181,65 +198,25 @@ def get_related_papers_by_title(title: str, max_papers: int = 15) -> List[Dict[s
         
         if not papers:
             log_warning("SemanticScholarAPIError", f"No papers found with title: {title}")
-            return _get_dummy_related_papers("タイトルに一致する論文が見つかりませんでした")
+            return None
         
         # 最も関連性の高い論文のIDを取得
         paper_id = papers[0].get("paperId")
         
-        if not paper_id:
+        if paper_id:
+            log_info("SemanticScholarAPI", f"Found paper ID: {paper_id} for title: {title}")
+            return paper_id
+        else:
             log_warning("SemanticScholarAPIError", f"No paperId found for title: {title}")
-            return _get_dummy_related_papers("この論文のIDが取得できませんでした")
-        
-        # レート制限に対応するため少し待機
-        time.sleep(1)
-        
-        # 関連論文APIエンドポイント
-        related_url = f"https://api.semanticscholar.org/graph/v1/paper/{paper_id}/related"
-        related_params = {
-            "fields": "paperId,title,authors,year,abstract,citationCount,url,venue,doi",
-            "limit": max_papers
-        }
-        
-        # 関連論文の取得
-        related_response = requests.get(related_url, headers=headers, params=related_params)
-        
-        # エラーチェック
-        if related_response.status_code != 200:
-            log_error("SemanticScholarAPIError", f"API returned error: {related_response.status_code}", 
-                     {"response": related_response.text})
-            return _get_dummy_related_papers()
-        
-        # 関連論文データを解析
-        related_data = related_response.json()
-        related_papers = []
-        
-        for paper in related_data.get("data", []):
-            # 著者リストの作成
-            authors = []
-            for author in paper.get("authors", []):
-                authors.append(author.get("name", ""))
-            
-            # 関連論文情報の整形
-            related_papers.append({
-                "title": paper.get("title", ""),
-                "doi": paper.get("doi", ""),
-                "year": paper.get("year"),
-                "authors": authors,
-                "citation_count": paper.get("citationCount", 0),
-                "relatedness_score": 0.8,  # タイトル検索は関連度をやや低く設定
-                "url": paper.get("url", f"https://doi.org/{paper.get('doi')}" if paper.get("doi") else "")
-            })
-        
-        log_info("SemanticScholarAPI", f"Successfully retrieved {len(related_papers)} related papers for title: {title}")
-        return related_papers
+            return None
     except Exception as e:
-        log_error("SemanticScholarAPIError", f"Failed to get related papers by title: {str(e)}", {"title": title})
-        # エラー時はダミーデータを返す
-        return _get_dummy_related_papers()
+        log_error("SemanticScholarAPIError", f"Failed to get paper ID: {str(e)}", {"title": title})
+        return None
 
 def get_related_papers(paper_data: Dict[str, Any], max_papers: int = 15) -> List[Dict[str, Any]]:
     """
     論文メタデータから関連論文を取得（DOIがある場合はDOIを使用、ない場合はタイトルを使用）
+    APIリクエストを最小限に抑えるため、重要なリクエストのみを行う
     
     Args:
         paper_data: 論文メタデータ
@@ -253,22 +230,41 @@ def get_related_papers(paper_data: Dict[str, Any], max_papers: int = 15) -> List
         return _get_dummy_related_papers("論文のメタデータが見つかりません")
     
     metadata = paper_data["metadata"]
+    paper_id = None
     
-    # DOIがある場合はDOIを使用
-    if metadata.get("doi"):
+    # すでに関連論文がFirestoreに保存されている場合はそれを返す
+    if paper_data.get("related_papers"):
+        log_info("RelatedPapers", "Using cached related papers from Firestore")
+        return paper_data["related_papers"]
+    
+    # 最初にFirestoreに保存されたSemantic Scholar IDをチェック
+    if paper_data.get("semantic_scholar_id"):
+        paper_id = paper_data["semantic_scholar_id"]
+        log_info("RelatedPapers", f"Using cached Semantic Scholar ID: {paper_id}")
+    
+    # DOIから検索
+    elif metadata.get("doi"):
         doi = metadata["doi"]
-        log_info("RelatedPapers", f"Searching related papers using DOI: {doi}")
-        return get_related_papers_by_doi(doi, max_papers)
+        log_info("RelatedPapers", f"Searching for paper ID using DOI: {doi}")
+        # 遅延を入れる - システム全体の負荷軽減のため
+        time.sleep(1)
+        paper_id = get_paper_id_by_doi(doi)
     
-    # DOIがない場合はタイトルを使用
+    # タイトルから検索
     elif metadata.get("title"):
         title = metadata["title"]
-        log_info("RelatedPapers", f"DOI not found. Searching related papers using title: {title}")
-        return get_related_papers_by_title(title, max_papers)
+        log_info("RelatedPapers", f"DOI not found. Searching for paper ID using title: {title}")
+        # 遅延を入れる - システム全体の負荷軽減のため
+        time.sleep(1)
+        paper_id = get_paper_id_by_title(title)
     
-    # DOIもタイトルもない場合はダミーデータを返す
+    # 論文IDが取得できた場合は関連論文を取得
+    if paper_id:
+        # 少し待機 - APIレート制限への配慮
+        time.sleep(2)
+        return get_related_papers_direct(paper_id, max_papers)
     else:
-        return _get_dummy_related_papers("論文のDOIもタイトルも見つかりません")
+        return _get_dummy_related_papers("論文が見つかりません")
 
 def _get_dummy_related_papers(message: str = "関連論文の取得中にエラーが発生しました") -> List[Dict[str, Any]]:
     """

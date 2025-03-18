@@ -133,7 +133,7 @@ def load_prompt(filename: str) -> str:
     """
     try:
         with open(filename, "r", encoding="utf-8") as f:
-            prompt = json.load(f)
+            prompt = json.loads(f.read())
         return prompt["prompt"]  # プロンプトはJSONの "prompt" キーに格納
     except Exception as e:
         log_error("PromptLoadError", f"Failed to load prompt: {filename}", {"error": str(e)})
@@ -148,7 +148,7 @@ def load_prompt(filename: str) -> str:
             raise ValueError(f"Unknown prompt type: {filename}")
 
 # エクスポネンシャルバックオフ付きリトライ関数
-def retry_with_backoff(func, max_retries=5, base_delay=1.0, max_delay=60.0):
+def retry_with_backoff(func, max_retries=0, base_delay=1.0, max_delay=60.0):
     """
     指数関数的バックオフ付きのリトライを行う関数
 
@@ -375,22 +375,42 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
             # Firestoreから論文メタデータを取得
             paper_data = doc_ref.get().to_dict()
             
-            # Semantic Scholar APIを使用して関連論文を取得
-            log_info("ProcessAllChapters", f"Fetching related papers using Semantic Scholar API", {"paper_id": paper_id})
-            
-            # 関連論文取得（DOIまたはタイトルを使用）
-            related_papers = get_related_papers(paper_data, max_papers=15)
-            
-            # 進捗を更新
-            doc_ref.update({"progress": 98})
-            
+            # すでに関連論文が保存されていたら再取得しない
+            if paper_data.get("related_papers"):
+                log_info("ProcessAllChapters", f"Using existing related papers data", {"paper_id": paper_id})
+                related_papers = paper_data.get("related_papers")
+            else:
+                # Semantic Scholar APIを使用して関連論文を取得
+                log_info("ProcessAllChapters", f"Fetching related papers using Semantic Scholar API", {"paper_id": paper_id})
+                
+                try:
+                    # 関連論文取得（DOIまたはタイトルを使用）
+                    # APIコールは1回に制限 - プロセスが重くなりすぎないように
+                    related_papers = get_related_papers(paper_data, max_papers=15)
+                    
+                    # 進捗を更新
+                    doc_ref.update({"progress": 98})
+                except Exception as api_error:
+                    log_error("RelatedPapersError", f"Error fetching related papers from API", 
+                            {"paper_id": paper_id, "error": str(api_error)})
+                    # APIエラー時でも処理を続行するためにダミーデータを使用
+                    related_papers = [
+                        {
+                            "title": "関連論文の取得中にAPIエラーが発生しました",
+                            "doi": "",
+                            "year": None,
+                            "authors": ["しばらく時間をおいて再度お試しください"],
+                            "citation_count": 0,
+                            "relatedness_score": 0
+                        }
+                    ]
         except Exception as e:
-            log_error("RelatedPapersError", f"Error fetching related papers", 
-                      {"paper_id": paper_id, "error": str(e)})
+            log_error("RelatedPapersError", f"Error in related papers processing", 
+                    {"paper_id": paper_id, "error": str(e)})
             # エラー時はダミーデータを使用
             related_papers = [
                 {
-                    "title": "関連論文の取得中にエラーが発生しました",
+                    "title": "関連論文の取得処理でエラーが発生しました",
                     "doi": "",
                     "year": None,
                     "authors": ["一時的なエラーが発生しました。もう一度試してください。"],
@@ -405,7 +425,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
             "progress": 100
         })
         log_info("ProcessAllChapters", f"Added {len(related_papers)} related paper recommendations", 
-                 {"paper_id": paper_id})
+                {"paper_id": paper_id})
 
         # チャットセッションを終了して解放
         end_chat_session(paper_id)
