@@ -446,8 +446,11 @@ export const exportToObsidian = async (
       attachmentsHandle = await smartPaperRootHandle.getDirectoryHandle('添付ファイル', { create: true });
     }
     
-    // 日付フォルダを作成（YYYY-MM-DD形式）
-    const today = new Date().toISOString().split('T')[0];
+    // 日付フォルダを作成（YYYY-MM-DD形式）- ローカル時間に基づく日付を使用
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    console.log('Creating/accessing date folder for:', today); // デバッグログ追加
+
     let dateFolderHandle: FileSystemDirectoryHandle;
     try {
       // すでに存在するか確認

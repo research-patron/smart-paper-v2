@@ -79,7 +79,8 @@ export class MarkdownExporter {
     }
     
     if (metadata.keywords && metadata.keywords.length > 0) {
-      header += `tags: [${metadata.keywords.map(k => `"${k.replace(/"/g, '\\"')}"`).join(', ')}]\n`;
+      // キーワードをそのままの形式で保持
+      header += `keywords: [${metadata.keywords.map(k => `"${k.replace(/"/g, '\\"')}"`).join(', ')}]\n`;
     }
     
     // プロパティセクションを閉じる
@@ -89,6 +90,68 @@ export class MarkdownExporter {
     header += `# ${metadata.title}\n\n`;
     
     return header;
+  }
+  
+  /**
+   * Obsidianスタイルのフロントマターを含むMarkdownを生成
+   * @param paper 論文データ
+   * @param translatedChapters 翻訳された章データ
+   * @param pdfFileName PDFファイル名（オプション）
+   * @returns Markdown文字列
+   */
+  static generateObsidianMarkdown(
+    paper: Paper, 
+    translatedChapters?: TranslatedChapter[], 
+    pdfFileName?: string
+  ): string {
+    let markdown = '';
+    
+    // Obsidianフロントマター
+    markdown += '---\n';
+    
+    if (paper.metadata) {
+      markdown += `title: "${paper.metadata.title.replace(/"/g, '\\"')}"\n`;
+      
+      if (paper.metadata.authors && paper.metadata.authors.length > 0) {
+        markdown += `authors: [${paper.metadata.authors.map(a => `"${a.name.replace(/"/g, '\\"')}"`).join(', ')}]\n`;
+      }
+      
+      if (paper.metadata.journal) {
+        markdown += `journal: "${paper.metadata.journal.replace(/"/g, '\\"')}"\n`;
+      }
+      
+      if (paper.metadata.year) {
+        markdown += `year: ${paper.metadata.year}\n`;
+      }
+      
+      if (paper.metadata.doi) {
+        markdown += `doi: "${paper.metadata.doi}"\n`;
+      }
+      
+      if (paper.metadata.keywords && paper.metadata.keywords.length > 0) {
+        // メタデータからのキーワードをそのまま保持
+        markdown += `keywords: [${paper.metadata.keywords.map(k => `"${k.replace(/"/g, '\\"')}"`).join(', ')}]\n`;
+      }
+    }
+    
+    // ローカル時間に基づく日付を使用
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    
+    markdown += `date: "${today}"\n`;
+    markdown += `type: "research-paper"\n`;
+    markdown += '---\n\n';
+    
+    // 通常のMarkdownコンテンツを追加
+    markdown += this.generateFullMarkdown(paper, translatedChapters);
+    
+    // PDFへのリンクを追加（埋め込み書類フォルダへのリンク）
+    if (pdfFileName) {
+      markdown += '\n\n## 原文PDF\n\n';
+      markdown += `![[埋め込み書類/${pdfFileName}]]\n`;
+    }
+    
+    return markdown;
   }
   
   /**
@@ -186,63 +249,6 @@ export class MarkdownExporter {
     
     URL.revokeObjectURL(url);
     document.body.removeChild(a);
-  }
-  
-  /**
-   * Obsidianスタイルのフロントマターを含むMarkdownを生成
-   * @param paper 論文データ
-   * @param translatedChapters 翻訳された章データ
-   * @param pdfFileName PDFファイル名（オプション）
-   * @returns Markdown文字列
-   */
-  static generateObsidianMarkdown(
-    paper: Paper, 
-    translatedChapters?: TranslatedChapter[], 
-    pdfFileName?: string
-  ): string {
-    let markdown = '';
-    
-    // Obsidianフロントマター
-    markdown += '---\n';
-    
-    if (paper.metadata) {
-      markdown += `title: "${paper.metadata.title.replace(/"/g, '\\"')}"\n`;
-      
-      if (paper.metadata.authors && paper.metadata.authors.length > 0) {
-        markdown += `authors: [${paper.metadata.authors.map(a => `"${a.name.replace(/"/g, '\\"')}"`).join(', ')}]\n`;
-      }
-      
-      if (paper.metadata.journal) {
-        markdown += `journal: "${paper.metadata.journal.replace(/"/g, '\\"')}"\n`;
-      }
-      
-      if (paper.metadata.year) {
-        markdown += `year: ${paper.metadata.year}\n`;
-      }
-      
-      if (paper.metadata.doi) {
-        markdown += `doi: "${paper.metadata.doi}"\n`;
-      }
-      
-      if (paper.metadata.keywords && paper.metadata.keywords.length > 0) {
-        markdown += `tags: [${paper.metadata.keywords.map(k => `"${k.replace(/"/g, '\\"')}"`).join(', ')}]\n`;
-      }
-    }
-    
-    markdown += `date: "${new Date().toISOString().split('T')[0]}"\n`;
-    markdown += `type: "research-paper"\n`;
-    markdown += '---\n\n';
-    
-    // 通常のMarkdownコンテンツを追加
-    markdown += this.generateFullMarkdown(paper, translatedChapters);
-    
-    // PDFへのリンクを追加（埋め込み書類フォルダへのリンク）
-    if (pdfFileName) {
-      markdown += '\n\n## 原文PDF\n\n';
-      markdown += `![[埋め込み書類/${pdfFileName}]]\n`;
-    }
-    
-    return markdown;
   }
   
   /**
