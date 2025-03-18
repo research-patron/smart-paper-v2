@@ -35,9 +35,37 @@ gcloud projects add-iam-policy-binding ${PROJECT_ID} \
   --member=serviceAccount:${SERVICE_ACCOUNT} \
   --role=roles/cloudfunctions.invoker || true
 
+# Secret Managerへのアクセス権限を追加
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+  --member=serviceAccount:${SERVICE_ACCOUNT} \
+  --role=roles/secretmanager.secretAccessor || true
+
 # Vertex AI APIを有効化
 echo -e "\n${BLUE}Vertex AI APIを有効化...${NC}"
 gcloud services enable aiplatform.googleapis.com
+
+# Secret Manager APIを有効化
+echo -e "\n${BLUE}Secret Manager APIを有効化...${NC}"
+gcloud services enable secretmanager.googleapis.com
+
+# Connected Papers APIキーの設定（既に存在する場合はスキップ）
+echo -e "\n${BLUE}Connected Papers APIキーの確認...${NC}"
+if ! gcloud secrets describe connected-papers-api-key &>/dev/null; then
+  echo -e "${YELLOW}Connected Papers APIキーが存在しません。新規作成します。${NC}"
+  
+  # APIキーの入力を求める
+  read -p "Connected Papers APIキーを入力してください: " CONNECTED_PAPERS_API_KEY
+  
+  # APIキーをSecret Managerに登録
+  echo -n "$CONNECTED_PAPERS_API_KEY" | gcloud secrets create connected-papers-api-key \
+    --replication-policy="automatic" \
+    --data-file=-
+    
+  # 成功メッセージ
+  echo -e "${GREEN}APIキーを登録しました${NC}"
+else
+  echo -e "${GREEN}Connected Papers APIキーは既に登録されています${NC}"
+fi
 
 # Cloud Functions依存関係のインストール
 echo -e "\n${BLUE}Cloud Functions依存関係のインストール...${NC}"

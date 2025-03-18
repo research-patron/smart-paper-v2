@@ -191,6 +191,8 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
     from google.cloud import firestore
     from google.cloud import storage
     import datetime
+    # Connected Papers APIモジュールをインポート
+    from connected_papers import get_related_papers
     
     db = firestore.Client()
     storage_client = storage.Client()
@@ -367,15 +369,52 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
 
             log_info("ProcessAllChapters", f"Translated text saved to Firestore", {"paper_id": paper_id})
 
-        # 関連論文の追加（ダミーデータ）
-        related_papers = [
-            {"title": "Related Paper 1", "doi": "10.1234/abcd1234"},
-            {"title": "Related Paper 2", "doi": "10.5678/efgh5678"},
-            {"title": "Related Paper 3", "doi": "10.9101/ijkl9101"}
-        ]
+        # 関連論文の取得
+        related_papers = []
+        try:
+            # Firestoreから論文メタデータを取得
+            paper_data = doc_ref.get().to_dict()
+            paper_metadata = paper_data.get("metadata", {})
+            
+            # DOIがある場合はConnected Papers APIを呼び出し
+            if paper_metadata and "doi" in paper_metadata and paper_metadata["doi"]:
+                doi = paper_metadata["doi"]
+                log_info("ProcessAllChapters", f"Fetching related papers for DOI: {doi}", {"paper_id": paper_id})
+                related_papers = get_related_papers(doi, max_papers=15)
+            else:
+                # DOIがない場合は論文タイトルとメタデータから検索（代替手段）
+                log_warning("ProcessAllChapters", "No DOI available for fetching related papers", {"paper_id": paper_id})
+                
+                # ダミーデータを使用
+                related_papers = [
+                    {
+                        "title": "関連論文が見つかりませんでした (DOIが存在しません)",
+                        "doi": "",
+                        "year": None,
+                        "authors": ["DOIを取得できなかったため、関連論文を検索できませんでした"],
+                        "citation_count": 0,
+                        "relatedness_score": 0
+                    }
+                ]
+        except Exception as e:
+            log_error("RelatedPapersError", f"Error fetching related papers", 
+                      {"paper_id": paper_id, "error": str(e)})
+            # エラー時はダミーデータを使用
+            related_papers = [
+                {
+                    "title": "関連論文の取得中にエラーが発生しました",
+                    "doi": "",
+                    "year": None,
+                    "authors": ["一時的なエラーが発生しました。もう一度試してください。"],
+                    "citation_count": 0,
+                    "relatedness_score": 0
+                }
+            ]
 
+        # 関連論文をFirestoreに保存
         doc_ref.update({"related_papers": related_papers})
-        log_info("ProcessAllChapters", f"Added related papers recommendations", {"paper_id": paper_id})
+        log_info("ProcessAllChapters", f"Added {len(related_papers)} related paper recommendations", 
+                 {"paper_id": paper_id})
 
         # チャットセッションを終了して解放
         end_chat_session(paper_id)

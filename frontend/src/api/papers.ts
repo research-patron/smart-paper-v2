@@ -51,6 +51,10 @@ export interface PaperMetadata {
 export interface RelatedPaper {
   title: string;
   doi: string;
+  year?: number;
+  authors?: string[];
+  citation_count?: number;
+  relatedness_score?: number;
 }
 
 // Obsidian連携状態の型定義
