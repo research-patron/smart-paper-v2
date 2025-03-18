@@ -896,61 +896,101 @@ const PaperViewPage: React.FC = () => {
                 
                 <List>
                   <ListItem>
-                    <ListItemText primary="タイトル" secondary={currentPaper.metadata.title} />
-                  </ListItem>
-                  <Divider component="li" />
-                  
-                  <ListItem>
                     <ListItemText 
-                      primary="著者" 
+                      primary={
+                        <Typography variant="subtitle1">タイトル</Typography>
+                      }
                       secondary={
-                        currentPaper.metadata.authors.map((author, index) => (
-                          <Typography key={index} component="span" display="block">
-                            {author.name}{author.affiliation ? ` (${author.affiliation})` : ''}
-                          </Typography>
-                        ))
+                        <Typography component="div" variant="body2">{currentPaper.metadata.title}</Typography>
                       }
                     />
                   </ListItem>
                   <Divider component="li" />
                   
                   <ListItem>
-                    <ListItemText primary="ジャーナル" secondary={currentPaper.metadata.journal} />
-                  </ListItem>
-                  <Divider component="li" />
-                  
-                  <ListItem>
-                    <ListItemText primary="出版年" secondary={currentPaper.metadata.year} />
+                    <ListItemText 
+                      primary={
+                        <Typography variant="subtitle1">著者</Typography>
+                      }
+                      secondary={
+                        <Box>
+                          {currentPaper.metadata.authors.map((author, index) => (
+                            <Typography key={index} component="div" variant="body2">
+                              {author.name}{author.affiliation ? ` (${author.affiliation})` : ''}
+                            </Typography>
+                          ))}
+                        </Box>
+                      }
+                    />
                   </ListItem>
                   <Divider component="li" />
                   
                   <ListItem>
                     <ListItemText 
-                      primary="DOI" 
+                      primary={
+                        <Typography variant="subtitle1">ジャーナル</Typography>
+                      }
+                      secondary={
+                        <Typography component="div" variant="body2">{currentPaper.metadata.journal}</Typography>
+                      }
+                    />
+                  </ListItem>
+                  <Divider component="li" />
+                  
+                  <ListItem>
+                    <ListItemText 
+                      primary={
+                        <Typography variant="subtitle1">出版年</Typography>
+                      }
+                      secondary={
+                        <Typography component="div" variant="body2">{currentPaper.metadata.year}</Typography>
+                      }
+                    />
+                  </ListItem>
+                  <Divider component="li" />
+                  
+                  <ListItem>
+                    <ListItemText 
+                      primary={
+                        <Typography variant="subtitle1">DOI</Typography>
+                      }
                       secondary={
                         <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
-                          <Typography variant="body2" sx={{ mr: 2 }}>
+                          <Typography component="div" variant="body2" sx={{ mr: 2 }}>
                             {currentPaper.metadata.doi || '不明'}
                           </Typography>
                           {currentPaper.metadata.doi && (
                             <ZoteroExport paper={currentPaper} />
                           )}
                         </Box>
-                      } 
+                      }
                     />
                   </ListItem>
                   <Divider component="li" />
                   
                   <ListItem>
                     <ListItemText 
-                      primary="キーワード" 
-                      secondary={currentPaper.metadata.keywords.join(', ') || '不明'}
+                      primary={
+                        <Typography variant="subtitle1">キーワード</Typography>
+                      }
+                      secondary={
+                        <Typography component="div" variant="body2">
+                          {currentPaper.metadata.keywords.join(', ') || '不明'}
+                        </Typography>
+                      }
                     />
                   </ListItem>
                   <Divider component="li" />
                   
                   <ListItem>
-                    <ListItemText primary="アブストラクト" secondary={currentPaper.metadata.abstract} />
+                    <ListItemText 
+                      primary={
+                        <Typography variant="subtitle1">アブストラクト</Typography>
+                      }
+                      secondary={
+                        <Typography component="div" variant="body2">{currentPaper.metadata.abstract}</Typography>
+                      }
+                    />
                   </ListItem>
                 </List>
                 
@@ -964,8 +1004,12 @@ const PaperViewPage: React.FC = () => {
                       {currentPaper.chapters.map((chapter, index) => (
                         <ListItem key={index}>
                           <ListItemText 
-                            primary={`${chapter.chapter_number}. ${chapter.title}`}
-                            secondary={`ページ: ${chapter.start_page}-${chapter.end_page}`}
+                            primary={
+                              <Typography variant="subtitle1">{`${chapter.chapter_number}. ${chapter.title}`}</Typography>
+                            }
+                            secondary={
+                              <Typography component="div" variant="body2">{`ページ: ${chapter.start_page}-${chapter.end_page}`}</Typography>
+                            }
                           />
                         </ListItem>
                       ))}
