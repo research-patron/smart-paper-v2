@@ -65,8 +65,8 @@ def start_chat_session(paper_id: str, pdf_gs_path: str) -> ChatSession:
         # 初期プロンプト - PDFの内容を保持するための指示
         initial_prompt = "これから解析する論文のPDFファイルです。このPDFの内容を記憶し、これ以降の質問や指示に対して、このPDFの内容に基づいて回答してください。"
         
-        # チャットセッションを開始
-        chat = model.start_chat()
+        # チャットセッションを開始 - response_validationをFalseに設定
+        chat = model.start_chat(response_validation=False)
         
         # 初期メッセージ送信（PDFを含む）
         chat.send_message([initial_prompt, pdf_content])
@@ -80,7 +80,7 @@ def start_chat_session(paper_id: str, pdf_gs_path: str) -> ChatSession:
         log_error("VertexAIError", f"Failed to start chat session", {"error": str(e), "paper_id": paper_id})
         raise VertexAIError(f"Failed to start chat session: {str(e)}") from e
 
-def process_with_chat(paper_id: str, prompt: str, temperature: float = 0.2) -> str:
+def process_with_chat(paper_id: str, prompt: str, temperature: float = 0.2, max_retries: int = 2) -> str:
     """
     既存のチャットセッションを使用してプロンプトを処理する
 
@@ -88,39 +88,57 @@ def process_with_chat(paper_id: str, prompt: str, temperature: float = 0.2) -> s
         paper_id: 論文のID
         prompt: プロンプト文字列
         temperature: 生成の温度パラメータ（デフォルト: 0.2）
+        max_retries: 最大リトライ回数
 
     Returns:
         str: 生成されたテキスト
     """
-    try:
-        # セッションが存在するか確認
-        if paper_id not in active_chat_sessions:
-            raise VertexAIError(f"No active chat session found for paper: {paper_id}")
-        
-        chat = active_chat_sessions[paper_id]
-        
-        # メッセージを送信
-        response = chat.send_message(
-            prompt,
-            generation_config=GenerationConfig(
-                temperature=temperature,
-                max_output_tokens=8192,
-                top_p=0.95,
-                top_k=40,
+    retry_count = 0
+    
+    while True:
+        try:
+            # セッションが存在するか確認
+            if paper_id not in active_chat_sessions:
+                raise VertexAIError(f"No active chat session found for paper: {paper_id}")
+            
+            chat = active_chat_sessions[paper_id]
+            
+            # メッセージを送信
+            response = chat.send_message(
+                prompt,
+                generation_config=GenerationConfig(
+                    temperature=temperature,
+                    max_output_tokens=8192,
+                    top_p=0.95,
+                    top_k=40,
+                )
             )
-        )
-        
-        log_info("VertexAI", f"Successfully processed prompt with chat session for paper: {paper_id}")
-        return response.text
-    except exceptions.DeadlineExceeded as e:
-        log_error("VertexAITimeout", "API request timed out", {"error": str(e), "paper_id": paper_id})
-        raise VertexAIError(f"API request timed out: {str(e)}") from e
-    except exceptions.ServiceUnavailable as e:
-        log_error("VertexAIUnavailable", "Service unavailable", {"error": str(e), "paper_id": paper_id})
-        raise VertexAIError(f"Service unavailable: {str(e)}") from e
-    except Exception as e:
-        log_error("VertexAIError", "Error processing with chat", {"error": str(e), "paper_id": paper_id})
-        raise VertexAIError(f"Error processing with chat: {str(e)}") from e
+            
+            log_info("VertexAI", f"Successfully processed prompt with chat session for paper: {paper_id}")
+            return response.text
+            
+        except exceptions.DeadlineExceeded as e:
+            log_error("VertexAITimeout", "API request timed out", {"error": str(e), "paper_id": paper_id})
+            if retry_count >= max_retries:
+                raise VertexAIError(f"API request timed out after {max_retries} retries: {str(e)}") from e
+            retry_count += 1
+            
+        except exceptions.ServiceUnavailable as e:
+            log_error("VertexAIUnavailable", "Service unavailable", {"error": str(e), "paper_id": paper_id})
+            if retry_count >= max_retries:
+                raise VertexAIError(f"Service unavailable after {max_retries} retries: {str(e)}") from e
+            retry_count += 1
+            
+        except exceptions.ResponseValidationError as e:
+            log_error("VertexAIValidationError", "Response validation error", {"error": str(e), "paper_id": paper_id})
+            if retry_count >= max_retries:
+                # 応答検証エラーの場合、一般的なテキストを返す
+                return "翻訳処理中にエラーが発生しました。"
+            retry_count += 1
+            
+        except Exception as e:
+            log_error("VertexAIError", "Error processing with chat", {"error": str(e), "paper_id": paper_id})
+            raise VertexAIError(f"Error processing with chat: {str(e)}") from e
 
 def end_chat_session(paper_id: str) -> bool:
     """

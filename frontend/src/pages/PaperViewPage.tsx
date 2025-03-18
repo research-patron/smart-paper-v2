@@ -37,14 +37,12 @@ import TocIcon from '@mui/icons-material/Toc';
 import CloudDoneIcon from '@mui/icons-material/CloudDone';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import LinkIcon from '@mui/icons-material/Link'; // 関連論文タブのアイコン
 import { usePaperStore } from '../store/paperStore';
 import { useAuthStore } from '../store/authStore';
 import ErrorMessage from '../components/common/ErrorMessage';
 import SplitView from '../components/papers/SplitView';
 import Summary from '../components/papers/Summary';
 import ZoteroExport from '../components/zotero/Export';
-import RelatedPapers from '../components/papers/RelatedPapers'; // 関連論文コンポーネントをインポート
 import { MarkdownExporter } from '../utils/MarkdownExporter';
 import { 
   exportToObsidian, 
@@ -802,7 +800,6 @@ const PaperViewPage: React.FC = () => {
             <Tab icon={<TranslateIcon />} label="翻訳" id="paper-tab-0" />
             <Tab icon={<SummarizeIcon />} label="要約" id="paper-tab-1" />
             <Tab icon={<InfoIcon />} label="メタデータ" id="paper-tab-2" />
-            <Tab icon={<LinkIcon />} label="関連論文" id="paper-tab-3" />
           </Tabs>
           
           {tabValue === 0 && currentPaper.chapters && currentPaper.chapters.length > 0 && (
@@ -1016,32 +1013,6 @@ const PaperViewPage: React.FC = () => {
                     </List>
                   </>
                 )}
-              </Paper>
-            )}
-          </TabPanel>
-          
-          {/* 関連論文タブ */}
-          <TabPanel value={tabValue} index={3}>
-            {currentPaper.status !== 'completed' ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                <Typography>論文の処理が完了するまでお待ちください...</Typography>
-              </Box>
-            ) : !currentPaper.related_papers ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                <CircularProgress size={30} sx={{ mr: 2 }} />
-                <Typography>関連論文を読み込み中...</Typography>
-              </Box>
-            ) : currentPaper.related_papers.length === 0 ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                <Typography>関連論文が見つかりませんでした</Typography>
-              </Box>
-            ) : (
-              <Paper elevation={0} sx={{ height: '100%', overflow: 'auto' }}>
-                <RelatedPapers 
-                  relatedPapers={currentPaper.related_papers} 
-                  loading={false} 
-                  error={null} 
-                />
               </Paper>
             )}
           </TabPanel>
