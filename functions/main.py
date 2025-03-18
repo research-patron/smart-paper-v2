@@ -11,6 +11,8 @@ import logging
 
 # 自作モジュールのインポート
 from process_pdf import process_content, process_all_chapters
+# Semantic Scholar API関連をインポート
+from semantic_scholar import get_related_papers
 from error_handling import (
     log_error,
     log_info,
@@ -238,6 +240,18 @@ def process_pdf_background(request: Request):
         chapters = result.get("chapters", [])
         if not chapters:
             log_warning("ProcessPDFBackground", f"No chapters found", {"paper_id": paper_id})
+            
+            # 関連論文を取得（コンテンツがない場合でもメタデータから関連論文を取得）
+            try:
+                related_papers = get_related_papers(paper_data, max_papers=15)
+                doc_ref.update({
+                    "related_papers": related_papers,
+                })
+                log_info("ProcessPDFBackground", f"Added {len(related_papers)} related papers despite no chapters", 
+                         {"paper_id": paper_id})
+            except Exception as e:
+                log_error("RelatedPapersError", f"Failed to get related papers: {str(e)}", {"paper_id": paper_id})
+            
             doc_ref.update({
                 "status": "completed",
                 "completed_at": datetime.datetime.now(),
@@ -361,3 +375,57 @@ def get_signed_url(request: Request):
     except Exception as e:
         log_error("GetSignedURLError", "Failed to generate signed URL", {"error": str(e)})
         return jsonify({"error": "Failed to generate signed URL", "details": str(e)}), 500, headers
+
+# 関連論文エンドポイント - フロントエンドからのリクエストで関連論文を取得
+@functions_framework.http
+def get_related_papers_api(request: Request):
+    """
+    論文のメタデータから関連論文を取得するAPIエンドポイント
+    """
+    try:
+        # CORSヘッダーの設定
+        if request.method == 'OPTIONS':
+            headers = {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                'Access-Control-Max-Age': '3600'
+            }
+            return ('', 204, headers)
+
+        headers = {'Access-Control-Allow-Origin': '*'}
+
+        # リクエスト検証
+        request_json = request.get_json(silent=True)
+        if not request_json:
+            return jsonify({"error": "No JSON payload received"}), 400, headers
+            
+        paper_id = request_json.get("paper_id")
+        if not paper_id:
+            return jsonify({"error": "Paper ID is required"}), 400, headers
+            
+        # 論文データを取得
+        doc_ref = db.collection("papers").document(paper_id)
+        paper_data = doc_ref.get().to_dict()
+        
+        if not paper_data:
+            return jsonify({"error": "Paper not found"}), 404, headers
+            
+        # すでに関連論文がある場合はそれを返す
+        if paper_data.get("related_papers"):
+            return jsonify({"related_papers": paper_data["related_papers"]}), 200, headers
+            
+        # 関連論文を取得
+        related_papers = get_related_papers(paper_data, max_papers=15)
+        
+        # Firestoreに結果を保存
+        doc_ref.update({"related_papers": related_papers})
+        
+        return jsonify({"related_papers": related_papers}), 200, headers
+            
+    except APIError as e:
+        log_error("APIError", e.message, {"details": e.details})
+        return handle_api_error(e)
+    except Exception as e:
+        log_error("UnhandledError", "An internal server error occurred", {"error": str(e)})
+        return jsonify({"error": "An internal server error occurred."}), 500, headers

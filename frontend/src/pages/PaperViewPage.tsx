@@ -1,3 +1,4 @@
+// ~/Desktop/smart-paper-v2/frontend/src/pages/PaperViewPage.tsx
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -20,7 +21,10 @@ import {
   MenuItem,
   Drawer,
   Tooltip,
-  Snackbar
+  Snackbar,
+  Card,
+  CardContent,
+  Grid
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -33,12 +37,14 @@ import TocIcon from '@mui/icons-material/Toc';
 import CloudDoneIcon from '@mui/icons-material/CloudDone';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import LinkIcon from '@mui/icons-material/Link'; // 関連論文タブのアイコン
 import { usePaperStore } from '../store/paperStore';
 import { useAuthStore } from '../store/authStore';
 import ErrorMessage from '../components/common/ErrorMessage';
 import SplitView from '../components/papers/SplitView';
 import Summary from '../components/papers/Summary';
 import ZoteroExport from '../components/zotero/Export';
+import RelatedPapers from '../components/papers/RelatedPapers'; // 関連論文コンポーネントをインポート
 import { MarkdownExporter } from '../utils/MarkdownExporter';
 import { 
   exportToObsidian, 
@@ -661,81 +667,120 @@ const PaperViewPage: React.FC = () => {
           マイ論文に戻る
         </Button>
         
-        <Paper sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h5" gutterBottom>
-            {currentPaper.metadata?.title || '無題の論文'}
-          </Typography>
-          
-          <Typography variant="subtitle1" color="text.secondary" gutterBottom>
-            {currentPaper.metadata?.authors?.map(author => author.name).join(', ') || '著者不明'}
-          </Typography>
-          
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            {currentPaper.metadata?.journal} ({currentPaper.metadata?.year})
-            {currentPaper.metadata?.doi && ` • DOI: ${currentPaper.metadata.doi}`}
-          </Typography>
-          
-          <Divider sx={{ my: 2 }} />
-          
-          {renderProgress()}
-          
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 2 }}>
-          {currentPaper.status === 'completed' && (
-            <>
-              <Button 
-                variant="outlined" 
-                size="small" 
-                startIcon={<DownloadIcon />}
-                onClick={handleOpenDownloadMenu}
-                disabled={!currentPaper.translated_text && !localTranslatedText}
-              >
-                ダウンロード
-              </Button>
+        {/* 論文情報カードの改善されたデザイン */}
+        <Card sx={{ mb: 3, overflow: 'visible' }}>
+          <CardContent sx={{ p: 3 }}>
+            <Grid container spacing={2}>
+              <Grid item xs={12}>
+                <Typography variant="h4" component="h1" fontWeight="medium" gutterBottom>
+                  {currentPaper.metadata?.title || '無題の論文'}
+                </Typography>
+              </Grid>
               
-              <Menu
-                anchorEl={downloadMenuAnchor}
-                open={Boolean(downloadMenuAnchor)}
-                onClose={handleCloseDownloadMenu}
-              >
-                <MenuItem onClick={handleDownloadPlainText}>
-                  <SaveAltIcon fontSize="small" sx={{ mr: 1 }} />
-                  プレーンテキスト (.txt)
-                </MenuItem>
-                <MenuItem onClick={handleDownloadMarkdown}>
-                  <BookIcon fontSize="small" sx={{ mr: 1 }} />
-                  Markdown (.md)
-                </MenuItem>
-              </Menu>
+              <Grid item xs={12}>
+                <Typography variant="subtitle1" color="text.secondary" gutterBottom>
+                  {currentPaper.metadata?.authors?.map(author => author.name).join(', ') || '著者不明'}
+                </Typography>
+              </Grid>
               
-              {obsidianSettings && (
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={<BookIcon />}
-                  onClick={handleExportToObsidian}
-                  disabled={isExporting || !currentPaper.translated_text && !localTranslatedText}
-                >
-                  {isExporting ? (
-                    <>
-                      <CircularProgress size={16} sx={{ mr: 1 }} />
-                      Obsidianに保存中...
-                    </>
-                  ) : obsidianExportStatus === 'success' ? (
-                    'Obsidianに再保存'
-                  ) : (
-                    'Obsidianに保存'
+              <Grid item xs={12}>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                  {currentPaper.metadata?.journal && (
+                    <Chip 
+                      label={currentPaper.metadata.journal} 
+                      size="small" 
+                      color="primary" 
+                      variant="outlined"
+                    />
                   )}
-                </Button>
-              )}
+                  {currentPaper.metadata?.year && (
+                    <Chip 
+                      label={currentPaper.metadata.year} 
+                      size="small" 
+                      variant="outlined"
+                    />
+                  )}
+                  {currentPaper.metadata?.doi && (
+                    <Chip 
+                      label={`DOI: ${currentPaper.metadata.doi}`}
+                      size="small"
+                      variant="outlined"
+                      component="a"
+                      href={`https://doi.org/${currentPaper.metadata.doi}`}
+                      target="_blank"
+                      clickable
+                    />
+                  )}
+                </Box>
+              </Grid>
+            </Grid>
+            
+            <Divider sx={{ my: 2 }} />
+            
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+              <Box>
+                {renderProgress()}
+              </Box>
               
-              {/* Zoteroエクスポートボタン */}
-              {currentPaper.metadata?.doi && (
-                <ZoteroExport paper={currentPaper} />
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+              {currentPaper.status === 'completed' && (
+                <>
+                  <Button 
+                    variant="outlined" 
+                    size="small" 
+                    startIcon={<DownloadIcon />}
+                    onClick={handleOpenDownloadMenu}
+                    disabled={!currentPaper.translated_text && !localTranslatedText}
+                  >
+                    ダウンロード
+                  </Button>
+                  
+                  <Menu
+                    anchorEl={downloadMenuAnchor}
+                    open={Boolean(downloadMenuAnchor)}
+                    onClose={handleCloseDownloadMenu}
+                  >
+                    <MenuItem onClick={handleDownloadPlainText}>
+                      <SaveAltIcon fontSize="small" sx={{ mr: 1 }} />
+                      プレーンテキスト (.txt)
+                    </MenuItem>
+                    <MenuItem onClick={handleDownloadMarkdown}>
+                      <BookIcon fontSize="small" sx={{ mr: 1 }} />
+                      Markdown (.md)
+                    </MenuItem>
+                  </Menu>
+                  
+                  {obsidianSettings && (
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={<BookIcon />}
+                      onClick={handleExportToObsidian}
+                      disabled={isExporting || !currentPaper.translated_text && !localTranslatedText}
+                    >
+                      {isExporting ? (
+                        <>
+                          <CircularProgress size={16} sx={{ mr: 1 }} />
+                          Obsidianに保存中...
+                        </>
+                      ) : obsidianExportStatus === 'success' ? (
+                        'Obsidianに再保存'
+                      ) : (
+                        'Obsidianに保存'
+                      )}
+                    </Button>
+                  )}
+                  
+                  {/* Zoteroエクスポートボタン */}
+                  {currentPaper.metadata?.doi && (
+                    <ZoteroExport paper={currentPaper} />
+                  )}
+                </>
               )}
-            </>
-          )}
-          </Box>
-        </Paper>
+              </Box>
+            </Box>
+          </CardContent>
+        </Card>
         
         {error && (
           <ErrorMessage message={error} onRetry={() => setError(null)} />
@@ -757,6 +802,7 @@ const PaperViewPage: React.FC = () => {
             <Tab icon={<TranslateIcon />} label="翻訳" id="paper-tab-0" />
             <Tab icon={<SummarizeIcon />} label="要約" id="paper-tab-1" />
             <Tab icon={<InfoIcon />} label="メタデータ" id="paper-tab-2" />
+            <Tab icon={<LinkIcon />} label="関連論文" id="paper-tab-3" />
           </Tabs>
           
           {tabValue === 0 && currentPaper.chapters && currentPaper.chapters.length > 0 && (
@@ -926,6 +972,32 @@ const PaperViewPage: React.FC = () => {
                     </List>
                   </>
                 )}
+              </Paper>
+            )}
+          </TabPanel>
+          
+          {/* 関連論文タブ */}
+          <TabPanel value={tabValue} index={3}>
+            {currentPaper.status !== 'completed' ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                <Typography>論文の処理が完了するまでお待ちください...</Typography>
+              </Box>
+            ) : !currentPaper.related_papers ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                <CircularProgress size={30} sx={{ mr: 2 }} />
+                <Typography>関連論文を読み込み中...</Typography>
+              </Box>
+            ) : currentPaper.related_papers.length === 0 ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                <Typography>関連論文が見つかりませんでした</Typography>
+              </Box>
+            ) : (
+              <Paper elevation={0} sx={{ height: '100%', overflow: 'auto' }}>
+                <RelatedPapers 
+                  relatedPapers={currentPaper.related_papers} 
+                  loading={false} 
+                  error={null} 
+                />
               </Paper>
             )}
           </TabPanel>
