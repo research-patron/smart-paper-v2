@@ -191,8 +191,8 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
     from google.cloud import firestore
     from google.cloud import storage
     import datetime
-    # Connected Papers APIモジュールをインポート
-    from connected_papers import get_related_papers
+    # Semantic Scholar APIモジュールをインポート
+    from semantic_scholar import get_related_papers
     
     db = firestore.Client()
     storage_client = storage.Client()
@@ -352,7 +352,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
                 "translated_text": None,
                 "status": "completed",
                 "completed_at": datetime.datetime.now(),
-                "progress": 100
+                "progress": 95
             })
 
             log_info("ProcessAllChapters", f"Large translated text saved to Cloud Storage",
@@ -364,38 +364,26 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
                 "translated_text": all_translated_text,
                 "status": "completed",
                 "completed_at": datetime.datetime.now(),
-                "progress": 100
+                "progress": 95
             })
 
             log_info("ProcessAllChapters", f"Translated text saved to Firestore", {"paper_id": paper_id})
 
-        # 関連論文の取得
+        # 3. 関連論文の取得
         related_papers = []
         try:
             # Firestoreから論文メタデータを取得
             paper_data = doc_ref.get().to_dict()
-            paper_metadata = paper_data.get("metadata", {})
             
-            # DOIがある場合はConnected Papers APIを呼び出し
-            if paper_metadata and "doi" in paper_metadata and paper_metadata["doi"]:
-                doi = paper_metadata["doi"]
-                log_info("ProcessAllChapters", f"Fetching related papers for DOI: {doi}", {"paper_id": paper_id})
-                related_papers = get_related_papers(doi, max_papers=15)
-            else:
-                # DOIがない場合は論文タイトルとメタデータから検索（代替手段）
-                log_warning("ProcessAllChapters", "No DOI available for fetching related papers", {"paper_id": paper_id})
-                
-                # ダミーデータを使用
-                related_papers = [
-                    {
-                        "title": "関連論文が見つかりませんでした (DOIが存在しません)",
-                        "doi": "",
-                        "year": None,
-                        "authors": ["DOIを取得できなかったため、関連論文を検索できませんでした"],
-                        "citation_count": 0,
-                        "relatedness_score": 0
-                    }
-                ]
+            # Semantic Scholar APIを使用して関連論文を取得
+            log_info("ProcessAllChapters", f"Fetching related papers using Semantic Scholar API", {"paper_id": paper_id})
+            
+            # 関連論文取得（DOIまたはタイトルを使用）
+            related_papers = get_related_papers(paper_data, max_papers=15)
+            
+            # 進捗を更新
+            doc_ref.update({"progress": 98})
+            
         except Exception as e:
             log_error("RelatedPapersError", f"Error fetching related papers", 
                       {"paper_id": paper_id, "error": str(e)})
@@ -412,7 +400,10 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
             ]
 
         # 関連論文をFirestoreに保存
-        doc_ref.update({"related_papers": related_papers})
+        doc_ref.update({
+            "related_papers": related_papers,
+            "progress": 100
+        })
         log_info("ProcessAllChapters", f"Added {len(related_papers)} related paper recommendations", 
                  {"paper_id": paper_id})
 
@@ -514,7 +505,8 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
             time.sleep(1.0 + random.uniform(0.1, 0.5))
             return process_with_chat(paper_id, prompt)
         
-        response_text = retry_with_backoff(api_call, max_retries=3, base_delay=2.0)
+        # リトライを無効化し、直接API呼び出しを実行
+        response_text = api_call()
         
         # JSONレスポンスの処理
         try:
