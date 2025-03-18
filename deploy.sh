@@ -40,6 +40,12 @@ gcloud projects add-iam-policy-binding ${PROJECT_ID} \
   --member=serviceAccount:${SERVICE_ACCOUNT} \
   --role=roles/secretmanager.secretAccessor || true
 
+# Firestore/Datastore書き込み権限を追加（パフォーマンスデータ保存用）
+echo -e "\n${BLUE}Firestoreへの書き込み権限を追加...${NC}"
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+  --member=serviceAccount:${SERVICE_ACCOUNT} \
+  --role=roles/datastore.user || true
+
 # Vertex AI APIを有効化
 echo -e "\n${BLUE}Vertex AI APIを有効化...${NC}"
 gcloud services enable aiplatform.googleapis.com
@@ -48,22 +54,36 @@ gcloud services enable aiplatform.googleapis.com
 echo -e "\n${BLUE}Secret Manager APIを有効化...${NC}"
 gcloud services enable secretmanager.googleapis.com
 
+# Firestoreが有効になっていることを確認
+echo -e "\n${BLUE}Firestore APIを有効化...${NC}"
+gcloud services enable firestore.googleapis.com
+
 # Cloud Functions依存関係のインストール
 echo -e "\n${BLUE}Cloud Functions依存関係のインストール...${NC}"
 cd functions
-# requirements.txtを修正
-echo "firebase-functions>=0.1.0
-google-cloud-firestore>=2.5.0
-google-cloud-storage>=2.1.0
-google-cloud-aiplatform>=1.27.0
-google-cloud-secret-manager
-Flask>=2.3.2
+# requirements.txtを修正 - 最新バージョンを使用
+echo "firebase-functions>=0.4.2
+google-cloud-firestore>=2.0.0
+google-cloud-storage>=2.0.0
+google-cloud-aiplatform>=1.0.0
+google-cloud-secret-manager>=2.0.0
+Flask>=2.0.0
 python-dateutil>=2.8.2
 requests>=2.25.0" > requirements.txt
 
+# ローカル環境に依存関係をインストール（古いライブラリがある場合はクリーンアップ）
+rm -rf lib
+mkdir -p lib
 python -m pip install --upgrade pip
 pip install -r requirements.txt -t lib --upgrade
 cd ..
+
+# 追加した性能計測モジュールが存在することを確認
+echo -e "\n${BLUE}性能計測モジュールの確認...${NC}"
+if [ ! -f "functions/performance.py" ]; then
+  echo -e "${RED}Error: functions/performance.py が見つかりません${NC}"
+  exit 1
+fi
 
 # Cloud Functions のデプロイ
 echo -e "\n${BLUE}Cloud Functions をデプロイしています...${NC}"
@@ -107,3 +127,32 @@ echo -e "以下のURLでCloud Functionsにアクセスできます:"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf_background${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/get_signed_url${NC}"
+
+# Firestoreコレクションの存在確認とインデックス作成
+echo -e "\n${BLUE}Firestoreインデックスの設定...${NC}"
+echo -e "${YELLOW}process_timeコレクションのインデックスを作成します...${NC}"
+echo "{
+  \"indexes\": [
+    {
+      \"collectionGroup\": \"process_time\",
+      \"queryScope\": \"COLLECTION\",
+      \"fields\": [
+        { \"fieldPath\": \"function_name\", \"order\": \"ASCENDING\" },
+        { \"fieldPath\": \"week_id\", \"order\": \"ASCENDING\" },
+        { \"fieldPath\": \"timestamp\", \"order\": \"ASCENDING\" }
+      ]
+    },
+    {
+      \"collectionGroup\": \"process_time\",
+      \"queryScope\": \"COLLECTION\",
+      \"fields\": [
+        { \"fieldPath\": \"week_id\", \"order\": \"ASCENDING\" },
+        { \"fieldPath\": \"function_name\", \"order\": \"ASCENDING\" },
+        { \"fieldPath\": \"processing_time_ms\", \"order\": \"ASCENDING\" }
+      ]
+    }
+  ]
+}" > firestore.indexes.json
+
+echo -e "\n${GREEN}設定が完了しました！${NC}"
+echo -e "${YELLOW}Firestoreの'process_time'コレクションに処理時間データが記録されます${NC}"

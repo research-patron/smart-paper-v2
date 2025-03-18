@@ -1,29 +1,22 @@
 {
   "indexes": [
     {
-      "collectionGroup": "papers",
+      "collectionGroup": "process_time",
       "queryScope": "COLLECTION",
       "fields": [
-        {
-          "fieldPath": "user_id",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "uploaded_at",
-          "order": "DESCENDING"
-        }
+        { "fieldPath": "function_name", "order": "ASCENDING" },
+        { "fieldPath": "week_id", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "ASCENDING" }
       ]
     },
     {
-      "collectionGroup": "translated_chapters",
+      "collectionGroup": "process_time",
       "queryScope": "COLLECTION",
       "fields": [
-        {
-          "fieldPath": "chapter_number",
-          "order": "ASCENDING"
-        }
+        { "fieldPath": "week_id", "order": "ASCENDING" },
+        { "fieldPath": "function_name", "order": "ASCENDING" },
+        { "fieldPath": "processing_time_ms", "order": "ASCENDING" }
       ]
     }
-  ],
-  "fieldOverrides": []
+  ]
 }
