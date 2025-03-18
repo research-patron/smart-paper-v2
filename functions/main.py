@@ -8,6 +8,7 @@ import datetime
 import json
 import os
 import logging
+import time
 
 # 自作モジュールのインポート
 from process_pdf import process_content, process_all_chapters
@@ -20,6 +21,7 @@ from error_handling import (
     AuthenticationError,
     NotFoundError
 )
+from performance import start_timer, stop_timer
 
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
@@ -68,6 +70,10 @@ def process_pdf(request: Request):
     """
     PDFアップロードを受け付け、Cloud Storageへの保存、メタデータ抽出、直列処理を行う
     """
+    # 処理時間測定開始
+    start_time = start_timer()
+    paper_id = None
+    
     try:
         # CORSヘッダーの設定
         if request.method == 'OPTIONS':
@@ -151,13 +157,34 @@ def process_pdf(request: Request):
         except Exception as e:
             log_error("BackgroundProcessingError", "Failed to start background processing", {"error": str(e)})
 
-        return jsonify({"paper_id": paper_id}), 200, headers
+        response = jsonify({"paper_id": paper_id}), 200, headers
+        
+        # 処理時間の記録
+        stop_timer(start_time, "process_pdf", {
+            "paper_id": paper_id, 
+            "file_size": content_length,
+            "user_id": user_id
+        })
+        
+        return response
 
     except APIError as e:
         log_error("APIError", e.message, {"details": e.details})
+        # 処理時間の記録（エラー発生時）
+        stop_timer(start_time, "process_pdf", {
+            "paper_id": paper_id, 
+            "error": e.message, 
+            "error_type": e.__class__.__name__
+        })
         return handle_api_error(e)
     except Exception as e:
         log_error("UnhandledError", "An internal server error occurred", {"error": str(e)})
+        # 処理時間の記録（エラー発生時）
+        stop_timer(start_time, "process_pdf", {
+            "paper_id": paper_id, 
+            "error": str(e), 
+            "error_type": "UnhandledException"
+        })
         return jsonify({"error": "An internal server error occurred."}), 500, headers
 
 @functions_framework.http
@@ -165,20 +192,23 @@ def process_pdf_background(request: Request):
     """
     PDF処理を同期的に実行する
     """
-    # CORSヘッダーの設定
-    if request.method == 'OPTIONS':
-        headers = {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-            'Access-Control-Max-Age': '3600'
-        }
-        return ('', 204, headers)
-
-    headers = {'Access-Control-Allow-Origin': '*'}
-
+    # 処理時間測定開始
+    start_time = start_timer()
     paper_id = None
+    
     try:
+        # CORSヘッダーの設定
+        if request.method == 'OPTIONS':
+            headers = {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                'Access-Control-Max-Age': '3600'
+            }
+            return ('', 204, headers)
+
+        headers = {'Access-Control-Allow-Origin': '*'}
+
         request_json = request.get_json(silent=True)
         if not request_json:
             raise ValidationError("No JSON payload received")
@@ -200,7 +230,13 @@ def process_pdf_background(request: Request):
 
         # 既に処理が完了している場合はスキップ
         if paper_data.get("status") == "completed":
-            return jsonify({"message": "Paper already processed", "paper_id": paper_id}), 200, headers
+            response = jsonify({"message": "Paper already processed", "paper_id": paper_id}), 200, headers
+            # 処理時間の記録
+            stop_timer(start_time, "process_pdf_background", {
+                "paper_id": paper_id, 
+                "status": "already_completed"
+            })
+            return response
 
         # 現在の状態を確認
         current_status = paper_data.get("status", "pending")
@@ -246,7 +282,15 @@ def process_pdf_background(request: Request):
                 "summary": "この論文には章が見つかりませんでした。",
                 "translated_text": "<p>この論文には処理可能な章が見つかりませんでした。別の論文を試してください。</p>"
             })
-            return jsonify({"message": "Processing completed (no chapters found)"}), 200, headers
+            
+            response = jsonify({"message": "Processing completed (no chapters found)"}), 200, headers
+            # 処理時間の記録
+            stop_timer(start_time, "process_pdf_background", {
+                "paper_id": paper_id, 
+                "chapters_count": 0,
+                "status": "no_chapters"
+            })
+            return response
 
         # 章を順番に処理（同期処理）
         chapter_results = process_all_chapters(chapters, paper_id, pdf_gs_path)
@@ -254,11 +298,20 @@ def process_pdf_background(request: Request):
         log_info("ProcessPDFBackground", f"All chapters processed successfully",
                 {"paper_id": paper_id, "chapters_count": len(chapters)})
 
-        return jsonify({
+        response = jsonify({
             "message": "Processing completed",
             "paper_id": paper_id,
             "chapters_processed": len(chapter_results) if chapter_results else 0
         }), 200, headers
+        
+        # 処理時間の記録
+        stop_timer(start_time, "process_pdf_background", {
+            "paper_id": paper_id, 
+            "chapters_count": len(chapters),
+            "chapters_processed": len(chapter_results) if chapter_results else 0
+        })
+        
+        return response
 
     except APIError as e:
         log_error("APIError", e.message, {"details": e.details})
@@ -271,6 +324,14 @@ def process_pdf_background(request: Request):
                 })
             except Exception as db_error:
                 log_error("FirestoreError", "Failed to update Firestore status", {"error": str(db_error)})
+        
+        # 処理時間の記録（エラー発生時）
+        stop_timer(start_time, "process_pdf_background", {
+            "paper_id": paper_id, 
+            "error": e.message,
+            "error_type": e.__class__.__name__
+        })
+        
         return jsonify(e.to_dict()), e.status_code, headers
 
     except Exception as e:
@@ -284,6 +345,14 @@ def process_pdf_background(request: Request):
                 })
             except Exception as db_error:
                 log_error("FirestoreError", "Failed to update Firestore status", {"error": str(db_error)})
+        
+        # 処理時間の記録（エラー発生時）
+        stop_timer(start_time, "process_pdf_background", {
+            "paper_id": paper_id, 
+            "error": str(e),
+            "error_type": "UnhandledException"
+        })
+        
         return jsonify({"error": "An internal server error occurred"}), 500, headers
 
 @functions_framework.http
@@ -291,6 +360,10 @@ def get_signed_url(request: Request):
     """
     Cloud StorageのファイルへのURLを取得する
     """
+    # 処理時間測定開始
+    start_time = start_timer()
+    file_path = None
+    
     try:
         # CORSヘッダーの設定
         if request.method == 'OPTIONS':
@@ -307,17 +380,32 @@ def get_signed_url(request: Request):
         # リクエスト検証
         request_json = request.get_json(silent=True)
         if not request_json or "filePath" not in request_json:
-            return jsonify({"error": "File path is required"}), 400, headers
+            error_response = jsonify({"error": "File path is required"}), 400, headers
+            # 処理時間の記録（バリデーションエラー）
+            stop_timer(start_time, "get_signed_url", {"error": "File path is required"})
+            return error_response
 
         file_path = request_json["filePath"]
 
         # gs://バケット名/オブジェクト名 からバケット名とオブジェクト名を抽出
         if not file_path.startswith("gs://"):
-            return jsonify({"error": "Invalid file path format. Must start with gs://"}), 400, headers
+            error_response = jsonify({"error": "Invalid file path format. Must start with gs://"}), 400, headers
+            # 処理時間の記録（バリデーションエラー）
+            stop_timer(start_time, "get_signed_url", {
+                "error": "Invalid file path format",
+                "file_path": file_path
+            })
+            return error_response
 
         parts = file_path[5:].split("/", 1)  # "gs://" を削除して最初の "/" で分割
         if len(parts) != 2:
-            return jsonify({"error": "Invalid file path format"}), 400, headers
+            error_response = jsonify({"error": "Invalid file path format"}), 400, headers
+            # 処理時間の記録（バリデーションエラー）
+            stop_timer(start_time, "get_signed_url", {
+                "error": "Invalid file path format",
+                "file_path": file_path
+            })
+            return error_response
 
         bucket_name = parts[0]
         object_name = parts[1]
@@ -333,7 +421,13 @@ def get_signed_url(request: Request):
             bucket = storage_client_signed.bucket(bucket_name)
         except Exception as e:
             log_error("GetSignedURLError", f"Failed to initialize storage client with credentials: {str(e)}")
-            return jsonify({"error": "Failed to initialize storage client"}), 500, headers
+            error_response = jsonify({"error": "Failed to initialize storage client"}), 500, headers
+            # 処理時間の記録（認証エラー）
+            stop_timer(start_time, "get_signed_url", {
+                "error": "Failed to initialize storage client",
+                "file_path": file_path
+            })
+            return error_response
 
         # 署名付きURLの生成
         blob = bucket.blob(object_name)
@@ -354,11 +448,33 @@ def get_signed_url(request: Request):
             log_info("GetSignedURL", "Successfully generated signed URL")
         except Exception as e:
             log_error("GetSignedURLError", f"Failed to generate signed URL: {str(e)}")
-            return jsonify({"error": "Failed to generate signed URL"}), 500, headers
+            error_response = jsonify({"error": "Failed to generate signed URL"}), 500, headers
+            # 処理時間の記録（URL生成エラー）
+            stop_timer(start_time, "get_signed_url", {
+                "error": "Failed to generate signed URL",
+                "file_path": file_path
+            })
+            return error_response
 
         log_info("GetSignedURL", f"Generated signed URL successfully")
-        return jsonify({"url": url}), 200, headers
+        
+        response = jsonify({"url": url}), 200, headers
+        
+        # 処理時間の記録
+        stop_timer(start_time, "get_signed_url", {
+            "bucket": bucket_name,
+            "object_name": object_name
+        })
+        
+        return response
 
     except Exception as e:
         log_error("GetSignedURLError", "Failed to generate signed URL", {"error": str(e)})
+        
+        # 処理時間の記録（エラー発生時）
+        stop_timer(start_time, "get_signed_url", {
+            "error": str(e),
+            "file_path": file_path
+        })
+        
         return jsonify({"error": "Failed to generate signed URL", "details": str(e)}), 500, headers
