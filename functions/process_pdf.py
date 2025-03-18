@@ -176,174 +176,6 @@ def retry_with_backoff(func, max_retries=5, base_delay=1.0, max_delay=60.0):
             time.sleep(delay)
             retries += 1
 
-def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_info: dict = None) -> dict:
-    """
-    PDFファイルを直接処理して翻訳・要約・メタデータ抽出を行う
-
-    Args:
-        pdf_gs_path: PDFファイルのパス (gs://から始まる)
-        paper_id: 論文のID
-        operation: 処理内容 ('translate', 'summarize', 'extract_metadata_and_chapters')
-        chapter_info: 章情報（章番号、開始ページ、終了ページ）。translate の場合に必要。
-
-    Returns:
-        dict: 処理結果（JSON形式）
-    """
-    try:
-        # Vertex AIの初期化
-        initialize_vertex_ai()
-        
-        # チャットセッションを開始または取得
-        start_chat_session(paper_id, pdf_gs_path)
-        
-        # 処理内容に応じてプロンプトを選択
-        if operation == "translate":
-            if not chapter_info:
-                raise ValidationError("Chapter info is required for translation operation")
-                
-            # 翻訳プロンプトのテンプレートを読み込む
-            prompt_template = load_prompt(TRANSLATION_PROMPT_FILE)
-            
-            # 安全なフォーマット処理 - 文字列置換によるフォーマット
-            # format()メソッドではなく手動で置換する
-            prompt = prompt_template.replace("{chapter_number}", str(chapter_info['chapter_number']))
-            prompt = prompt.replace("{start_page}", str(chapter_info['start_page']))
-            prompt = prompt.replace("{end_page}", str(chapter_info['end_page']))
-            prompt = prompt.replace("{chapter_title}", str(chapter_info['title']))
-            
-        elif operation == "summarize":
-            # 論文全体の要約のためのプロンプト
-            prompt = load_prompt(SUMMARY_PROMPT_FILE)
-            
-        elif operation == "extract_metadata_and_chapters":
-            prompt = load_prompt(METADATA_AND_CHAPTER_PROMPT_FILE)
-            
-        else:
-            raise ValidationError(f"Invalid operation: {operation}")
-
-        # チャットセッションを使用してプロンプトを処理
-        # リソースエラー対策のためリトライ機能を追加
-        log_info("ProcessPDF", f"Processing with chat session for operation: {operation}, paper_id: {paper_id}")
-        
-        # リトライ処理でAPIを呼び出す
-        def api_call():
-            # リソースエラー対策のためのスリープ (ランダム要素を含める)
-            time.sleep(1.0 + random.uniform(0.1, 0.5))
-            return process_with_chat(paper_id, prompt)
-        
-        response_text = retry_with_backoff(api_call, max_retries=3, base_delay=2.0)
-        
-        # JSONレスポンスの処理
-        try:
-            # 1. JSON部分を抽出する試み
-            json_pattern = re.compile(r'```(?:json)?\s*([\s\S]*?)\s*```')
-            json_match = json_pattern.search(response_text)
-            
-            if json_match:
-                # コードブロック内のJSONテキストを抽出
-                json_str = json_match.group(1).strip()
-                try:
-                    result = json.loads(json_str)
-                    log_info("ProcessPDF", f"Successfully parsed JSON from code block for {operation}")
-                except json.JSONDecodeError:
-                    # コードブロック内が有効なJSONでない場合
-                    raise json.JSONDecodeError(f"Invalid JSON in code block", json_str, 0)
-            else:
-                # 2. JSONブロックがない場合、テキスト全体がJSONかチェック
-                try:
-                    # 直接JSONとして解析を試みる
-                    # 前後の空白を削除
-                    cleaned_text = response_text.strip()
-                    result = json.loads(cleaned_text)
-                    log_info("ProcessPDF", f"Successfully parsed entire response as JSON for {operation}")
-                except json.JSONDecodeError:
-                    # 3. テキスト中にJSONオブジェクトがあるか正規表現でチェック
-                    json_obj_pattern = re.compile(r'(\{[^{]*"(?:translated_text|summary)":[^}]*\})')
-                    json_obj_match = json_obj_pattern.search(response_text)
-                    
-                    if json_obj_match:
-                        try:
-                            result = json.loads(json_obj_match.group(1))
-                            log_info("ProcessPDF", f"Successfully extracted JSON object for {operation}")
-                        except json.JSONDecodeError:
-                            # それでも失敗した場合、テキスト全体を該当するキーに格納
-                            if operation == "translate":
-                                result = {"translated_text": sanitize_html(response_text)}
-                            elif operation == "summarize":
-                                result = {"summary": response_text}
-                            else:
-                                raise json.JSONDecodeError("Unable to parse response as JSON", response_text, 0)
-                    else:
-                        # JSONが見つからない場合、テキスト全体を該当するキーに格納
-                        if operation == "translate":
-                            result = {"translated_text": sanitize_html(response_text)}
-                        elif operation == "summarize":
-                            result = {"summary": response_text}
-                        else:
-                            raise json.JSONDecodeError("Unable to parse response as JSON", response_text, 0)
-            
-            # 翻訳結果のHTMLをサニタイズ
-            if operation == "translate" and "translated_text" in result:
-                result["translated_text"] = sanitize_html(result.get("translated_text", ""))
-                
-                # 翻訳テキストから最初の段階でJSONフォーマットを取り除く
-                translated_text = result["translated_text"]
-                json_pattern = re.compile(r'^\s*\{\s*"translated_text"\s*:\s*"(.+)"\s*\}\s*$', re.DOTALL)
-                json_match = json_pattern.search(translated_text)
-                if json_match:
-                    # JSON形式になっている場合は中身を取り出す
-                    translated_text = json_match.group(1)
-                    # エスケープされたクォートを戻す
-                    translated_text = translated_text.replace('\\"', '"')
-                    result["translated_text"] = sanitize_html(translated_text)
-                
-                # 章情報を結果に追加
-                result["chapter_number"] = chapter_info["chapter_number"]
-                result["title"] = chapter_info["title"]
-                result["start_page"] = chapter_info["start_page"]
-                result["end_page"] = chapter_info["end_page"]
-            
-            # 要約結果からJSONフォーマットを取り除く
-            if operation == "summarize" and "summary" in result:
-                summary_text = result["summary"]
-                json_pattern = re.compile(r'^\s*\{\s*"summary"\s*:\s*"(.+)"\s*\}\s*$', re.DOTALL)
-                json_match = json_pattern.search(summary_text)
-                if json_match:
-                    # JSON形式になっている場合は中身を取り出す
-                    summary_text = json_match.group(1)
-                    # エスケープされたクォートを戻す
-                    summary_text = summary_text.replace('\\"', '"')
-                    result["summary"] = summary_text
-                    
-            log_info("ProcessPDF", f"Successfully processed {operation}")
-            return result
-            
-        except json.JSONDecodeError as e:
-            # JSONでない場合のフォールバック処理
-            log_warning("JSONDecodeError", "Invalid JSON response from Vertex AI. Trying fallback processing.", 
-                       {"response_text": response_text[:1000] + "..." if len(response_text) > 1000 else response_text})
-            
-            if operation == "translate":
-                return {
-                    "translated_text": sanitize_html(response_text),
-                    "chapter_number": chapter_info["chapter_number"],
-                    "title": chapter_info["title"],
-                    "start_page": chapter_info["start_page"],
-                    "end_page": chapter_info["end_page"]
-                }
-            elif operation == "summarize":
-                return {"summary": response_text}
-            else:
-                # それでも失敗する場合は例外を発生させる
-                log_error("JSONDecodeError", "Failed to parse response as JSON and no fallback available", 
-                         {"response_text": response_text[:1000] + "..." if len(response_text) > 1000 else response_text})
-                raise VertexAIError("Failed to parse Vertex AI response as JSON")
-                
-    except Exception as e:
-        log_error("ProcessPDFError", f"Failed to process PDF: {operation}", 
-                 {"error": str(e), "file_path": pdf_gs_path, "operation": operation})
-        raise
-
 def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> list:
     """
     すべての章を順番に処理する（同期処理版）
@@ -588,6 +420,181 @@ def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None)
                  {"error": str(e), "cache_id": cache_id, "operation": operation})
         raise
 
+def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_info: dict = None) -> dict:
+    """
+    PDFファイルを直接処理して翻訳・要約・メタデータ抽出を行う
+
+    Args:
+        pdf_gs_path: PDFファイルのパス (gs://から始まる)
+        paper_id: 論文のID
+        operation: 処理内容 ('translate', 'summarize', 'extract_metadata_and_chapters')
+        chapter_info: 章情報（章番号、開始ページ、終了ページ）。translate の場合に必要。
+
+    Returns:
+        dict: 処理結果（JSON形式）
+    """
+    try:
+        # Vertex AIの初期化
+        initialize_vertex_ai()
+        
+        # チャットセッションを開始または取得
+        start_chat_session(paper_id, pdf_gs_path)
+        
+        # 処理内容に応じてプロンプトを選択
+        if operation == "translate":
+            if not chapter_info:
+                raise ValidationError("Chapter info is required for translation operation")
+                
+            # 翻訳プロンプトのテンプレートを読み込む
+            prompt_template = load_prompt(TRANSLATION_PROMPT_FILE)
+            
+            # 安全なフォーマット処理 - 文字列置換によるフォーマット
+            # format()メソッドではなく手動で置換する
+            prompt = prompt_template.replace("{chapter_number}", str(chapter_info['chapter_number']))
+            prompt = prompt.replace("{start_page}", str(chapter_info['start_page']))
+            prompt = prompt.replace("{end_page}", str(chapter_info['end_page']))
+            prompt = prompt.replace("{chapter_title}", str(chapter_info.get('title', 'Untitled')))
+            
+        elif operation == "summarize":
+            # 論文全体の要約のためのプロンプト
+            prompt = load_prompt(SUMMARY_PROMPT_FILE)
+            
+        elif operation == "extract_metadata_and_chapters":
+            prompt = load_prompt(METADATA_AND_CHAPTER_PROMPT_FILE)
+            
+        else:
+            raise ValidationError(f"Invalid operation: {operation}")
+
+        # チャットセッションを使用してプロンプトを処理
+        # リソースエラー対策のためリトライ機能を追加
+        log_info("ProcessPDF", f"Processing with chat session for operation: {operation}, paper_id: {paper_id}")
+        
+        # リトライ処理でAPIを呼び出す
+        def api_call():
+            # リソースエラー対策のためのスリープ (ランダム要素を含める)
+            time.sleep(1.0 + random.uniform(0.1, 0.5))
+            return process_with_chat(paper_id, prompt)
+        
+        response_text = retry_with_backoff(api_call, max_retries=3, base_delay=2.0)
+        
+        # JSONレスポンスの処理
+        try:
+            # 改善されたJSONパース処理
+            # モデルが返すさまざまな形式に対応
+            result = extract_json_from_response(response_text, operation)
+            
+            # 翻訳結果のHTMLをサニタイズ
+            if operation == "translate" and "translated_text" in result:
+                result["translated_text"] = sanitize_html(result.get("translated_text", ""))
+                
+                # 章情報を結果に追加
+                result["chapter_number"] = chapter_info["chapter_number"]
+                result["title"] = chapter_info.get("title", "")
+                result["start_page"] = chapter_info["start_page"]
+                result["end_page"] = chapter_info["end_page"]
+                
+            log_info("ProcessPDF", f"Successfully processed {operation}")
+            return result
+            
+        except json.JSONDecodeError as e:
+            # JSONでない場合のフォールバック処理
+            log_warning("JSONDecodeError", "Invalid JSON response from Vertex AI. Trying fallback processing.", 
+                       {"response_text": response_text[:1000] + "..." if len(response_text) > 1000 else response_text})
+            
+            if operation == "translate":
+                return {
+                    "translated_text": sanitize_html(response_text),
+                    "chapter_number": chapter_info["chapter_number"],
+                    "title": chapter_info.get("title", ""),
+                    "start_page": chapter_info["start_page"],
+                    "end_page": chapter_info["end_page"]
+                }
+            elif operation == "summarize":
+                return {"summary": response_text}
+            else:
+                # それでも失敗する場合は例外を発生させる
+                log_error("JSONDecodeError", "Failed to parse response as JSON and no fallback available", 
+                         {"response_text": response_text[:1000] + "..." if len(response_text) > 1000 else response_text})
+                raise VertexAIError("Failed to parse Vertex AI response as JSON")
+                
+    except Exception as e:
+        log_error("ProcessPDFError", f"Failed to process PDF: {operation}", 
+                 {"error": str(e), "file_path": pdf_gs_path, "operation": operation})
+        raise
+
+def extract_json_from_response(response_text: str, operation: str) -> dict:
+    """
+    さまざまな形式のレスポンスからJSONを抽出する改善された関数
+    
+    Args:
+        response_text: モデルからのレスポンステキスト
+        operation: 処理タイプ ('translate', 'summarize', 'extract_metadata_and_chapters')
+        
+    Returns:
+        dict: パースされたJSON
+    """
+    # 1. コードブロック内のJSONを探す (最も一般的なケース)
+    json_code_pattern = re.compile(r'```(?:json)?\s*([\s\S]*?)\s*```')
+    json_code_match = json_code_pattern.search(response_text)
+    
+    if json_code_match:
+        try:
+            json_str = json_code_match.group(1).strip()
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            # コードブロック内でも有効なJSONでない場合は次の方法を試す
+            pass
+    
+    # 2. レスポンス全体がJSONかどうかを確認
+    try:
+        cleaned_text = response_text.strip()
+        return json.loads(cleaned_text)
+    except json.JSONDecodeError:
+        pass
+    
+    # 3. translated_text だけを含むJSONオブジェクトを探す
+    if operation == "translate":
+        # "translated_text"をキーとするJSONオブジェクトパターン
+        json_pattern = re.compile(r'\{\s*"translated_text"\s*:\s*"([\s\S]*?)"\s*\}')
+        match = json_pattern.search(response_text)
+        if match:
+            translated_text = match.group(1)
+            # バックスラッシュ文字をエスケープして正しいJSON文字列にする
+            translated_text = translated_text.replace('\\', '\\\\')
+            # 重複するエスケープを修正
+            translated_text = re.sub(r'\\+(["\\/])', r'\\\1', translated_text)
+            return {"translated_text": translated_text}
+    
+    # 4. summary だけを含むJSONオブジェクトを探す
+    if operation == "summarize":
+        json_pattern = re.compile(r'\{\s*"summary"\s*:\s*"([\s\S]*?)"\s*\}')
+        match = json_pattern.search(response_text)
+        if match:
+            summary_text = match.group(1)
+            # エスケープを修正
+            summary_text = summary_text.replace('\\', '\\\\')
+            summary_text = re.sub(r'\\+(["\\/])', r'\\\1', summary_text)
+            return {"summary": summary_text}
+    
+    # 5. レスポンス全体を該当するキーの値として使用
+    if operation == "translate":
+        return {"translated_text": response_text}
+    elif operation == "summarize":
+        return {"summary": response_text}
+    else:
+        # extract_metadata_and_chapters の場合は、もっと複雑なJSONが期待されるため
+        # 前処理を試みてからJSON解析を再試行
+        # 余分な文字やヘッダーなどを除去して有効なJSONを抽出しようとする
+        potential_json = re.search(r'\{[\s\S]*\}', response_text)
+        if potential_json:
+            try:
+                return json.loads(potential_json.group(0))
+            except json.JSONDecodeError:
+                pass
+    
+    # 6. すべての試みが失敗した場合はエラーを発生
+    raise json.JSONDecodeError(f"Could not extract valid JSON for operation: {operation}", response_text, 0)
+
 def sanitize_html(html_text: str) -> str:
     """
     HTMLをサニタイズする（XSS対策など）
@@ -614,7 +621,7 @@ def sanitize_html(html_text: str) -> str:
     html_text = re.sub(r'<h(\d)>\s*Chapter\s+(\d+):\s*(.*?)\s*<\/h\1>', r'<h\1>\2. \3</h\1>', html_text, flags=re.IGNORECASE)
     # サブセクションの見出しも修正 (例: "Section 3.1: Methods" → "3.1. Methods")
     html_text = re.sub(r'<h(\d)>\s*Section\s+(\d+\.\d+):\s*(.*?)\s*<\/h\1>', r'<h\1>\2. \3</h\1>', html_text, flags=re.IGNORECASE)
-        
+    
     # 許可するタグのリスト
     allowed_tags = [
         'p', 'br', 'b', 'i', 'u', 'strong', 'em', 
