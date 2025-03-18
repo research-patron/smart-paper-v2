@@ -191,8 +191,6 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
     from google.cloud import firestore
     from google.cloud import storage
     import datetime
-    # Semantic Scholar APIモジュールをインポート
-    from semantic_scholar import get_related_papers
     
     db = firestore.Client()
     storage_client = storage.Client()
@@ -352,7 +350,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
                 "translated_text": None,
                 "status": "completed",
                 "completed_at": datetime.datetime.now(),
-                "progress": 95
+                "progress": 100
             })
 
             log_info("ProcessAllChapters", f"Large translated text saved to Cloud Storage",
@@ -364,68 +362,10 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
                 "translated_text": all_translated_text,
                 "status": "completed",
                 "completed_at": datetime.datetime.now(),
-                "progress": 95
+                "progress": 100
             })
 
             log_info("ProcessAllChapters", f"Translated text saved to Firestore", {"paper_id": paper_id})
-
-        # 3. 関連論文の取得
-        related_papers = []
-        try:
-            # Firestoreから論文メタデータを取得
-            paper_data = doc_ref.get().to_dict()
-            
-            # すでに関連論文が保存されていたら再取得しない
-            if paper_data.get("related_papers"):
-                log_info("ProcessAllChapters", f"Using existing related papers data", {"paper_id": paper_id})
-                related_papers = paper_data.get("related_papers")
-            else:
-                # Semantic Scholar APIを使用して関連論文を取得
-                log_info("ProcessAllChapters", f"Fetching related papers using Semantic Scholar API", {"paper_id": paper_id})
-                
-                try:
-                    # 関連論文取得（DOIまたはタイトルを使用）
-                    # APIコールは1回に制限 - プロセスが重くなりすぎないように
-                    related_papers = get_related_papers(paper_data, max_papers=15)
-                    
-                    # 進捗を更新
-                    doc_ref.update({"progress": 98})
-                except Exception as api_error:
-                    log_error("RelatedPapersError", f"Error fetching related papers from API", 
-                            {"paper_id": paper_id, "error": str(api_error)})
-                    # APIエラー時でも処理を続行するためにダミーデータを使用
-                    related_papers = [
-                        {
-                            "title": "関連論文の取得中にAPIエラーが発生しました",
-                            "doi": "",
-                            "year": None,
-                            "authors": ["しばらく時間をおいて再度お試しください"],
-                            "citation_count": 0,
-                            "relatedness_score": 0
-                        }
-                    ]
-        except Exception as e:
-            log_error("RelatedPapersError", f"Error in related papers processing", 
-                    {"paper_id": paper_id, "error": str(e)})
-            # エラー時はダミーデータを使用
-            related_papers = [
-                {
-                    "title": "関連論文の取得処理でエラーが発生しました",
-                    "doi": "",
-                    "year": None,
-                    "authors": ["一時的なエラーが発生しました。もう一度試してください。"],
-                    "citation_count": 0,
-                    "relatedness_score": 0
-                }
-            ]
-
-        # 関連論文をFirestoreに保存
-        doc_ref.update({
-            "related_papers": related_papers,
-            "progress": 100
-        })
-        log_info("ProcessAllChapters", f"Added {len(related_papers)} related paper recommendations", 
-                {"paper_id": paper_id})
 
         # チャットセッションを終了して解放
         end_chat_session(paper_id)

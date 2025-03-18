@@ -102,21 +102,8 @@ gcloud functions deploy get_signed_url \
   --allow-unauthenticated \
   --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
 
-echo -e "\n${BLUE}get_related_papers_api 関数をデプロイしています...${NC}"
-gcloud functions deploy get_related_papers_api \
-  --region=${REGION} \
-  --runtime=python310 \
-  --trigger-http \
-  --source=./functions \
-  --entry-point=get_related_papers_api \
-  --memory=512MB \
-  --timeout=60s \
-  --allow-unauthenticated \
-  --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
-
 echo -e "\n${GREEN}デプロイが完了しました！${NC}"
 echo -e "以下のURLでCloud Functionsにアクセスできます:"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf_background${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/get_signed_url${NC}"
-echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/get_related_papers_api${NC}"

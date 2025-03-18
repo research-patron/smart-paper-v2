@@ -79,10 +79,10 @@ export interface Paper {
   required_knowledge?: string | null;
   translated_text: string | null;
   translated_text_path: string | null;
-  related_papers: RelatedPaper[] | null;
+  related_papers?: RelatedPaper[] | null; // Made optional
   error_message?: string;
-  progress?: number; // 処理進捗率（0-100）
-  obsidian?: ObsidianState; // Obsidian連携状態
+  progress?: number; 
+  obsidian?: ObsidianState;
 }
 
 // Cloud Functionsへのリクエスト型
