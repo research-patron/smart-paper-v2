@@ -26,7 +26,13 @@ from error_handling import (
     AuthenticationError,
     NotFoundError
 )
-from performance import start_timer, stop_timer, add_step
+from performance import (
+    start_timer, 
+    stop_timer, 
+    add_step, 
+    save_translated_text, 
+    save_summary_text
+)
 
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
@@ -137,10 +143,12 @@ def process_pdf(request: Request):
         
         upload_start = time.time()
         blob.upload_from_file(pdf_file, content_type="application/pdf")
-        upload_time_ms = (time.time() - upload_start) * 1000
+        upload_time_sec = time.time() - upload_start
         
         pdf_gs_path = f"gs://{BUCKET_NAME}/papers/{file_name}"
-        add_step(session_id, temp_paper_id, "storage_upload_complete", {"pdf_gs_path": pdf_gs_path}, upload_time_ms)
+        add_step(session_id, temp_paper_id, "storage_upload_complete", 
+                {"pdf_gs_path": pdf_gs_path}, 
+                upload_time_sec * 1000)  # このAPIはまだミリ秒を受け取る
 
         log_info("Storage", f"Uploaded PDF to {pdf_gs_path}")
 
@@ -267,11 +275,11 @@ def process_pdf_background(request: Request):
             
             metadata_start = time.time()
             result = process_content(pdf_gs_path, paper_id, "extract_metadata_and_chapters")
-            metadata_time_ms = (time.time() - metadata_start) * 1000
+            metadata_time_sec = time.time() - metadata_start
             
             add_step(session_id, paper_id, "metadata_extraction_complete", 
                     {"chapters_count": len(result.get("chapters", []))}, 
-                    metadata_time_ms)
+                    metadata_time_sec * 1000)  # このAPIはまだミリ秒を受け取る
 
             # Firestoreに結果を保存
             doc_ref.update({
@@ -313,12 +321,12 @@ def process_pdf_background(request: Request):
         # 章を順番に処理（同期処理）
         chapters_start = time.time()
         chapter_results = process_all_chapters(chapters, paper_id, pdf_gs_path, session_id)  # セッションIDを渡す
-        chapters_time_ms = (time.time() - chapters_start) * 1000
+        chapters_time_sec = time.time() - chapters_start
         
         add_step(session_id, paper_id, "all_chapters_processed", 
                 {"chapters_count": len(chapters), 
                  "processed_count": len(chapter_results) if chapter_results else 0}, 
-                chapters_time_ms)
+                chapters_time_sec * 1000)  # このAPIはまだミリ秒を受け取る
 
         log_info("ProcessPDFBackground", f"All chapters processed successfully",
                 {"paper_id": paper_id, "chapters_count": len(chapters)})
@@ -445,12 +453,18 @@ def get_signed_url(request: Request):
             "file_path": file_path
         })
 
+        url_gen_start = time.time()
         try:
             url = blob.generate_signed_url(
                 version="v4",
                 expiration=datetime.timedelta(minutes=15),
                 method="GET"
             )
+            url_gen_time_sec = time.time() - url_gen_start
+            add_step(session_id, temp_paper_id, "signed_url_generated", 
+                   {"bucket": bucket_name, "object": object_name}, 
+                   url_gen_time_sec * 1000)  # このAPIはまだミリ秒を受け取る
+                   
             log_info("GetSignedURL", "Successfully generated signed URL")
         except Exception as e:
             log_error("GetSignedURLError", f"Failed to generate signed URL: {str(e)}")

@@ -13,8 +13,17 @@ PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT")
 # Firestoreクライアント初期化 (グローバル変数)
 _db = None
 
+# 操作タイプの定義
+OPERATION_TRANSLATE = "translate"
+OPERATION_SUMMARY = "summary"
+OPERATION_METADATA = "metadata"
+OPERATION_UNKNOWN = "unknown"
+
 # 現在の処理情報を一時保存するディクショナリ（paper_idをキーとして使用）
 _processing_data = {}
+
+# 処理タイプとそれに関連するテキストを一時保存するディクショナリ
+_operation_texts = {}
 
 def get_db():
     """Firestoreクライアントを取得または初期化する"""
@@ -47,6 +56,27 @@ def get_current_week_range():
     # フォーマット: YYYY_MM_DD_to_MM_DD
     return f"{monday.year}_{monday.month}_{monday.day}_to_{sunday.month}_{sunday.day}"
 
+def determine_operation_type(function_name):
+    """
+    関数名から操作タイプを判断する
+    
+    Args:
+        function_name: 関数名
+        
+    Returns:
+        操作タイプ (translate, summary, metadata, unknown)
+    """
+    function_name_lower = function_name.lower()
+    
+    if "translate" in function_name_lower:
+        return OPERATION_TRANSLATE
+    elif "summary" in function_name_lower or "summarize" in function_name_lower:
+        return OPERATION_SUMMARY
+    elif "metadata" in function_name_lower:
+        return OPERATION_METADATA
+    else:
+        return OPERATION_UNKNOWN
+
 def start_processing_session(paper_id, function_name, details=None):
     """
     処理セッションを開始し、開始時間とセッションIDを記録する
@@ -65,10 +95,14 @@ def start_processing_session(paper_id, function_name, details=None):
     # 新しいセッションIDを生成
     session_id = str(uuid.uuid4())
     
+    # 操作タイプを判断
+    operation_type = determine_operation_type(function_name)
+    
     # セッション情報を記録
     _processing_data[paper_id][session_id] = {
         "paper_id": paper_id,
         "function_name": function_name,
+        "operation_type": operation_type,
         "start_time": time.time(),
         "steps": [],
         "details": details or {}
@@ -97,6 +131,7 @@ def add_processing_step(paper_id, session_id, step_name, details=None, processin
         _processing_data[paper_id][session_id] = {
             "paper_id": paper_id,
             "function_name": f"recovery_for_{step_name}",
+            "operation_type": OPERATION_UNKNOWN,
             "start_time": time.time(),
             "steps": [],
             "details": {"recovery": True, "original_step": step_name}
@@ -111,13 +146,51 @@ def add_processing_step(paper_id, session_id, step_name, details=None, processin
     # 詳細情報があれば追加
     if details:
         step_info["details"] = details
+        
+        # 翻訳テキストまたは要約テキストが含まれていれば保存
+        if "translated_text" in details:
+            # セッションIDと操作タイプの組み合わせでテキストを保存
+            key = f"{session_id}_{OPERATION_TRANSLATE}"
+            _operation_texts[key] = details["translated_text"]
+            
+        if "summary_text" in details:
+            # セッションIDと操作タイプの組み合わせでテキストを保存
+            key = f"{session_id}_{OPERATION_SUMMARY}"
+            _operation_texts[key] = details["summary_text"]
     
-    # 処理時間があれば追加
+    # 処理時間を秒単位に変換して追加（ミリ秒から秒に変換）
     if processing_time_ms is not None:
-        step_info["processing_time_ms"] = processing_time_ms
+        processing_time_sec = processing_time_ms / 1000.0
+        step_info["processing_time_sec"] = processing_time_sec
     
     # ステップを追加
     _processing_data[paper_id][session_id]["steps"].append(step_info)
+
+def save_operation_text(session_id, operation_type, text):
+    """
+    操作の出力テキストを保存する
+    
+    Args:
+        session_id: セッションID
+        operation_type: 操作タイプ (translate, summary, metadata)
+        text: 保存するテキスト
+    """
+    key = f"{session_id}_{operation_type}"
+    _operation_texts[key] = text
+
+def get_operation_text(session_id, operation_type):
+    """
+    保存された操作の出力テキストを取得する
+    
+    Args:
+        session_id: セッションID
+        operation_type: 操作タイプ (translate, summary, metadata)
+        
+    Returns:
+        保存されたテキスト（存在しなければNone）
+    """
+    key = f"{session_id}_{operation_type}"
+    return _operation_texts.get(key)
 
 def end_processing_session(paper_id, session_id, success=True, error=None):
     """
@@ -130,7 +203,7 @@ def end_processing_session(paper_id, session_id, success=True, error=None):
         error: エラー情報（失敗した場合）
     
     Returns:
-        処理時間（ミリ秒）
+        処理時間（秒）
     """
     # セッションが存在しない場合、回復措置としてエラーだけ記録
     if paper_id not in _processing_data or session_id not in _processing_data.get(paper_id, {}):
@@ -149,9 +222,9 @@ def end_processing_session(paper_id, session_id, success=True, error=None):
     end_time = time.time()
     session_data["end_time"] = end_time
     
-    # 処理時間を計算（ミリ秒）
-    processing_time_ms = (end_time - session_data["start_time"]) * 1000
-    session_data["processing_time_ms"] = processing_time_ms
+    # 処理時間を計算（ミリ秒からセコンドに変換）
+    processing_time_sec = (end_time - session_data["start_time"])
+    session_data["processing_time_sec"] = processing_time_sec
     
     # 処理結果を記録
     session_data["success"] = success
@@ -184,13 +257,16 @@ def end_processing_session(paper_id, session_id, success=True, error=None):
             "updated_at": datetime.datetime.now()
         })
         
-        # 処理データをサブコレクションに保存
+        # 操作タイプに基づいてデータ保存
+        operation_type = session_data.get("operation_type", OPERATION_UNKNOWN)
+        
+        # 基本的な処理データを準備
         process_data = {
             "paper_id": paper_id,
             "function_name": session_data["function_name"],
             "start_time": datetime.datetime.fromtimestamp(session_data["start_time"]),
             "end_time": datetime.datetime.fromtimestamp(session_data["end_time"]),
-            "processing_time_ms": processing_time_ms,
+            "processing_time_sec": processing_time_sec,  # 秒単位に変更
             "steps": session_data["steps"],
             "success": success,
             "timestamp": datetime.datetime.now(),
@@ -206,21 +282,50 @@ def end_processing_session(paper_id, session_id, success=True, error=None):
         if error:
             process_data["error"] = error
         
-        # データをFirestoreに保存
-        week_doc_ref.collection("processes").document(session_id).set(process_data)
+        # 操作タイプに基づいて出力テキストを取得
+        if operation_type == OPERATION_TRANSLATE:
+            translated_text = get_operation_text(session_id, OPERATION_TRANSLATE)
+            if translated_text:
+                # テキストが長すぎる場合は切り詰める（Firestoreのドキュメントサイズ制限を考慮）
+                if len(translated_text) > 100000:  # 約10万文字でトリミング
+                    process_data["translated_text"] = translated_text[:100000] + "... (続き)"
+                    process_data["text_truncated"] = True
+                else:
+                    process_data["translated_text"] = translated_text
+        
+        elif operation_type == OPERATION_SUMMARY:
+            summary_text = get_operation_text(session_id, OPERATION_SUMMARY)
+            if summary_text:
+                # 要約テキストは通常短いので、全体を保存
+                process_data["summary_text"] = summary_text
+        
+        # 操作タイプに応じたドキュメントに保存
+        if operation_type in [OPERATION_TRANSLATE, OPERATION_SUMMARY, OPERATION_METADATA]:
+            # /process_time/{週範囲}/processes/{session_id}/{操作タイプ} の構造でデータを保存
+            operation_doc_ref = week_doc_ref.collection("processes").document(session_id).collection("operations").document(operation_type)
+            operation_doc_ref.set(process_data)
+        else:
+            # 未知の操作タイプの場合は、プロセスドキュメント直下に保存
+            process_doc_ref = week_doc_ref.collection("processes").document(session_id)
+            process_doc_ref.set(process_data)
         
         # セッションデータをクリーンアップ
         del _processing_data[paper_id][session_id]
         if not _processing_data[paper_id]:  # 論文に関するセッションがすべて終了したら
             del _processing_data[paper_id]
+            
+        # 操作テキストのクリーンアップ
+        for key in list(_operation_texts.keys()):
+            if key.startswith(f"{session_id}_"):
+                del _operation_texts[key]
         
-        log_info("Performance", f"Logged processing time: {session_data['function_name']}, {processing_time_ms:.2f}ms, session_id: {session_id}")
+        log_info("Performance", f"Logged processing time: {session_data['function_name']}, {processing_time_sec:.2f}s, session_id: {session_id}, operation: {operation_type}")
         
-        return processing_time_ms
+        return processing_time_sec
         
     except Exception as e:
         log_error("PerformanceError", f"Error logging processing time: {str(e)}")
-        return processing_time_ms
+        return processing_time_sec
 
 def start_timer(function_name, paper_id=None, details=None):
     """
@@ -267,6 +372,28 @@ def stop_timer(session_id, paper_id, success=True, error=None):
         error: エラー情報（失敗した場合）
     
     Returns:
-        処理時間（ミリ秒）
+        処理時間（秒）
     """
     return end_processing_session(paper_id, session_id, success, error)
+
+# 以下は特定の操作タイプに対する専用ヘルパー関数
+
+def save_translated_text(session_id, translated_text):
+    """
+    翻訳テキストを保存する便利な関数
+    
+    Args:
+        session_id: セッションID
+        translated_text: 翻訳テキスト
+    """
+    save_operation_text(session_id, OPERATION_TRANSLATE, translated_text)
+
+def save_summary_text(session_id, summary_text):
+    """
+    要約テキストを保存する便利な関数
+    
+    Args:
+        session_id: セッションID
+        summary_text: 要約テキスト
+    """
+    save_operation_text(session_id, OPERATION_SUMMARY, summary_text)
