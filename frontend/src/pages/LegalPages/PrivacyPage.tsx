@@ -160,10 +160,8 @@ const PrivacyPage = () => {
             本ポリシーに関するお問い合わせは、下記の窓口までお願いいたします。
           </Typography>
           <Typography paragraph>
-            住所：〒XXX-XXXX 東京都○○区△△X-X-X<br />
-            社名：Smart Paper v2運営事務局<br />
-            担当部署：カスタマーサポート<br />
-            Eメールアドレス：support@smartpaper-v2.example.com
+            担当部署：Smart Paper v2運営事務局<br />
+            Eメールアドレス：	info@student-subscription.com
           </Typography>
         </Paper>
       </Box>
