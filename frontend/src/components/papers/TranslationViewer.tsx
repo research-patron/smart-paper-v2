@@ -32,6 +32,39 @@ const extractTranslatedText = (text: string | null): string | null => {
   if (!text) return null;
 
   try {
+    // JSONオブジェクトとして解析できるか試す
+    try {
+      const jsonObj = JSON.parse(text);
+      if (jsonObj && typeof jsonObj === 'object') {
+        // 新しい構造に対応 (chapter, translated_text, sub_chapters)
+        if (jsonObj.chapter && jsonObj.translated_text) {
+          // サブチャプターを含めたHTMLを生成
+          let htmlContent = `<h2>${jsonObj.chapter}</h2>\n\n`;
+          htmlContent += jsonObj.translated_text;
+          
+          // サブチャプターがあれば追加
+          if (jsonObj.sub_chapters && Array.isArray(jsonObj.sub_chapters)) {
+            for (const subChapter of jsonObj.sub_chapters) {
+              if (subChapter.title && subChapter.content) {
+                htmlContent += `\n\n<h3>${subChapter.title}</h3>\n\n`;
+                htmlContent += subChapter.content;
+              }
+            }
+          }
+          
+          return htmlContent;
+        }
+        
+        // 旧形式に対応 (translated_text のみ)
+        if (jsonObj.translated_text) {
+          return jsonObj.translated_text;
+        }
+      }
+    } catch (e) {
+      // JSONとして解析できない場合は次の方法を試す
+      console.log('Failed to parse as JSON object:', e);
+    }
+
     // JSON形式かチェック - 完全なJSON文字列の場合
     const jsonPattern = /^\s*\{\s*"translated_text"\s*:\s*"(.+)"\s*\}\s*$/;
     const jsonMatch = jsonPattern.exec(text);
@@ -41,16 +74,6 @@ const extractTranslatedText = (text: string | null): string | null => {
       // エスケープされた引用符を戻す
       extractedText = extractedText.replace(/\\"/g, '"');
       return extractedText;
-    }
-
-    // JSONオブジェクトとして解析できるか試す
-    try {
-      const jsonObj = JSON.parse(text);
-      if (jsonObj && typeof jsonObj === 'object' && jsonObj.translated_text) {
-        return jsonObj.translated_text;
-      }
-    } catch (e) {
-      // JSONとして解析できない場合は無視
     }
 
     // 見出しの処理
