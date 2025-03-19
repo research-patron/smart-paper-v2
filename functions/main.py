@@ -21,7 +21,7 @@ from error_handling import (
     AuthenticationError,
     NotFoundError
 )
-from performance import start_timer, stop_timer
+from performance import start_timer, stop_timer, add_step
 
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
@@ -71,7 +71,7 @@ def process_pdf(request: Request):
     PDFアップロードを受け付け、Cloud Storageへの保存、メタデータ抽出、直列処理を行う
     """
     # 処理時間測定開始
-    start_time = start_timer()
+    session_id, temp_paper_id = start_timer("process_pdf")
     paper_id = None
     
     try:
@@ -95,6 +95,8 @@ def process_pdf(request: Request):
 
         if not request.files or "file" not in request.files:
             raise ValidationError("No file uploaded")
+            
+        add_step(session_id, temp_paper_id, "validation_complete", {"method": request.method})
 
         pdf_file = request.files["file"]
         if not pdf_file.filename.lower().endswith(".pdf"):
@@ -103,6 +105,8 @@ def process_pdf(request: Request):
         content_length = request.content_length or 0
         if content_length > 20 * 1024 * 1024:  # 20MB limit
             raise ValidationError("File too large. Maximum size is 20MB.")
+            
+        add_step(session_id, temp_paper_id, "file_validation_complete", {"file_size": content_length, "filename": pdf_file.filename})
 
         # Firebase AuthenticationのIDトークン検証
         user_id = None
@@ -118,13 +122,20 @@ def process_pdf(request: Request):
                 except Exception as e:
                     log_error("AuthError", "Invalid ID token", {"error": str(e)})
                     raise AuthenticationError("Invalid ID token")
+                    
+        add_step(session_id, temp_paper_id, "auth_complete", {"user_id": user_id})
 
         # Cloud StorageにPDFを保存
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
         file_name = f"{timestamp}_{pdf_file.filename}"
         blob = storage_client.bucket(BUCKET_NAME).blob(f"papers/{file_name}")
+        
+        upload_start = time.time()
         blob.upload_from_file(pdf_file, content_type="application/pdf")
+        upload_time_ms = (time.time() - upload_start) * 1000
+        
         pdf_gs_path = f"gs://{BUCKET_NAME}/papers/{file_name}"
+        add_step(session_id, temp_paper_id, "storage_upload_complete", {"pdf_gs_path": pdf_gs_path}, upload_time_ms)
 
         log_info("Storage", f"Uploaded PDF to {pdf_gs_path}")
 
@@ -144,6 +155,9 @@ def process_pdf(request: Request):
             "progress": 0
         })
         paper_id = doc_ref.id
+        
+        # 一時IDではなく実際のpaper_idに関連付け
+        add_step(session_id, paper_id, "firestore_document_created", {"paper_id": paper_id})
 
         log_info("Firestore", f"Created paper document with ID: {paper_id}")
 
@@ -154,37 +168,29 @@ def process_pdf(request: Request):
                 "processing_started": True,
                 "status": "pending"
             })
+            add_step(session_id, paper_id, "background_processing_started")
         except Exception as e:
             log_error("BackgroundProcessingError", "Failed to start background processing", {"error": str(e)})
+            add_step(session_id, paper_id, "background_processing_failed", {"error": str(e)})
 
         response = jsonify({"paper_id": paper_id}), 200, headers
         
         # 処理時間の記録
-        stop_timer(start_time, "process_pdf", {
-            "paper_id": paper_id, 
-            "file_size": content_length,
-            "user_id": user_id
-        })
+        stop_timer(session_id, paper_id)
         
         return response
 
     except APIError as e:
         log_error("APIError", e.message, {"details": e.details})
         # 処理時間の記録（エラー発生時）
-        stop_timer(start_time, "process_pdf", {
-            "paper_id": paper_id, 
-            "error": e.message, 
-            "error_type": e.__class__.__name__
-        })
+        target_paper_id = paper_id if paper_id else temp_paper_id
+        stop_timer(session_id, target_paper_id, False, f"{e.__class__.__name__}: {e.message}")
         return handle_api_error(e)
     except Exception as e:
         log_error("UnhandledError", "An internal server error occurred", {"error": str(e)})
         # 処理時間の記録（エラー発生時）
-        stop_timer(start_time, "process_pdf", {
-            "paper_id": paper_id, 
-            "error": str(e), 
-            "error_type": "UnhandledException"
-        })
+        target_paper_id = paper_id if paper_id else temp_paper_id
+        stop_timer(session_id, target_paper_id, False, f"UnhandledException: {str(e)}")
         return jsonify({"error": "An internal server error occurred."}), 500, headers
 
 @functions_framework.http
@@ -193,7 +199,7 @@ def process_pdf_background(request: Request):
     PDF処理を同期的に実行する
     """
     # 処理時間測定開始
-    start_time = start_timer()
+    session_id, temp_paper_id = start_timer("process_pdf_background")
     paper_id = None
     
     try:
@@ -216,6 +222,8 @@ def process_pdf_background(request: Request):
         paper_id = request_json.get("paper_id")
         if not paper_id:
             raise ValidationError("Paper ID is required")
+            
+        add_step(session_id, paper_id, "request_validation_complete", {"paper_id": paper_id})
 
         # 論文ドキュメントを取得
         doc_ref = db.collection("papers").document(paper_id)
@@ -227,15 +235,15 @@ def process_pdf_background(request: Request):
         pdf_gs_path = paper_data.get("file_path")
         if not pdf_gs_path:
             raise ValidationError("PDF file path is missing")
+            
+        add_step(session_id, paper_id, "paper_data_retrieved", {"pdf_gs_path": pdf_gs_path})
 
         # 既に処理が完了している場合はスキップ
         if paper_data.get("status") == "completed":
+            add_step(session_id, paper_id, "paper_already_completed")
             response = jsonify({"message": "Paper already processed", "paper_id": paper_id}), 200, headers
             # 処理時間の記録
-            stop_timer(start_time, "process_pdf_background", {
-                "paper_id": paper_id, 
-                "status": "already_completed"
-            })
+            stop_timer(session_id, paper_id, True)
             return response
 
         # 現在の状態を確認
@@ -252,7 +260,13 @@ def process_pdf_background(request: Request):
                 "progress": 10
             })
             
+            metadata_start = time.time()
             result = process_content(pdf_gs_path, paper_id, "extract_metadata_and_chapters")
+            metadata_time_ms = (time.time() - metadata_start) * 1000
+            
+            add_step(session_id, paper_id, "metadata_extraction_complete", 
+                    {"chapters_count": len(result.get("chapters", []))}, 
+                    metadata_time_ms)
 
             # Firestoreに結果を保存
             doc_ref.update({
@@ -268,6 +282,8 @@ def process_pdf_background(request: Request):
             result = {
                 "chapters": paper_data.get("chapters", [])
             }
+            add_step(session_id, paper_id, "metadata_already_extracted", 
+                    {"chapters_count": len(result.get("chapters", []))})
 
         # すべての章を順番に処理
         chapters = result.get("chapters", [])
@@ -283,17 +299,21 @@ def process_pdf_background(request: Request):
                 "translated_text": "<p>この論文には処理可能な章が見つかりませんでした。別の論文を試してください。</p>"
             })
             
+            add_step(session_id, paper_id, "no_chapters_found")
             response = jsonify({"message": "Processing completed (no chapters found)"}), 200, headers
             # 処理時間の記録
-            stop_timer(start_time, "process_pdf_background", {
-                "paper_id": paper_id, 
-                "chapters_count": 0,
-                "status": "no_chapters"
-            })
+            stop_timer(session_id, paper_id, True)
             return response
 
         # 章を順番に処理（同期処理）
-        chapter_results = process_all_chapters(chapters, paper_id, pdf_gs_path)
+        chapters_start = time.time()
+        chapter_results = process_all_chapters(chapters, paper_id, pdf_gs_path, session_id)  # セッションIDを渡す
+        chapters_time_ms = (time.time() - chapters_start) * 1000
+        
+        add_step(session_id, paper_id, "all_chapters_processed", 
+                {"chapters_count": len(chapters), 
+                 "processed_count": len(chapter_results) if chapter_results else 0}, 
+                chapters_time_ms)
 
         log_info("ProcessPDFBackground", f"All chapters processed successfully",
                 {"paper_id": paper_id, "chapters_count": len(chapters)})
@@ -305,11 +325,7 @@ def process_pdf_background(request: Request):
         }), 200, headers
         
         # 処理時間の記録
-        stop_timer(start_time, "process_pdf_background", {
-            "paper_id": paper_id, 
-            "chapters_count": len(chapters),
-            "chapters_processed": len(chapter_results) if chapter_results else 0
-        })
+        stop_timer(session_id, paper_id, True)
         
         return response
 
@@ -326,11 +342,8 @@ def process_pdf_background(request: Request):
                 log_error("FirestoreError", "Failed to update Firestore status", {"error": str(db_error)})
         
         # 処理時間の記録（エラー発生時）
-        stop_timer(start_time, "process_pdf_background", {
-            "paper_id": paper_id, 
-            "error": e.message,
-            "error_type": e.__class__.__name__
-        })
+        target_paper_id = paper_id if paper_id else temp_paper_id
+        stop_timer(session_id, target_paper_id, False, f"{e.__class__.__name__}: {e.message}")
         
         return jsonify(e.to_dict()), e.status_code, headers
 
@@ -347,11 +360,8 @@ def process_pdf_background(request: Request):
                 log_error("FirestoreError", "Failed to update Firestore status", {"error": str(db_error)})
         
         # 処理時間の記録（エラー発生時）
-        stop_timer(start_time, "process_pdf_background", {
-            "paper_id": paper_id, 
-            "error": str(e),
-            "error_type": "UnhandledException"
-        })
+        target_paper_id = paper_id if paper_id else temp_paper_id
+        stop_timer(session_id, target_paper_id, False, f"UnhandledException: {str(e)}")
         
         return jsonify({"error": "An internal server error occurred"}), 500, headers
 
@@ -361,7 +371,7 @@ def get_signed_url(request: Request):
     Cloud StorageのファイルへのURLを取得する
     """
     # 処理時間測定開始
-    start_time = start_timer()
+    session_id, temp_paper_id = start_timer("get_signed_url")
     file_path = None
     
     try:
@@ -382,7 +392,7 @@ def get_signed_url(request: Request):
         if not request_json or "filePath" not in request_json:
             error_response = jsonify({"error": "File path is required"}), 400, headers
             # 処理時間の記録（バリデーションエラー）
-            stop_timer(start_time, "get_signed_url", {"error": "File path is required"})
+            stop_timer(session_id, temp_paper_id, False, "Validation error: File path is required")
             return error_response
 
         file_path = request_json["filePath"]
@@ -391,20 +401,14 @@ def get_signed_url(request: Request):
         if not file_path.startswith("gs://"):
             error_response = jsonify({"error": "Invalid file path format. Must start with gs://"}), 400, headers
             # 処理時間の記録（バリデーションエラー）
-            stop_timer(start_time, "get_signed_url", {
-                "error": "Invalid file path format",
-                "file_path": file_path
-            })
+            stop_timer(session_id, temp_paper_id, False, "Validation error: Invalid file path format")
             return error_response
 
         parts = file_path[5:].split("/", 1)  # "gs://" を削除して最初の "/" で分割
         if len(parts) != 2:
             error_response = jsonify({"error": "Invalid file path format"}), 400, headers
             # 処理時間の記録（バリデーションエラー）
-            stop_timer(start_time, "get_signed_url", {
-                "error": "Invalid file path format",
-                "file_path": file_path
-            })
+            stop_timer(session_id, temp_paper_id, False, "Validation error: Invalid file path format")
             return error_response
 
         bucket_name = parts[0]
@@ -423,10 +427,7 @@ def get_signed_url(request: Request):
             log_error("GetSignedURLError", f"Failed to initialize storage client with credentials: {str(e)}")
             error_response = jsonify({"error": "Failed to initialize storage client"}), 500, headers
             # 処理時間の記録（認証エラー）
-            stop_timer(start_time, "get_signed_url", {
-                "error": "Failed to initialize storage client",
-                "file_path": file_path
-            })
+            stop_timer(session_id, temp_paper_id, False, "Authentication error: Failed to initialize storage client")
             return error_response
 
         # 署名付きURLの生成
@@ -450,10 +451,7 @@ def get_signed_url(request: Request):
             log_error("GetSignedURLError", f"Failed to generate signed URL: {str(e)}")
             error_response = jsonify({"error": "Failed to generate signed URL"}), 500, headers
             # 処理時間の記録（URL生成エラー）
-            stop_timer(start_time, "get_signed_url", {
-                "error": "Failed to generate signed URL",
-                "file_path": file_path
-            })
+            stop_timer(session_id, temp_paper_id, False, "Error: Failed to generate signed URL")
             return error_response
 
         log_info("GetSignedURL", f"Generated signed URL successfully")
@@ -461,10 +459,7 @@ def get_signed_url(request: Request):
         response = jsonify({"url": url}), 200, headers
         
         # 処理時間の記録
-        stop_timer(start_time, "get_signed_url", {
-            "bucket": bucket_name,
-            "object_name": object_name
-        })
+        stop_timer(session_id, temp_paper_id, True)
         
         return response
 
@@ -472,9 +467,6 @@ def get_signed_url(request: Request):
         log_error("GetSignedURLError", "Failed to generate signed URL", {"error": str(e)})
         
         # 処理時間の記録（エラー発生時）
-        stop_timer(start_time, "get_signed_url", {
-            "error": str(e),
-            "file_path": file_path
-        })
+        stop_timer(session_id, temp_paper_id, False, f"Unhandled error: {str(e)}")
         
         return jsonify({"error": "Failed to generate signed URL", "details": str(e)}), 500, headers

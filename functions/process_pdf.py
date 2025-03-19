@@ -4,7 +4,7 @@ import os
 import time
 import random
 from typing import Dict, Optional, Any, List
-from performance import start_timer, stop_timer
+from performance import start_timer, stop_timer, add_step
 from vertex import (
     initialize_vertex_ai,
     get_model,
@@ -177,12 +177,21 @@ def retry_with_backoff(func, max_retries=0, base_delay=1.0, max_delay=60.0):
             time.sleep(delay)
             retries += 1
 
-def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> list:
+def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent_session_id=None) -> list:
     """
     すべての章を順番に処理する（同期処理版）
+    
+    Args:
+        chapters: 章情報のリスト
+        paper_id: 論文ID
+        pdf_gs_path: PDFのパス
+        parent_session_id: 親処理のセッションID（オプション）
+        
+    Returns:
+        list: 各章の処理結果リスト
     """
     # 処理時間測定開始
-    start_time = start_timer()
+    session_id, _ = start_timer("process_all_chapters", paper_id, {"chapters_count": len(chapters)})
     
     from google.cloud import firestore
     from google.cloud import storage
@@ -200,10 +209,13 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
             "status": "processing",
             "progress": 5
         })
+        
+        add_step(session_id, paper_id, "processing_started")
 
         # チャットセッションを初期化
         start_chat_session(paper_id, pdf_gs_path)
         log_info("ProcessAllChapters", f"Initialized chat session for paper", {"paper_id": paper_id})
+        add_step(session_id, paper_id, "chat_session_initialized")
 
         # 各章を順番に処理
         results = []
@@ -221,22 +233,23 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
                 time.sleep(2.0 + random.uniform(0.5, 1.5))
                 
                 # 章処理の開始時間を記録
-                chapter_start_time = start_timer()
+                chapter_start = time.time()
                 
                 # 翻訳処理
                 translate_result = process_content(pdf_gs_path, paper_id, "translate", chapter)
+                
+                # 章処理の時間を記録
+                chapter_time_ms = (time.time() - chapter_start) * 1000
                 
                 # FirestoreのサブコレクションにTranslation結果を保存
                 chapter_ref = doc_ref.collection("translated_chapters").document(f"chapter_{chapter['chapter_number']}")
                 chapter_ref.set(translate_result)
                 
-                # 章処理の時間を記録
-                stop_timer(chapter_start_time, f"process_chapter_translate", {
-                    "paper_id": paper_id,
-                    "chapter_number": chapter["chapter_number"],
-                    "start_page": chapter["start_page"],
-                    "end_page": chapter["end_page"]
-                })
+                add_step(session_id, paper_id, f"chapter_{chapter['chapter_number']}_translated", 
+                        {"chapter_number": chapter["chapter_number"],
+                         "start_page": chapter["start_page"], 
+                         "end_page": chapter["end_page"]}, 
+                        chapter_time_ms)
                 
                 log_info("ProcessAllChapters", f"Translation completed for chapter {chapter['chapter_number']}",
                          {"paper_id": paper_id})
@@ -256,6 +269,11 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
             except Exception as chapter_error:
                 log_error("ProcessChapterError", f"Error processing chapter {chapter['chapter_number']}",
                          {"paper_id": paper_id, "error": str(chapter_error)})
+                         
+                add_step(session_id, paper_id, f"chapter_{chapter['chapter_number']}_error", 
+                        {"chapter_number": chapter["chapter_number"],
+                         "error": str(chapter_error)})
+                
                 # エラーが発生しても続行
                 results.append({
                     "chapter_number": chapter["chapter_number"],
@@ -277,15 +295,14 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
             time.sleep(3.0 + random.uniform(1.0, 2.0))
             
             # 要約処理の開始時間を記録
-            summary_start_time = start_timer()
+            summary_start = time.time()
             
             # 要約処理 (章情報なしで全体要約)
             summary_result = process_content(pdf_gs_path, paper_id, "summarize")
             
             # 要約処理の時間を記録
-            stop_timer(summary_start_time, "process_paper_summarize", {
-                "paper_id": paper_id
-            })
+            summary_time_ms = (time.time() - summary_start) * 1000
+            add_step(session_id, paper_id, "summary_generated", {}, summary_time_ms)
             
             # 正常なJSONレスポンスがある場合
             if isinstance(summary_result, dict):
@@ -308,6 +325,9 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
         except Exception as summary_error:
             log_error("ProcessSummaryError", f"Error generating paper summary",
                     {"paper_id": paper_id, "error": str(summary_error)})
+                    
+            add_step(session_id, paper_id, "summary_error", {"error": str(summary_error)})
+                    
             doc_ref.update({
                 "summary": "要約の生成中にエラーが発生しました。",
                 "required_knowledge": ""  # エラー時も空の値を設定
@@ -324,6 +344,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
         
         # 進捗を更新
         doc_ref.update({"progress": 85})
+        add_step(session_id, paper_id, "chapters_combining_started", {"chapters_count": len(chapter_docs)})
         
         for chapter_doc in chapter_docs:
             chapter_data = chapter_doc.to_dict()
@@ -349,16 +370,27 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
         # エラーチェック
         if not all_translated_text:
             log_warning("ProcessAllChapters", "No translated text was generated", {"paper_id": paper_id})
+            add_step(session_id, paper_id, "no_translated_text_error")
             all_translated_text = "<p>翻訳の生成に失敗しました。しばらくしてから再度お試しください。</p>"
 
         # 文字数に応じて保存先を決定
-        if len(all_translated_text) > 800000:
+        text_length = len(all_translated_text)
+        add_step(session_id, paper_id, "text_combined", {"translated_text_length": text_length})
+        
+        if text_length > 800000:
             # Cloud Storageに保存
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
             file_name = f"translated_text_{timestamp}_{paper_id}.txt"
             blob = storage_client.bucket(BUCKET_NAME).blob(f"papers/{file_name}")
+            
+            storage_start = time.time()
             blob.upload_from_string(all_translated_text, content_type="text/plain")
+            storage_time_ms = (time.time() - storage_start) * 1000
+            
             translated_text_path = f"gs://{BUCKET_NAME}/papers/{file_name}"
+            add_step(session_id, paper_id, "text_saved_to_storage", 
+                    {"translated_text_path": translated_text_path},
+                    storage_time_ms)
 
             doc_ref.update({
                 "translated_text_path": translated_text_path,
@@ -372,6 +404,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
                     {"paper_id": paper_id, "path": translated_text_path})
         else:
             # Firestoreに保存
+            firestore_start = time.time()
             doc_ref.update({
                 "translated_text_path": None,
                 "translated_text": all_translated_text,
@@ -379,20 +412,26 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
                 "completed_at": datetime.datetime.now(),
                 "progress": 100
             })
+            firestore_time_ms = (time.time() - firestore_start) * 1000
+            
+            add_step(session_id, paper_id, "text_saved_to_firestore", {}, firestore_time_ms)
 
             log_info("ProcessAllChapters", f"Translated text saved to Firestore", {"paper_id": paper_id})
 
         # チャットセッションを終了して解放
         end_chat_session(paper_id)
         log_info("ProcessAllChapters", f"Ended chat session for paper", {"paper_id": paper_id})
+        add_step(session_id, paper_id, "chat_session_ended")
 
         # 処理時間の記録
-        stop_timer(start_time, "process_all_chapters", {
-            "paper_id": paper_id,
-            "chapters_count": total_chapters,
-            "translated_text_length": len(all_translated_text),
-            "status": "completed"
-        })
+        stop_timer(session_id, paper_id, True)
+        
+        # 親セッションにステップを追加（存在する場合）
+        if parent_session_id:
+            add_step(parent_session_id, paper_id, "all_chapters_completed", 
+                    {"chapters_count": total_chapters, 
+                     "translated_text_length": text_length,
+                     "success": True})
         
         return results
         
@@ -406,13 +445,15 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str) -> lis
             "error_message": str(e)
         })
         
+        add_step(session_id, paper_id, "processing_failed", {"error": str(e)})
+        
         # 処理時間の記録（エラー発生時）
-        stop_timer(start_time, "process_all_chapters", {
-            "paper_id": paper_id,
-            "error": str(e),
-            "error_type": e.__class__.__name__,
-            "status": "error"
-        })
+        stop_timer(session_id, paper_id, False, str(e))
+        
+        # 親セッションにステップを追加（存在する場合）
+        if parent_session_id:
+            add_step(parent_session_id, paper_id, "all_chapters_failed", 
+                    {"error": str(e)})
         
         # エラー時もチャットセッションを解放
         try:
@@ -445,9 +486,22 @@ def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None)
 def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_info: dict = None) -> dict:
     """
     PDFファイルを直接処理して翻訳・要約・メタデータ抽出を行う
+
+    Args:
+        pdf_gs_path: PDFファイルのパス (gs://から始まる)
+        paper_id: 論文のID
+        operation: 処理内容 ('translate', 'summarize', 'extract_metadata_and_chapters')
+        chapter_info: 章情報（章番号、開始ページ、終了ページ）。translate の場合に必要。
+
+    Returns:
+        dict: 処理結果（JSON形式）
     """
-    # 処理時間測定開始
-    start_time = start_timer()
+    # 処理時間測定開始 - 関数名を明示的に指定
+    processing_details = {"operation": operation}
+    if chapter_info:
+        processing_details["chapter_number"] = chapter_info.get("chapter_number")
+    
+    session_id, _ = start_timer(f"process_content_{operation}", paper_id, processing_details)
     
     try:
         # Vertex AIの初期化
@@ -455,6 +509,7 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
         
         # チャットセッションを開始または取得
         start_chat_session(paper_id, pdf_gs_path)
+        add_step(session_id, paper_id, "chat_session_started")
         
         # 処理内容に応じてプロンプトを選択
         if operation == "translate":
@@ -471,12 +526,17 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
             prompt = prompt.replace("{end_page}", str(chapter_info['end_page']))
             prompt = prompt.replace("{chapter_title}", str(chapter_info.get('title', 'Untitled')))
             
+            add_step(session_id, paper_id, "translation_prompt_prepared", 
+                   {"chapter_number": chapter_info['chapter_number']})
+            
         elif operation == "summarize":
             # 論文全体の要約のためのプロンプト
             prompt = load_prompt(SUMMARY_PROMPT_FILE)
+            add_step(session_id, paper_id, "summary_prompt_prepared")
             
         elif operation == "extract_metadata_and_chapters":
             prompt = load_prompt(METADATA_AND_CHAPTER_PROMPT_FILE)
+            add_step(session_id, paper_id, "metadata_prompt_prepared")
             
         else:
             raise ValidationError(f"Invalid operation: {operation}")
@@ -484,6 +544,7 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
         # チャットセッションを使用してプロンプトを処理
         # リソースエラー対策のためリトライ機能を追加
         log_info("ProcessPDF", f"Processing with chat session for operation: {operation}, paper_id: {paper_id}")
+        add_step(session_id, paper_id, "process_started")
         
         # リトライ処理でAPIを呼び出す
         def api_call():
@@ -491,14 +552,22 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
             time.sleep(1.0 + random.uniform(0.1, 0.5))
             return process_with_chat(paper_id, prompt)
         
+        # APIコール開始時間を記録
+        api_start = time.time()
+        
         # リトライを無効化し、直接API呼び出しを実行
         response_text = api_call()
+        
+        # API呼び出しの時間を記録
+        api_time_ms = (time.time() - api_start) * 1000
+        add_step(session_id, paper_id, "api_call_completed", {}, api_time_ms)
         
         # JSONレスポンスの処理
         try:
             # 改善されたJSONパース処理
             # モデルが返すさまざまな形式に対応
             result = extract_json_from_response(response_text, operation)
+            add_step(session_id, paper_id, "response_parsed")
             
             # 翻訳結果のHTMLをサニタイズ
             if operation == "translate" and "translated_text" in result:
@@ -510,18 +579,12 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
                 result["start_page"] = chapter_info["start_page"]
                 result["end_page"] = chapter_info["end_page"]
                 
+                add_step(session_id, paper_id, "html_sanitized")
+                
             log_info("ProcessPDF", f"Successfully processed {operation}")
             
             # 処理時間の記録
-            details = {
-                "paper_id": paper_id,
-                "operation": operation,
-            }
-            
-            if chapter_info:
-                details["chapter_number"] = chapter_info.get("chapter_number")
-                
-            stop_timer(start_time, f"process_content_{operation}", details)
+            stop_timer(session_id, paper_id, True)
             
             return result
             
@@ -530,47 +593,42 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
             log_warning("JSONDecodeError", "Invalid JSON response from Vertex AI. Trying fallback processing.", 
                        {"response_text": response_text[:1000] + "..." if len(response_text) > 1000 else response_text})
             
-            # 処理時間の記録（JSONパースエラー）
-            details = {
-                "paper_id": paper_id,
-                "operation": operation,
-                "error": "JSONDecodeError",
-            }
-            
-            if chapter_info:
-                details["chapter_number"] = chapter_info.get("chapter_number")
-                
-            stop_timer(start_time, f"process_content_{operation}", details)
+            add_step(session_id, paper_id, "json_parsing_failed", {"error": str(e)})
             
             if operation == "translate":
-                return {
+                result = {
                     "translated_text": sanitize_html(response_text),
                     "chapter_number": chapter_info["chapter_number"],
                     "title": chapter_info.get("title", ""),
                     "start_page": chapter_info["start_page"],
                     "end_page": chapter_info["end_page"]
                 }
+                add_step(session_id, paper_id, "used_fallback_translation")
+                
+                # 処理時間の記録（エラーだがリカバリー成功）
+                stop_timer(session_id, paper_id, True)
+                return result
+                
             elif operation == "summarize":
-                return {"summary": response_text}
+                result = {"summary": response_text}
+                add_step(session_id, paper_id, "used_fallback_summary")
+                
+                # 処理時間の記録（エラーだがリカバリー成功）
+                stop_timer(session_id, paper_id, True)
+                return result
+                
             else:
                 # それでも失敗する場合は例外を発生させる
                 log_error("JSONDecodeError", "Failed to parse response as JSON and no fallback available", 
                          {"response_text": response_text[:1000] + "..." if len(response_text) > 1000 else response_text})
+                
+                # 処理時間の記録（失敗）
+                stop_timer(session_id, paper_id, False, "Failed to parse response as JSON")
                 raise VertexAIError("Failed to parse Vertex AI response as JSON")
                 
     except Exception as e:
         # 処理時間の記録（エラー発生時）
-        details = {
-            "paper_id": paper_id,
-            "operation": operation,
-            "error": str(e),
-            "error_type": e.__class__.__name__
-        }
-        
-        if chapter_info:
-            details["chapter_number"] = chapter_info.get("chapter_number")
-            
-        stop_timer(start_time, f"process_content_{operation}", details)
+        stop_timer(session_id, paper_id, False, str(e))
         
         log_error("ProcessPDFError", f"Failed to process PDF: {operation}", 
                  {"error": str(e), "file_path": pdf_gs_path, "operation": operation})
