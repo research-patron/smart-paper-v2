@@ -254,10 +254,10 @@ const Summary: React.FC<SummaryProps> = ({
   
   return (
     <Box>
-      {/* メイン要約 */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          論文の要約
+      <Box sx={{ p: 3 }}>
+        {/* 論文の要約部分 */}
+        <Typography variant="h5" gutterBottom>
+          <strong><u style={{ paddingTop: '5px', display: 'inline-block', textUnderlineOffset: '3px' }}>論文の要約</u></strong>
         </Typography>
         <Divider sx={{ mb: 2 }} />
         <div
@@ -265,22 +265,23 @@ const Summary: React.FC<SummaryProps> = ({
             __html: parseMarkdown(chapterSummaries[0] || processedContent.summary)
           }}
         />
-      </Paper>
-      
-      {/* 必要な知識の表示 */}
-      {processedContent.requiredKnowledge && (
-        <Paper sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            この分野の研究を行うために必要な知識
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
-          <div
-            dangerouslySetInnerHTML={{
-              __html: parseMarkdown(processedContent.requiredKnowledge)
-            }}
-          />
-        </Paper>
-      )}
+
+        {processedContent.requiredKnowledge && (
+          <>
+            <Box sx={{ mt: 4 }}>
+              <Typography variant="h5" gutterBottom>
+                <strong><u style={{ paddingTop: '5px', display: 'inline-block', textUnderlineOffset: '3px' }}>この分野の研究を行うために必要な知識</u></strong>
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <div
+                dangerouslySetInnerHTML={{
+                  __html: parseMarkdown(processedContent.requiredKnowledge)
+                }}
+              />
+            </Box>
+          </>
+        )}
+      </Box>
       
       {/* 章ごとの要約を表示（章情報がある場合のみ） */}
       {chapters.length > 0 && Object.keys(chapterSummaries).length > 1 && (
@@ -294,7 +295,7 @@ const Summary: React.FC<SummaryProps> = ({
             if (!summaryForChapter) return null;
 
             return (
-              <Paper key={chapter.chapter_number} sx={{ p: 3, mb: 3 }}>
+              <Box key={chapter.chapter_number} sx={{ p: 3, mb: 3 }}>
                 <Typography variant="h6" gutterBottom>
                   {chapter.chapter_number}. {chapter.title}
                 </Typography>
@@ -304,7 +305,7 @@ const Summary: React.FC<SummaryProps> = ({
                     __html: parseMarkdown(cleanSummaryText(summaryForChapter))
                   }}
                 />
-              </Paper>
+              </Box>
             );
           })}
         </Box>

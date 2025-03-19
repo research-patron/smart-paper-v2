@@ -886,16 +886,16 @@ const PaperViewPage: React.FC = () => {
                 <Typography>メタデータが見つかりません</Typography>
               </Box>
             ) : (
-              <Paper elevation={0} sx={{ p: 3, height: '100%', overflow: 'auto' }}>
-                <Typography variant="h6" gutterBottom>
-                  論文のメタデータ
+              <Paper elevation={0} sx={{ p: 6, height: '100%', overflow: 'auto' }}>
+                <Typography variant="h5" gutterBottom>
+                  <strong><u style={{ paddingTop: '5px', display: 'inline-block', textUnderlineOffset: '3px' }}>論文のメタデータ</u></strong>
                 </Typography>
                 
                 <List>
                   <ListItem>
                     <ListItemText 
                       primary={
-                        <Typography variant="subtitle1">タイトル</Typography>
+                        <Typography variant="subtitle1"><strong>論文タイトル</strong></Typography>
                       }
                       secondary={
                         <Typography component="div" variant="body2">{currentPaper.metadata.title}</Typography>
@@ -907,7 +907,7 @@ const PaperViewPage: React.FC = () => {
                   <ListItem>
                     <ListItemText 
                       primary={
-                        <Typography variant="subtitle1">著者</Typography>
+                        <Typography variant="subtitle1"><strong>著者</strong></Typography>
                       }
                       secondary={
                         <Box>
@@ -925,7 +925,7 @@ const PaperViewPage: React.FC = () => {
                   <ListItem>
                     <ListItemText 
                       primary={
-                        <Typography variant="subtitle1">ジャーナル</Typography>
+                        <Typography variant="subtitle1"><strong>ジャーナル</strong></Typography>
                       }
                       secondary={
                         <Typography component="div" variant="body2">{currentPaper.metadata.journal}</Typography>
@@ -937,7 +937,7 @@ const PaperViewPage: React.FC = () => {
                   <ListItem>
                     <ListItemText 
                       primary={
-                        <Typography variant="subtitle1">出版年</Typography>
+                        <Typography variant="subtitle1"><strong>出版年</strong></Typography>
                       }
                       secondary={
                         <Typography component="div" variant="body2">{currentPaper.metadata.year}</Typography>
@@ -949,7 +949,7 @@ const PaperViewPage: React.FC = () => {
                   <ListItem>
                     <ListItemText 
                       primary={
-                        <Typography variant="subtitle1">DOI</Typography>
+                        <Typography variant="subtitle1"><strong>DOI</strong></Typography>
                       }
                       secondary={
                         <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
@@ -968,7 +968,7 @@ const PaperViewPage: React.FC = () => {
                   <ListItem>
                     <ListItemText 
                       primary={
-                        <Typography variant="subtitle1">キーワード</Typography>
+                        <Typography variant="subtitle1"><strong>キーワード</strong></Typography>
                       }
                       secondary={
                         <Typography component="div" variant="body2">
@@ -982,7 +982,7 @@ const PaperViewPage: React.FC = () => {
                   <ListItem>
                     <ListItemText 
                       primary={
-                        <Typography variant="subtitle1">アブストラクト</Typography>
+                        <Typography variant="subtitle1"><strong>アブストラクト</strong></Typography>
                       }
                       secondary={
                         <Typography component="div" variant="body2">{currentPaper.metadata.abstract}</Typography>
@@ -994,7 +994,7 @@ const PaperViewPage: React.FC = () => {
                 {currentPaper.chapters && currentPaper.chapters.length > 0 && (
                   <>
                     <Typography variant="h6" gutterBottom sx={{ mt: 4 }}>
-                      章構成
+                      <strong>章構成</strong>
                     </Typography>
                     
                     <List>
