@@ -342,6 +342,49 @@ export const formatFileName = (format: string, paper: Paper): string => {
 };
 
 /**
+ * PDFファイル名用のフォーマットを適用して生成する
+ * @param paper 論文データ
+ * @returns 「著者名(刊行年)_論文タイトル.pdf」形式のファイル名
+ */
+export const formatPdfFileName = (paper: Paper): string => {
+  if (!paper.metadata) {
+    // メタデータがない場合は現在の日時をファイル名にする
+    return `paper_${new Date().toISOString().slice(0, 10)}.pdf`;
+  }
+  
+  // 著者名（最初の著者のみ）- 省略形（例：O Kehinde）も保持
+  let authorName = 'unknown';
+  if (paper.metadata.authors && paper.metadata.authors.length > 0) {
+    // 著者名全体を使用（省略形も保持）
+    authorName = paper.metadata.authors[0].name;
+    // 特殊文字を除去
+    authorName = authorName.replace(/[<>:"/\\|?*]/g, '');
+    // スペースをアンダースコアに置換（ファイル名の見やすさのため）
+    authorName = authorName.replace(/\s+/g, '_');
+    // ファイル名として適切な長さに切り詰める（必要に応じて）
+    if (authorName.length > 30) {
+      authorName = authorName.substring(0, 30);
+    }
+  }
+  
+  // 出版年
+  const year = paper.metadata.year || 'yyyy';
+  
+  // 論文タイトル
+  let title = 'untitled';
+  if (paper.metadata.title) {
+    // タイトルから特殊文字を除去し、短く切り詰める
+    title = paper.metadata.title
+      .replace(/[<>:"/\\|?*]/g, '')  // ファイル名に使えない文字を除去
+      .replace(/\s+/g, '_')           // スペースをアンダースコアに置換
+      .substring(0, 50);              // 長すぎる場合は切り詰め
+  }
+  
+  // 「著者名(刊行年)_論文タイトル.pdf」形式のファイル名を生成
+  return `${authorName}(${year})_${title}.pdf`;
+};
+
+/**
  * ダウンロードしたMarkdownファイルをObsidianで開く
  * @param vaultName Obsidianのvault名
  * @param filePath ファイルパス
@@ -460,18 +503,8 @@ export const exportToObsidian = async (
       dateFolderHandle = await smartPaperRootHandle.getDirectoryHandle(today, { create: true });
     }
     
-    // PDFファイル名を取得
-    let pdfFileName = '';
-    if (paper.file_path) {
-      // ファイルパスからファイル名を抽出
-      pdfFileName = paper.file_path.split('/').pop() || '';
-    } else if (paper.id) {
-      // IDをもとにファイル名を生成
-      pdfFileName = `paper_${paper.id}.pdf`;
-    } else {
-      // フォールバック: タイムスタンプでファイル名を生成
-      pdfFileName = `paper_${Date.now()}.pdf`;
-    }
+    // PDFファイル名をメタデータを使用して「著者名(刊行年)_論文タイトル.pdf」形式で生成
+    const pdfFileName = formatPdfFileName(paper);
     
     // PDF Blobを取得
     let pdfBlob: Blob | null = null;

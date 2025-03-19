@@ -4,7 +4,13 @@ import os
 import time
 import random
 from typing import Dict, Optional, Any, List
-from performance import start_timer, stop_timer, add_step
+from performance import (
+    start_timer, 
+    stop_timer, 
+    add_step, 
+    save_translated_text, 
+    save_summary_text
+)
 from vertex import (
     initialize_vertex_ai,
     get_model,
@@ -223,6 +229,9 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
         sorted_chapters = sorted(chapters, key=lambda x: x["chapter_number"])
         total_chapters = len(sorted_chapters)
         
+        # 全章の翻訳テキストを結合するための変数
+        all_translated_text = ""
+        
         # 1. 翻訳フェーズ - 各章を順番に翻訳
         for i, chapter in enumerate(sorted_chapters, 1):
             try:
@@ -240,6 +249,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
 
                 # 章処理の時間を記録
                 chapter_time_ms = (time.time() - chapter_start) * 1000
+                chapter_time_sec = chapter_time_ms / 1000.0
 
                 # 結果を確認して構造化
                 if "chapter" in translate_result and "translated_text" in translate_result:
@@ -277,15 +287,36 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
                     if "end_page" not in final_result:
                         final_result["end_page"] = chapter["end_page"]
 
+                # 全体の翻訳テキストに追加
+                chapter_translated_text = final_result.get("translated_text", "")
+                if chapter_translated_text:
+                    if all_translated_text:
+                        all_translated_text += "\n\n"
+                    
+                    # 章番号とタイトルを追加
+                    chapter_number = final_result.get("chapter_number", "?")
+                    chapter_title = final_result.get("title", "")
+                    
+                    # タイトルが「数字. タイトル」の形式かチェック
+                    title_pattern = rf"^{chapter_number}\.\s+.*"
+                    if not re.match(title_pattern, chapter_title):
+                        chapter_title = f"{chapter_number}. {chapter_title}"
+                    
+                    all_translated_text += f"<h2>{chapter_title}</h2>\n\n"
+                    all_translated_text += chapter_translated_text
+
                 # FirestoreのサブコレクションにTranslation結果を保存
                 chapter_ref = doc_ref.collection("translated_chapters").document(f"chapter_{chapter['chapter_number']}")
                 chapter_ref.set(final_result)
+                
+                # パフォーマンス計測モジュールに翻訳テキストを保存
+                save_translated_text(session_id, chapter_translated_text)
                 
                 add_step(session_id, paper_id, f"chapter_{chapter['chapter_number']}_translated", 
                         {"chapter_number": chapter["chapter_number"],
                          "start_page": chapter["start_page"], 
                          "end_page": chapter["end_page"]}, 
-                        chapter_time_ms)
+                        chapter_time_ms)  # このAPIはまだミリ秒を受け取る
                 
                 log_info("ProcessAllChapters", f"Translation completed for chapter {chapter['chapter_number']}",
                          {"paper_id": paper_id})
@@ -320,6 +351,9 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
                 # エラー後は少し長めに待機
                 time.sleep(5.0 + random.uniform(1.0, 3.0))
 
+        # 翻訳テキスト全体をパフォーマンス計測モジュールに保存
+        save_translated_text(session_id, all_translated_text)
+
         # 2. 要約フェーズ - 論文全体の要約を一回だけ生成
         try:
             log_info("ProcessAllChapters", f"Generating summary for the entire paper", {"paper_id": paper_id})
@@ -338,7 +372,9 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
             
             # 要約処理の時間を記録
             summary_time_ms = (time.time() - summary_start) * 1000
-            add_step(session_id, paper_id, "summary_generated", {}, summary_time_ms)
+            summary_time_sec = summary_time_ms / 1000.0
+            
+            add_step(session_id, paper_id, "summary_generated", {}, summary_time_ms)  # このAPIはまだミリ秒を受け取る
             
             # 正常なJSONレスポンスがある場合
             if isinstance(summary_result, dict):
@@ -348,6 +384,9 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
                 # JSONレスポンスがない場合、結果全体を要約とみなす
                 summary_text = str(summary_result)
                 required_knowledge = ''
+
+            # パフォーマンス計測モジュールに要約テキストを保存
+            save_summary_text(session_id, summary_text)
 
             # Firestoreに結果を保存
             doc_ref.update({
@@ -369,43 +408,14 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
                 "required_knowledge": ""  # エラー時も空の値を設定
             })
 
-        # 全ての章の翻訳結果を結合
-        all_translated_text = ""
-        
-        # 章番号順にソート
-        chapter_docs = sorted(
-            doc_ref.collection("translated_chapters").get(),
-            key=lambda x: x.to_dict().get("chapter_number", 0)
-        )
-        
         # 進捗を更新
         doc_ref.update({"progress": 85})
-        add_step(session_id, paper_id, "chapters_combining_started", {"chapters_count": len(chapter_docs)})
+        add_step(session_id, paper_id, "chapters_combining_started", {"chapters_count": len(results)})
         
-        for chapter_doc in chapter_docs:
-            chapter_data = chapter_doc.to_dict()
-            translated_text = chapter_data.get('translated_text', '')
-            if translated_text:
-                if all_translated_text:
-                    all_translated_text += "\n\n"
-                # 章番号とタイトルを追加（日本語タイトルのみの形式に変更）
-                chapter_number = chapter_data.get('chapter_number', '?')
-                chapter_title = chapter_data.get('title', '')
-                
-                # タイトルが「数字. タイトル」の形式かチェック
-                title_pattern = rf"^{chapter_number}\.\s+.*"
-                if not re.match(title_pattern, chapter_title):
-                    chapter_title = f"{chapter_number}. {chapter_title}"
-                
-                all_translated_text += f"<h2>{chapter_title}</h2>\n\n"
-                all_translated_text += translated_text
-
-        # 進捗を更新
-        doc_ref.update({"progress": 90})
-
         # エラーチェック
         if not all_translated_text:
             log_warning("ProcessAllChapters", "No translated text was generated", {"paper_id": paper_id})
+            
             add_step(session_id, paper_id, "no_translated_text_error")
             all_translated_text = "<p>翻訳の生成に失敗しました。しばらくしてから再度お試しください。</p>"
 
@@ -422,11 +432,12 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
             storage_start = time.time()
             blob.upload_from_string(all_translated_text, content_type="text/plain")
             storage_time_ms = (time.time() - storage_start) * 1000
+            storage_time_sec = storage_time_ms / 1000.0
             
             translated_text_path = f"gs://{BUCKET_NAME}/papers/{file_name}"
             add_step(session_id, paper_id, "text_saved_to_storage", 
                     {"translated_text_path": translated_text_path},
-                    storage_time_ms)
+                    storage_time_ms)  # このAPIはまだミリ秒を受け取る
 
             doc_ref.update({
                 "translated_text_path": translated_text_path,
@@ -449,8 +460,9 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
                 "progress": 100
             })
             firestore_time_ms = (time.time() - firestore_start) * 1000
+            firestore_time_sec = firestore_time_ms / 1000.0
             
-            add_step(session_id, paper_id, "text_saved_to_firestore", {}, firestore_time_ms)
+            add_step(session_id, paper_id, "text_saved_to_firestore", {}, firestore_time_ms)  # このAPIはまだミリ秒を受け取る
 
             log_info("ProcessAllChapters", f"Translated text saved to Firestore", {"paper_id": paper_id})
 
@@ -596,7 +608,7 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
         
         # API呼び出しの時間を記録
         api_time_ms = (time.time() - api_start) * 1000
-        add_step(session_id, paper_id, "api_call_completed", {}, api_time_ms)
+        add_step(session_id, paper_id, "api_call_completed", {}, api_time_ms)  # このAPIはまだミリ秒を受け取る
         
         # JSONレスポンスの処理
         try:
@@ -615,7 +627,15 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
                 result["start_page"] = chapter_info["start_page"]
                 result["end_page"] = chapter_info["end_page"]
                 
+                # 翻訳テキストをパフォーマンス計測モジュールに保存
+                save_translated_text(session_id, result["translated_text"])
+                
                 add_step(session_id, paper_id, "html_sanitized")
+            
+            # 要約結果の処理
+            elif operation == "summarize" and "summary" in result:
+                # 要約テキストをパフォーマンス計測モジュールに保存
+                save_summary_text(session_id, result["summary"])
                 
             log_info("ProcessPDF", f"Successfully processed {operation}")
             
@@ -632,13 +652,18 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
             add_step(session_id, paper_id, "json_parsing_failed", {"error": str(e)})
             
             if operation == "translate":
+                sanitized_text = sanitize_html(response_text)
                 result = {
-                    "translated_text": sanitize_html(response_text),
+                    "translated_text": sanitized_text,
                     "chapter_number": chapter_info["chapter_number"],
                     "title": chapter_info.get("title", ""),
                     "start_page": chapter_info["start_page"],
                     "end_page": chapter_info["end_page"]
                 }
+                
+                # 翻訳テキストをパフォーマンス計測モジュールに保存
+                save_translated_text(session_id, sanitized_text)
+                
                 add_step(session_id, paper_id, "used_fallback_translation")
                 
                 # 処理時間の記録（エラーだがリカバリー成功）
@@ -647,6 +672,10 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
                 
             elif operation == "summarize":
                 result = {"summary": response_text}
+                
+                # 要約テキストをパフォーマンス計測モジュールに保存
+                save_summary_text(session_id, response_text)
+                
                 add_step(session_id, paper_id, "used_fallback_summary")
                 
                 # 処理時間の記録（エラーだがリカバリー成功）
