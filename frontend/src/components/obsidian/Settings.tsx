@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -28,10 +28,11 @@ import InfoIcon from '@mui/icons-material/Info';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import SaveIcon from '@mui/icons-material/Save';
 import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../../api/firebase';
 import { useAuthStore } from '../../store/authStore';
-import { selectObsidianVault } from '../../api/obsidian';
+import { selectObsidianVault, checkFolderExists, getVault } from '../../api/obsidian';
 
 interface ObsidianSettingsProps {
   onSaved?: () => void;
@@ -39,6 +40,19 @@ interface ObsidianSettingsProps {
 
 const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
   const { user } = useAuthStore();
+  
+  // 初期設定値の保持用のref
+  const initialSettings = useRef<{
+    vault_dir: string;
+    vault_name: string;
+    folder_path: string;
+    file_name_format: string;
+    file_type: 'md' | 'txt';
+    open_after_export: boolean;
+    include_pdf: boolean;
+    create_embed_folder: boolean;
+    auto_export: boolean;
+  }>();
   
   // 設定値の状態管理
   const [vaultDir, setVaultDir] = useState('');
@@ -54,6 +68,7 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
   // UI状態の管理
   const [isLoading, setIsLoading] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [settingsChanged, setSettingsChanged] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isObsidianInstalled = true; // デフォルトで連携可能とする
   
@@ -68,6 +83,25 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
   
   const [selectedPreset, setSelectedPreset] = useState(fileNameFormatPresets[0].value);
   const [customFormat, setCustomFormat] = useState('');
+  
+  // 設定値の変更を追跡
+  useEffect(() => {
+    if (!initialSettings.current) return;
+    
+    // 初期値と現在値を比較
+    const isChanged = 
+      vaultDir !== initialSettings.current.vault_dir ||
+      vaultName !== initialSettings.current.vault_name ||
+      folderPath !== initialSettings.current.folder_path ||
+      fileNameFormat !== initialSettings.current.file_name_format ||
+      fileType !== initialSettings.current.file_type ||
+      openAfterExport !== initialSettings.current.open_after_export ||
+      includePdf !== initialSettings.current.include_pdf ||
+      createEmbedFolder !== initialSettings.current.create_embed_folder ||
+      autoExport !== initialSettings.current.auto_export;
+    
+    setSettingsChanged(isChanged);
+  }, [vaultDir, vaultName, folderPath, fileNameFormat, fileType, openAfterExport, includePdf, createEmbedFolder, autoExport]);
   
   // ユーザーの既存設定を読み込む
   useEffect(() => {
@@ -84,15 +118,30 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
         
         if (settingsSnap.exists()) {
           const data = settingsSnap.data();
-          setVaultDir(data.vault_dir || '');
-          setVaultName(data.vault_name || '');
-          setFolderPath(data.folder_path || '');
-          setFileNameFormat(data.file_name_format || '{authors}_{title}_{year}');
-          setFileType(data.file_type || 'md');
-          setOpenAfterExport(data.open_after_export !== false);
-          setIncludePdf(data.include_pdf !== false);
-          setCreateEmbedFolder(data.create_embed_folder !== false);
-          setAutoExport(data.auto_export !== false);
+          
+          // 初期値として保存
+          initialSettings.current = {
+            vault_dir: data.vault_dir || '',
+            vault_name: data.vault_name || '',
+            folder_path: data.folder_path || '',
+            file_name_format: data.file_name_format || '{authors}_{title}_{year}',
+            file_type: data.file_type || 'md',
+            open_after_export: data.open_after_export !== false,
+            include_pdf: data.include_pdf !== false,
+            create_embed_folder: data.create_embed_folder !== false,
+            auto_export: data.auto_export !== false
+          };
+          
+          // 状態を更新
+          setVaultDir(initialSettings.current.vault_dir);
+          setVaultName(initialSettings.current.vault_name);
+          setFolderPath(initialSettings.current.folder_path);
+          setFileNameFormat(initialSettings.current.file_name_format);
+          setFileType(initialSettings.current.file_type);
+          setOpenAfterExport(initialSettings.current.open_after_export);
+          setIncludePdf(initialSettings.current.include_pdf);
+          setCreateEmbedFolder(initialSettings.current.create_embed_folder);
+          setAutoExport(initialSettings.current.auto_export);
           
           // プリセットの選択を更新
           const matchingPreset = fileNameFormatPresets.find(p => p.value === data.file_name_format);
@@ -102,6 +151,16 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
             setSelectedPreset('custom');
             setCustomFormat(data.file_name_format);
           }
+          
+          // 設定値の読み込み後は変更フラグをリセット
+          setSettingsChanged(false);
+          
+          // ローカルストレージにも保存
+          localStorage.setItem('obsidian_settings', JSON.stringify({
+            ...initialSettings.current,
+            created_at: data.created_at?.toDate().toISOString(),
+            updated_at: data.updated_at?.toDate().toISOString()
+          }));
         }
       } catch (err) {
         console.error('Error loading Obsidian settings:', err);
@@ -135,6 +194,20 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
     try {
       setIsLoading(true);
       setError(null);
+      
+      // フォルダパスが指定されている場合の確認を厳密化
+      if (folderPath.trim()) {
+        const vaultHandle = await getVault();
+        if (!vaultHandle) {
+          throw new Error('Obsidian vaultが選択されていません');
+        }
+        
+        // フォルダ存在確認
+        const exists = await checkFolderExists(vaultHandle, folderPath);
+        if (!exists) {
+          throw new Error(`指定されたフォルダ「${folderPath}」がObsidian vault内に存在しません`);
+        }
+      }
       
       // カスタムフォーマットを使用する場合
       let finalFileNameFormat = fileNameFormat;
@@ -170,15 +243,38 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
         });
       }
       
+      // 初期値を更新
+      initialSettings.current = {
+        vault_dir: vaultDir,
+        vault_name: vaultName,
+        folder_path: folderPath,
+        file_name_format: finalFileNameFormat,
+        file_type: fileType,
+        open_after_export: openAfterExport,
+        include_pdf: includePdf,
+        create_embed_folder: createEmbedFolder,
+        auto_export: autoExport
+      };
+      
+      // 保存が成功したら変更フラグを更新
+      setSettingsChanged(false);
       setIsSaved(true);
-      setTimeout(() => setIsSaved(false), 3000);
+      
+      // 保存成功メッセージは3秒後に非表示
+      setTimeout(() => {
+        setIsSaved(false);
+      }, 3000);
       
       // 保存完了後のコールバックを呼び出す
       if (onSaved) onSaved();
       
     } catch (err) {
       console.error('Error saving Obsidian settings:', err);
-      setError('設定の保存に失敗しました。');
+      if (err instanceof Error) {
+        setError(err.message || '設定の保存に失敗しました。');
+      } else {
+        setError('設定の保存に失敗しました。');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -265,12 +361,26 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
           設定を保存しました
         </Alert>
       )}
+      
+      {settingsChanged && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          <AlertTitle>設定が変更されています</AlertTitle>
+          <Typography variant="body2">
+            設定を反映するには「設定を保存」ボタンを押してください。
+          </Typography>
+          {folderPath && (
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              注意: 指定したフォルダ名がObsidian vault内に存在することを確認してください。
+            </Typography>
+          )}
+        </Alert>
+      )}
 
       <Alert severity="info" sx={{ mb: 3 }}>
         <AlertTitle>自動保存機能について</AlertTitle>
         <Typography variant="body2">
           Obsidianと連携すると、論文の翻訳後に自動的にObsidianに保存されます。
-          自動保存を有効にすることで、「Obsidianへエクスポート」ボタンをクリックする必要がなくなります。
+          自動保存を有効にすることで、「Obsidianに保存」ボタンをクリックする必要がなくなります。
         </Typography>
         <Typography variant="body2" sx={{ mt: 1 }}>
           <strong>注意：</strong> ブラウザのセキュリティ制限により、ブラウザを再起動すると権限が失われます。
@@ -302,11 +412,25 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
         <Grid item xs={12}>
           <FormControl fullWidth margin="normal">
             <TextField
-              label="保存先フォルダパス (オプション)"
+              label="保存先フォルダ名"
               value={folderPath}
               onChange={(e) => handleFolderPathChange(e.target.value)}
-              placeholder="例: Papers/Research"
-              helperText="論文を保存するVault内のフォルダパスを入力してください。空の場合はVaultのルートに保存されます。"
+              placeholder="例: 研究ノート"
+              helperText={
+                <>
+                  <Typography variant="caption" component="span">
+                    論文を保存するVault内の既存フォルダを指定してください。フォルダ名を変更したら必ず「設定を保存」ボタンを押してください。
+                  </Typography>
+                  <br />
+                  <Typography variant="caption" component="span" color="error">
+                    注意: 指定したフォルダがObsidian vault内に存在しない場合、論文保存時にエラーになります。
+                  </Typography>
+                  <br />
+                  <Typography variant="caption" component="span">
+                    空の場合はVault直下に「smart-paper-v2」フォルダを自動作成します。
+                  </Typography>
+                </>
+              }
               disabled={isLoading}
             />
           </FormControl>
@@ -345,30 +469,6 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
             </FormControl>
           </Grid>
         )}
-        
-        <Grid item xs={12}>
-          <FormControl component="fieldset">
-            <FormLabel component="legend">ファイル形式</FormLabel>
-            <RadioGroup
-              row
-              value={fileType}
-              onChange={(e) => setFileType(e.target.value as 'md' | 'txt')}
-            >
-              <FormControlLabel 
-                value="md" 
-                control={<Radio />} 
-                label="Markdown (.md)" 
-                disabled={isLoading} 
-              />
-              <FormControlLabel 
-                value="txt" 
-                control={<Radio />} 
-                label="プレーンテキスト (.txt)" 
-                disabled={isLoading} 
-              />
-            </RadioGroup>
-          </FormControl>
-        </Grid>
         
         <Grid item xs={12}>
           <Typography variant="subtitle2" gutterBottom>
@@ -421,7 +521,7 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
                 label="埋め込み書類フォルダを作成"
               />
               <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4 }}>
-                オンにすると、PDFは「Embed Documents」フォルダに保存され、Markdownからリンクされます
+                オンにすると、PDFは「添付ファイル」フォルダに保存され、Markdownからリンクされます
               </Typography>
             </Box>
           )}
@@ -435,6 +535,7 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
               color="primary"
               onClick={handleSave}
               disabled={isLoading || !vaultName}
+              startIcon={<SaveIcon />}
             >
               設定を保存
             </Button>
