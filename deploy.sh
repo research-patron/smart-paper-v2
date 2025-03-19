@@ -58,6 +58,10 @@ gcloud services enable secretmanager.googleapis.com
 echo -e "\n${BLUE}Firestore APIを有効化...${NC}"
 gcloud services enable firestore.googleapis.com
 
+# Firebase Auth APIを有効化
+echo -e "\n${BLUE}Firebase Auth APIを有効化...${NC}"
+gcloud services enable identitytoolkit.googleapis.com
+
 # Cloud Functions依存関係のインストール
 echo -e "\n${BLUE}Cloud Functions依存関係のインストール...${NC}"
 cd functions
@@ -69,7 +73,8 @@ google-cloud-aiplatform>=1.0.0
 google-cloud-secret-manager>=2.0.0
 Flask>=2.0.0
 python-dateutil>=2.8.2
-requests>=2.25.0" > requirements.txt
+requests>=2.25.0
+firebase-admin>=6.0.0" > requirements.txt
 
 # ローカル環境に依存関係をインストール（古いライブラリがある場合はクリーンアップ）
 rm -rf lib

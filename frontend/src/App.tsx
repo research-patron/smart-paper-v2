@@ -27,6 +27,7 @@ import SubscriptionPage from './pages/SubscriptionPage';
 // Firebase
 import { auth, db } from './api/firebase';
 import { useAuthStore } from './store/authStore';
+import { usePaperStore } from './store/paperStore'; // 追加: PaperStoreをインポート
 
 // 認証が必要なルートのラッパーコンポーネント
 // 認証なしでもアクセス可能に変更（開発中のため）
@@ -68,6 +69,7 @@ const convertToUserData = (data: any) => {
 
 function App() {
   const { setUser, setUserData } = useAuthStore();
+  const { fetchUserPapers } = usePaperStore(); // 追加: PaperStoreから関数を取得
   const [appReady, setAppReady] = useState(false);
   
   useEffect(() => {
@@ -93,6 +95,16 @@ function App() {
             console.log("No user data found in Firestore");
             setUserData(null);
           }
+          
+          // 追加: ユーザーの論文データを取得
+          try {
+            console.log("Fetching user papers...");
+            await fetchUserPapers(user.uid);
+            console.log("User papers loaded successfully");
+          } catch (paperError) {
+            console.error("Failed to load user papers:", paperError);
+          }
+          
         } catch (error) {
           console.error('Error fetching user data:', error);
           setUserData(null);
@@ -106,7 +118,7 @@ function App() {
     
     // コンポーネントのアンマウント時にリスナーを解除
     return () => unsubscribe();
-  }, [setUser, setUserData]);
+  }, [setUser, setUserData, fetchUserPapers]); // fetchUserPapers を依存配列に追加
   
   // アプリが初期化される前はローディング表示
   if (!appReady) {
