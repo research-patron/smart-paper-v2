@@ -415,6 +415,41 @@ const savePdfBlobToDirectory = async (pdfBlob: Blob, directoryHandle: FileSystem
   }
 };
 
+// 新しく追加する関数 - フォルダパスの存在確認
+
+/**
+ * 指定されたフォルダパスが存在するか確認する関数
+ * @param rootHandle ルートディレクトリハンドル
+ * @param folderPath フォルダパス
+ * @returns 存在する場合はそのディレクトリハンドル、存在しない場合はnull
+ */
+export const checkFolderExists = async (
+  rootHandle: FileSystemDirectoryHandle,
+  folderPath: string
+): Promise<FileSystemDirectoryHandle | null> => {
+  if (!folderPath) return null;
+  
+  const folders = folderPath.split('/').filter(f => f);
+  let currentHandle = rootHandle;
+  
+  try {
+    for (const folderName of folders) {
+      try {
+        currentHandle = await currentHandle.getDirectoryHandle(folderName);
+      } catch (e) {
+        // フォルダが存在しない場合
+        console.error(`Folder does not exist: ${folderName} in path ${folderPath}`);
+        return null;
+      }
+    }
+    
+    return currentHandle;
+  } catch (error) {
+    console.error(`Error checking folder existence: ${folderPath}`, error);
+    return null;
+  }
+};
+
 /**
  * 論文をObsidianに直接エクスポートする
  * @param paper 論文データ
@@ -469,74 +504,117 @@ export const exportToObsidian = async (
       };
     }
     
-    // 常にsmart-paper-v2フォルダを作成
-    let smartPaperRootHandle: FileSystemDirectoryHandle;
-    try {
-      // すでに存在するか確認
-      smartPaperRootHandle = await vaultHandle.getDirectoryHandle('smart-paper-v2');
-    } catch (e) {
-      // 存在しない場合は作成
-      smartPaperRootHandle = await vaultHandle.getDirectoryHandle('smart-paper-v2', { create: true });
+    // 保存先ディレクトリの決定
+    let targetDirHandle: FileSystemDirectoryHandle;
+    
+    // フォルダパスが設定されている場合
+    if (settings.folder_path && settings.folder_path.trim() !== '') {
+      // 指定されたパスが存在するか確認
+      const folderHandle = await checkFolderExists(vaultHandle, settings.folder_path);
+      
+      if (folderHandle) {
+        // 指定フォルダが存在する場合は、そのディレクトリをターゲットに
+        targetDirHandle = folderHandle;
+        console.log(`Using specified folder path: ${settings.folder_path}`);
+      } else {
+        // 指定フォルダが存在しない場合はエラー
+        return {
+          exported: false,
+          error: `指定されたフォルダ「${settings.folder_path}」がObsidian vaultに存在しません。フォルダ名を確認してください。`
+        };
+      }
+    } else {
+      // フォルダパスが設定されていない場合は従来通り smart-paper-v2 フォルダを使用
+      try {
+        // すでに存在するか確認
+        try {
+          targetDirHandle = await vaultHandle.getDirectoryHandle('smart-paper-v2');
+        } catch (e) {
+          // 存在しない場合は作成
+          targetDirHandle = await vaultHandle.getDirectoryHandle('smart-paper-v2', { create: true });
+        }
+        console.log('Using default smart-paper-v2 folder');
+      } catch (error) {
+        console.error('Failed to create or access smart-paper-v2 folder:', error);
+        throw new Error('Obsidian vaultにフォルダを作成できませんでした');
+      }
     }
     
-    // PDFを保存する添付ファイルフォルダを作成
-    let attachmentsHandle: FileSystemDirectoryHandle;
-    try {
-      // すでに存在するか確認
-      attachmentsHandle = await smartPaperRootHandle.getDirectoryHandle('添付ファイル');
-    } catch (e) {
-      // 存在しない場合は作成
-      attachmentsHandle = await smartPaperRootHandle.getDirectoryHandle('添付ファイル', { create: true });
+    // 添付ファイルフォルダの作成（PDFを埋め込む場合）
+    let attachmentsHandle: FileSystemDirectoryHandle | null = null;
+    
+    // 「原文PDFも埋め込む」が有効な場合のみPDF関連処理を実行
+    let pdfFileName = '';
+    if (settings.include_pdf) {
+      // PDFを保存する添付ファイルフォルダを作成
+      try {
+        // すでに存在するか確認
+        try {
+          attachmentsHandle = await targetDirHandle.getDirectoryHandle('添付ファイル');
+        } catch (e) {
+          // 存在しない場合は作成
+          attachmentsHandle = await targetDirHandle.getDirectoryHandle('添付ファイル', { create: true });
+        }
+      } catch (error) {
+        console.error('Failed to create or access attachments folder:', error);
+        // 添付ファイルフォルダの作成に失敗してもMarkdownの保存は続行
+        // ただしPDFの保存はスキップ
+      }
+      
+      // PDFファイル名をメタデータを使用して「著者名(刊行年)_論文タイトル.pdf」形式で生成
+      pdfFileName = formatPdfFileName(paper);
+      
+      // PDF Blobを取得
+      let pdfBlob: Blob | null = null;
+      
+      // 1. 引数で渡されたBlobを優先使用
+      if (localPdfBlob) {
+        pdfBlob = localPdfBlob;
+      } 
+      // 2. キャッシュからBlobを取得
+      else if (paper.id) {
+        pdfBlob = getCachedPdfBlob(paper.id);
+      }
+      
+      // PDFが存在する場合、添付ファイルフォルダに保存
+      if (pdfBlob && attachmentsHandle) {
+        try {
+          await savePdfBlobToDirectory(pdfBlob, attachmentsHandle, pdfFileName);
+          console.log(`PDFを添付ファイルフォルダに保存しました: ${pdfFileName}`);
+        } catch (pdfError) {
+          console.error('PDF保存エラー:', pdfError);
+          // PDFの保存に失敗してもMarkdownの保存は続行
+        }
+      }
     }
     
     // 日付フォルダを作成（YYYY-MM-DD形式）- ローカル時間に基づく日付を使用
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    console.log('Creating/accessing date folder for:', today); // デバッグログ追加
+    console.log('Creating/accessing date folder for:', today);
 
     let dateFolderHandle: FileSystemDirectoryHandle;
     try {
       // すでに存在するか確認
-      dateFolderHandle = await smartPaperRootHandle.getDirectoryHandle(today);
-    } catch (e) {
-      // 存在しない場合は作成
-      dateFolderHandle = await smartPaperRootHandle.getDirectoryHandle(today, { create: true });
-    }
-    
-    // PDFファイル名をメタデータを使用して「著者名(刊行年)_論文タイトル.pdf」形式で生成
-    const pdfFileName = formatPdfFileName(paper);
-    
-    // PDF Blobを取得
-    let pdfBlob: Blob | null = null;
-    
-    // 1. 引数で渡されたBlobを優先使用
-    if (localPdfBlob) {
-      pdfBlob = localPdfBlob;
-    } 
-    // 2. キャッシュからBlobを取得
-    else if (paper.id) {
-      pdfBlob = getCachedPdfBlob(paper.id);
-    }
-    
-    // PDFが存在する場合、添付ファイルフォルダに保存
-    if (pdfBlob) {
       try {
-        await savePdfBlobToDirectory(pdfBlob, attachmentsHandle, pdfFileName);
-        console.log(`PDFを添付ファイルフォルダに保存しました: ${pdfFileName}`);
-      } catch (pdfError) {
-        console.error('PDF保存エラー:', pdfError);
-        // PDFの保存に失敗してもMarkdownの保存は続行
+        dateFolderHandle = await targetDirHandle.getDirectoryHandle(today);
+      } catch (e) {
+        // 存在しない場合は作成
+        dateFolderHandle = await targetDirHandle.getDirectoryHandle(today, { create: true });
       }
+    } catch (error) {
+      console.error(`Failed to create or access date folder: ${today}`, error);
+      throw new Error(`日付フォルダ「${today}」を作成できませんでした`);
     }
     
-    // Markdown生成（PDFへのリンクを追加）
+    // Markdown生成
     let markdown = '';
     if (settings.file_type === 'md') {
-      // カスタムMarkdownを生成（PDFリンクを明示的に添付ファイルフォルダに指定）
+      // カスタムMarkdownを生成
       markdown = MarkdownExporter.generateFullMarkdown(paper, chapters);
       
-      // PDFリンクを追加
-      if (pdfBlob) {
+      // 「原文PDFも埋め込む」が有効かつPDFが存在する場合のみリンクを追加
+      if (settings.include_pdf && pdfFileName) {
         markdown += '\n\n## PDF原文\n\n';
         markdown += `![[添付ファイル/${pdfFileName}]]\n`;
       }
@@ -545,14 +623,28 @@ export const exportToObsidian = async (
     }
     
     // Markdownファイルを日付フォルダに書き込み
-    const fileHandle = await dateFolderHandle.getFileHandle(fullFileName, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(new Blob([markdown], { type: settings.file_type === 'md' ? 'text/markdown' : 'text/plain' }));
-    await writable.close();
+    try {
+      const fileHandle = await dateFolderHandle.getFileHandle(fullFileName, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(new Blob([markdown], { type: settings.file_type === 'md' ? 'text/markdown' : 'text/plain' }));
+      await writable.close();
+    } catch (error) {
+      console.error(`Failed to write file: ${fullFileName}`, error);
+      throw new Error(`ファイル「${fullFileName}」の書き込みに失敗しました`);
+    }
     
     // 結果を更新
     result.exported = true;
-    result.export_path = `smart-paper-v2/${today}/${fullFileName}`;
+    
+    // エクスポートパスの設定
+    // カスタムフォルダパスが設定されている場合はそれを使用
+    if (settings.folder_path && settings.folder_path.trim() !== '') {
+      result.export_path = `${settings.folder_path}/${today}/${fullFileName}`;
+    } else {
+      // デフォルトパスの場合
+      result.export_path = `smart-paper-v2/${today}/${fullFileName}`;
+    }
+    
     result.exported_at = new Date();
     
     // エクスポート状態をローカルストレージに保存

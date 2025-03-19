@@ -71,8 +71,14 @@ const Plans: React.FC<PlansProps> = ({
     { name: 'Zotero連携', none: true, free: true, paid: true },
   ];
   
+  // お得率の計算
+  // 月額: 350円/月 × 12カ月 = 4,200円/年
+  // 年額: 3,000円/年
+  // お得率: (4,200 - 3,000) / 4,200 ≈ 0.2857... = 約29%
+  const savingsPercentage = 29;
+  
   // プランオプション
-  const planOptions: PlanOption[] = [
+  const allPlanOptions: PlanOption[] = [
     {
       id: 'none',
       title: '非会員プラン',
@@ -99,6 +105,12 @@ const Plans: React.FC<PlansProps> = ({
       popular: true,
     }
   ];
+  
+  // ログイン状態に応じてプランをフィルタリング
+  // ログイン済みの場合は「非会員プラン」を表示しない
+  const planOptions = user 
+    ? allPlanOptions.filter(plan => plan.id !== 'none')
+    : allPlanOptions;
   
   // 表示するプランを選択
   // 非会員、無料会員、有料会員を正しく判別する
@@ -137,7 +149,9 @@ const Plans: React.FC<PlansProps> = ({
             <TableHead>
               <TableRow>
                 <TableCell>機能</TableCell>
-                <TableCell align="center">非会員プラン</TableCell>
+                {!user && (
+                  <TableCell align="center">非会員プラン</TableCell>
+                )}
                 <TableCell align="center">無料会員プラン</TableCell>
                 <TableCell align="center">プレミアムプラン {annually ? "(年額 ¥3,000)" : "(月額 ¥350)"}</TableCell>
               </TableRow>
@@ -148,22 +162,24 @@ const Plans: React.FC<PlansProps> = ({
                   <TableCell component="th" scope="row">
                     {feature.name}
                   </TableCell>
-                  <TableCell align="center">
-                    {typeof feature.none === 'boolean' ? (
-                      feature.none ? 
-                        <CheckIcon color="success" /> : 
-                        <CloseIcon color="error" />
-                    ) : (
-                      // 論文保存期間が0日間の場合は灰色表示
-                      feature.name === '論文保存期間' && feature.none === '0日間' ? (
-                        <Typography color="text.disabled">
-                          {feature.none}
-                        </Typography>
+                  {!user && (
+                    <TableCell align="center">
+                      {typeof feature.none === 'boolean' ? (
+                        feature.none ? 
+                          <CheckIcon color="success" /> : 
+                          <CloseIcon color="error" />
                       ) : (
-                        feature.none
-                      )
-                    )}
-                  </TableCell>
+                        // 論文保存期間が0日間の場合は灰色表示
+                        feature.name === '論文保存期間' && feature.none === '0日間' ? (
+                          <Typography color="text.disabled">
+                            {feature.none}
+                          </Typography>
+                        ) : (
+                          feature.none
+                        )
+                      )}
+                    </TableCell>
+                  )}
                   <TableCell align="center">
                     {typeof feature.free === 'boolean' ? (
                       feature.free ? 
@@ -197,9 +213,11 @@ const Plans: React.FC<PlansProps> = ({
                 <TableCell component="th" scope="row">
                   料金
                 </TableCell>
-                <TableCell align="center">
-                  ¥0
-                </TableCell>
+                {!user && (
+                  <TableCell align="center">
+                    ¥0
+                  </TableCell>
+                )}
                 <TableCell align="center">
                   ¥0
                 </TableCell>
@@ -259,7 +277,7 @@ const Plans: React.FC<PlansProps> = ({
                 </Typography>
                 {annually && (
                   <Chip
-                    label="17%お得"
+                    label={`${savingsPercentage}%お得`}
                     size="small"
                     color="secondary"
                     sx={{ ml: 1, height: 20, fontSize: '0.7rem' }}
