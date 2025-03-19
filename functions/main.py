@@ -11,7 +11,12 @@ import logging
 import time
 
 # 自作モジュールのインポート
-from process_pdf import process_content, process_all_chapters
+from process_pdf import (
+    process_all_chapters,
+    process_content,
+    sanitize_html,
+    extract_json_from_response
+)
 from error_handling import (
     log_error,
     log_info,

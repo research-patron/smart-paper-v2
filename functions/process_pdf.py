@@ -237,13 +237,49 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
                 
                 # 翻訳処理
                 translate_result = process_content(pdf_gs_path, paper_id, "translate", chapter)
-                
+
                 # 章処理の時間を記録
                 chapter_time_ms = (time.time() - chapter_start) * 1000
-                
+
+                # 結果を確認して構造化
+                if "chapter" in translate_result and "translated_text" in translate_result:
+                    # 新しい構造の結果をサブチャプターも含めて処理
+                    chapter_title = translate_result["chapter"]
+                    translated_text = translate_result["translated_text"]
+                    
+                    # サブチャプターがあれば構造化されたHTMLを生成
+                    html_content = translated_text
+                    
+                    if "sub_chapters" in translate_result and translate_result["sub_chapters"]:
+                        for sub_chapter in translate_result["sub_chapters"]:
+                            if isinstance(sub_chapter, dict) and "title" in sub_chapter and "content" in sub_chapter:
+                                html_content += f"\n\n<h3>{sub_chapter['title']}</h3>\n\n"
+                                html_content += sub_chapter["content"]
+                    
+                    # 最終的な翻訳テキストを設定
+                    final_result = {
+                        "chapter_number": chapter["chapter_number"],
+                        "title": chapter_title,
+                        "translated_text": html_content,
+                        "start_page": chapter["start_page"],
+                        "end_page": chapter["end_page"]
+                    }
+                else:
+                    # 旧形式の場合は変換（後方互換性）
+                    final_result = translate_result
+                    # 必要なフィールドを追加
+                    if "chapter_number" not in final_result:
+                        final_result["chapter_number"] = chapter["chapter_number"]
+                    if "title" not in final_result:
+                        final_result["title"] = chapter.get("title", f"Chapter {chapter['chapter_number']}")
+                    if "start_page" not in final_result:
+                        final_result["start_page"] = chapter["start_page"]
+                    if "end_page" not in final_result:
+                        final_result["end_page"] = chapter["end_page"]
+
                 # FirestoreのサブコレクションにTranslation結果を保存
                 chapter_ref = doc_ref.collection("translated_chapters").document(f"chapter_{chapter['chapter_number']}")
-                chapter_ref.set(translate_result)
+                chapter_ref.set(final_result)
                 
                 add_step(session_id, paper_id, f"chapter_{chapter['chapter_number']}_translated", 
                         {"chapter_number": chapter["chapter_number"],
@@ -636,7 +672,7 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
 
 def extract_json_from_response(response_text: str, operation: str) -> dict:
     """
-    さまざまな形式のレスポンスからJSONを抽出する改善された関数
+    さまざまな形式のレスポンスからJSONを抽出する強化された関数
     
     Args:
         response_text: モデルからのレスポンステキスト
@@ -645,75 +681,231 @@ def extract_json_from_response(response_text: str, operation: str) -> dict:
     Returns:
         dict: パースされたJSON
     """
-    # 1. コードブロック内のJSONを探す (最も一般的なケース)
-    json_code_pattern = re.compile(r'```(?:json)?\s*([\s\S]*?)\s*```')
-    json_code_match = json_code_pattern.search(response_text)
+    # 前処理: 余分な空白、改行を削除
+    cleaned_text = response_text.strip()
     
-    if json_code_match:
-        try:
-            json_str = json_code_match.group(1).strip()
-            return json.loads(json_str)
-        except json.JSONDecodeError:
-            # コードブロック内でも有効なJSONでない場合は次の方法を試す
-            pass
+    # マークダウンのコードブロックを削除
+    cleaned_text = re.sub(r'^```(?:json)?\s*', '', cleaned_text)
+    cleaned_text = re.sub(r'\s*```$', '', cleaned_text)
     
-    # 2. レスポンス全体がJSONかどうかを確認
+    # 1. 完全なJSONオブジェクトを探す - 最も厳格なチェック
+    # 一般的なJSONパターン: '{...}'
     try:
-        cleaned_text = response_text.strip()
-        return json.loads(cleaned_text)
+        # JSON部分を正規表現で抽出
+        json_pattern = re.compile(r'(\{.*\})', re.DOTALL)
+        match = json_pattern.search(cleaned_text)
+        if match:
+            potential_json = match.group(1)
+            return json.loads(potential_json)
     except json.JSONDecodeError:
         pass
     
-    # 3. translated_text だけを含むJSONオブジェクトを探す
-    if operation == "translate":
-        # "translated_text"をキーとするJSONオブジェクトパターン
-        json_pattern = re.compile(r'\{\s*"translated_text"\s*:\s*"([\s\S]*?)"\s*\}')
-        match = json_pattern.search(response_text)
-        if match:
-            translated_text = match.group(1)
-            # バックスラッシュ文字をエスケープして正しいJSON文字列にする
-            translated_text = translated_text.replace('\\', '\\\\')
-            # 重複するエスケープを修正
-            translated_text = re.sub(r'\\+(["\\/])', r'\\\1', translated_text)
-            return {"translated_text": translated_text}
+    # 2. 特殊ケース: "1. 導入 json { "translated_text": " のようなパターン
+    json_snippet_pattern = re.compile(r'.*?(?:json)?\s*(\{\s*"[^"]+"\s*:)', re.DOTALL)
+    match = json_snippet_pattern.search(cleaned_text)
+    if match:
+        # JSONの開始部分を見つけた場合、そこから完全なJSONを抽出する試み
+        start_index = match.start(1)
+        text_from_start = cleaned_text[start_index:]
+        
+        # JSONオブジェクトを完成させる
+        try:
+            # まず波括弧のバランスを確認
+            open_count = 0
+            close_count = 0
+            in_string = False
+            escape_next = False
+            end_index = -1
+            
+            for i, char in enumerate(text_from_start):
+                if escape_next:
+                    escape_next = False
+                    continue
+                
+                if char == '\\':
+                    escape_next = True
+                elif char == '"' and not escape_next:
+                    in_string = not in_string
+                elif not in_string:
+                    if char == '{':
+                        open_count += 1
+                    elif char == '}':
+                        close_count += 1
+                        if open_count == close_count:
+                            end_index = i + 1
+                            break
+            
+            if end_index > 0:
+                json_str = text_from_start[:end_index]
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    # JSONの修復を試みる
+                    json_str = json_str.replace('\n', '\\n')
+                    try:
+                        return json.loads(json_str)
+                    except json.JSONDecodeError:
+                        pass
+        except Exception:
+            pass
     
-    # 4. summary だけを含むJSONオブジェクトを探す
-    if operation == "summarize":
-        json_pattern = re.compile(r'\{\s*"summary"\s*:\s*"([\s\S]*?)"\s*\}')
-        match = json_pattern.search(response_text)
-        if match:
-            summary_text = match.group(1)
-            # エスケープを修正
-            summary_text = summary_text.replace('\\', '\\\\')
-            summary_text = re.sub(r'\\+(["\\/])', r'\\\1', summary_text)
-            return {"summary": summary_text}
-    
-    # 5. レスポンス全体を該当するキーの値として使用
+    # 3. translated_text だけを抽出する特殊処理
     if operation == "translate":
-        return {"translated_text": response_text}
+        # 正規表現を使って章見出しと本文を識別
+        chapter_pattern = re.compile(r'(?:<h2>)?\s*(\d+\.\s+[^<\n]+)(?:</h2>)?', re.MULTILINE)
+        chapter_match = chapter_pattern.search(cleaned_text)
+        
+        if chapter_match:
+            chapter_title = chapter_match.group(1).strip()
+            # 章タイトルを整形
+            if not chapter_title.startswith('<h2>'):
+                chapter_title = f"<h2>{chapter_title}</h2>"
+            
+            # 本文を抽出
+            body_text = cleaned_text.replace(chapter_match.group(0), '', 1).strip()
+            
+            # 参考文献セクションを確認
+            references_pattern = re.compile(r'(?:<h[1-6]>)?(?:\d+\.\s*)?(?:references|bibliography|参考文献)(?:</h[1-6]>)?.*?$', re.DOTALL | re.IGNORECASE)
+            references_match = references_pattern.search(body_text)
+            
+            if references_match:
+                # 参考文献部分を削除して専用フォーマットに置き換え
+                body_text = body_text[:references_match.start()].strip() + '\n\n<h2>参考文献</h2>\n<p>（参考文献リストは省略）</p>'
+            
+            # 本文が<p>タグで囲まれていなければ囲む
+            if not re.search(r'<p>', body_text):
+                paragraphs = re.split(r'\n\s*\n', body_text)
+                body_text = '\n\n'.join([f"<p>{p.strip()}</p>" if not p.strip().startswith('<') else p.strip() for p in paragraphs if p.strip()])
+            
+            # 結合して返す
+            full_text = f"{chapter_title}\n\n{body_text}"
+            return {"translated_text": full_text}
+    
+    # 4. 翻訳処理の特殊フォールバック
+    if operation == "translate":
+        # 参考文献セクションを確認して除去
+        references_pattern = re.compile(r'(?:<h[1-6]>)?(?:\d+\.\s*)?(?:references|bibliography|参考文献)(?:</h[1-6]>)?.*?$', re.DOTALL | re.IGNORECASE)
+        references_match = references_pattern.search(cleaned_text)
+        
+        if references_match:
+            # 参考文献部分を削除して専用フォーマットに置き換え
+            cleaned_text = cleaned_text[:references_match.start()].strip() + '\n\n<h2>参考文献</h2>\n<p>（参考文献リストは省略）</p>'
+        
+        # 章見出しを適切なHTMLタグで囲む
+        chapter_pattern = re.compile(r'^(\d+\.\s+[^\n]+)$', re.MULTILINE)
+        cleaned_text = chapter_pattern.sub(r'<h2>\1</h2>', cleaned_text)
+        
+        # サブ章見出しを適切なHTMLタグで囲む
+        subchapter_pattern = re.compile(r'^(\d+\.\d+\.\s+[^\n]+)$', re.MULTILINE)
+        cleaned_text = subchapter_pattern.sub(r'<h3>\1</h3>', cleaned_text)
+        
+        # <img>タグを処理
+        img_pattern = re.compile(r'<img[^>]+>')
+        cleaned_text = img_pattern.sub(r'（図表）', cleaned_text)
+        
+        # 段落を<p>タグで囲む（すでにHTMLタグがある場合を除く）
+        if not re.search(r'<p>', cleaned_text):
+            paragraphs = re.split(r'\n\s*\n', cleaned_text)
+            processed_paragraphs = []
+            
+            for p in paragraphs:
+                p = p.strip()
+                if not p:
+                    continue
+                # すでにHTMLタグで始まる場合はそのまま
+                if p.startswith('<h') or p.startswith('<p') or p.startswith('<ul') or p.startswith('<ol'):
+                    processed_paragraphs.append(p)
+                else:
+                    processed_paragraphs.append(f"<p>{p}</p>")
+            
+            cleaned_text = '\n\n'.join(processed_paragraphs)
+        
+        return {"translated_text": cleaned_text}
+    
+    # 5. 要約処理の特殊フォールバック
     elif operation == "summarize":
-        return {"summary": response_text}
-    else:
-        # extract_metadata_and_chapters の場合は、もっと複雑なJSONが期待されるため
-        # 前処理を試みてからJSON解析を再試行
-        # 余分な文字やヘッダーなどを除去して有効なJSONを抽出しようとする
-        potential_json = re.search(r'\{[\s\S]*\}', response_text)
-        if potential_json:
-            try:
-                return json.loads(potential_json.group(0))
-            except json.JSONDecodeError:
-                pass
+        return {"summary": cleaned_text}
     
-    # 6. すべての試みが失敗した場合はエラーを発生
-    raise json.JSONDecodeError(f"Could not extract valid JSON for operation: {operation}", response_text, 0)
+    # 6. メタデータ抽出の場合は最も厳格
+    elif operation == "extract_metadata_and_chapters":
+        # JSON形式を完全に修復する試み
+        try:
+            # メタデータの基本構造を作成
+            metadata = {
+                "metadata": {
+                    "title": "",
+                    "authors": [],
+                    "year": 0,
+                    "journal": "",
+                    "doi": "",
+                    "keywords": [],
+                    "abstract": ""
+                },
+                "chapters": []
+            }
+            
+            # タイトルを抽出
+            title_pattern = re.compile(r'"title"\s*:\s*"([^"]+)"')
+            title_match = title_pattern.search(cleaned_text)
+            if title_match:
+                metadata["metadata"]["title"] = title_match.group(1).strip()
+            
+            # 章構造を抽出
+            chapters_pattern = re.compile(r'"chapters"\s*:\s*\[(.*?)\]', re.DOTALL)
+            chapters_match = chapters_pattern.search(cleaned_text)
+            if chapters_match:
+                chapters_text = chapters_match.group(1)
+                # 個々の章情報を抽出
+                chapter_items = re.findall(r'{(.*?)}', chapters_text, re.DOTALL)
+                for chapter_item in chapter_items:
+                    chapter = {}
+                    
+                    # 章番号
+                    number_match = re.search(r'"chapter_number"\s*:\s*(\d+)', chapter_item)
+                    if number_match:
+                        chapter["chapter_number"] = int(number_match.group(1))
+                    
+                    # タイトル
+                    title_match = re.search(r'"title"\s*:\s*"([^"]+)"', chapter_item)
+                    if title_match:
+                        chapter["title"] = title_match.group(1)
+                    
+                    # ページ情報
+                    start_page_match = re.search(r'"start_page"\s*:\s*(\d+)', chapter_item)
+                    if start_page_match:
+                        chapter["start_page"] = int(start_page_match.group(1))
+                    
+                    end_page_match = re.search(r'"end_page"\s*:\s*(\d+)', chapter_item)
+                    if end_page_match:
+                        chapter["end_page"] = int(end_page_match.group(1))
+                    
+                    if chapter:
+                        metadata["chapters"].append(chapter)
+            
+            return metadata
+        except Exception as e:
+            log_error("JSONExtraction", f"Failed to extract metadata: {str(e)}", 
+                      {"text_sample": cleaned_text[:500] + "..." if len(cleaned_text) > 500 else cleaned_text})
+            raise json.JSONDecodeError(f"Could not extract valid JSON for metadata", cleaned_text, 0)
+    
+    # 7. どのケースにも当てはまらない場合、最終手段としてテキスト全体を適切なキーの値として返す
+    log_warning("JSONExtraction", f"Fallback case: returning raw text for operation {operation}", 
+               {"text_sample": cleaned_text[:100] + "..." if len(cleaned_text) > 100 else cleaned_text})
+    
+    if operation == "translate":
+        return {"translated_text": cleaned_text}
+    elif operation == "summarize":
+        return {"summary": cleaned_text}
+    else:
+        raise json.JSONDecodeError(f"Could not extract valid JSON for operation: {operation}", cleaned_text, 0)
 
 def sanitize_html(html_text: str) -> str:
     """
-    HTMLをサニタイズする（XSS対策など）
-
+    HTMLをサニタイズし、章構造を整える改良版関数
+    
     Args:
         html_text: サニタイズするHTML文字列
-
+        
     Returns:
         str: サニタイズされたHTML
     """
@@ -726,13 +918,76 @@ def sanitize_html(html_text: str) -> str:
     if json_match:
         # JSON形式の文字列から内容を抽出
         html_text = json_match.group(1)
-        # エスケープされたクォートを戻す
-        html_text = html_text.replace('\\"', '"')
+        # エスケープされたクォートとバックスラッシュを戻す
+        html_text = html_text.replace('\\"', '"').replace('\\\\', '\\')
+        # エスケープされた改行を実際の改行に変換
+        html_text = html_text.replace('\\n', '\n')
     
-    # 見出しの形式を修正（例：「Chapter 3: Results」→「3. Results」）
-    html_text = re.sub(r'<h(\d)>\s*Chapter\s+(\d+):\s*(.*?)\s*<\/h\1>', r'<h\1>\2. \3</h\1>', html_text, flags=re.IGNORECASE)
-    # サブセクションの見出しも修正 (例: "Section 3.1: Methods" → "3.1. Methods")
-    html_text = re.sub(r'<h(\d)>\s*Section\s+(\d+\.\d+):\s*(.*?)\s*<\/h\1>', r'<h\1>\2. \3</h\1>', html_text, flags=re.IGNORECASE)
+    # 参考文献セクションの処理
+    references_pattern = re.compile(r'<h\d>\s*(?:\d+\.\s*)?(?:references|bibliography|参考文献)(?:リスト)?</h\d>.*?$', re.DOTALL | re.IGNORECASE)
+    if re.search(references_pattern, html_text):
+        html_text = re.sub(references_pattern, '<h2>参考文献</h2><p>（参考文献リストは省略）</p>', html_text)
+    
+    # 参考文献リストパターン (例: [1], [2] など)
+    references_list_pattern = re.compile(r'(?:\[\d+\][^\[]{2,})+$', re.MULTILINE)
+    if re.search(references_list_pattern, html_text):
+        html_text = re.sub(references_list_pattern, '', html_text)
+    
+    # <img>タグの処理（画像を適切な表記に置換）
+    img_pattern = re.compile(r'<img[^>]+>')
+    html_text = img_pattern.sub('（図表）', html_text)
+    
+    # 章見出しの形式を修正
+    # 「Chapter X: Title」の形式を「X. タイトル」に変換
+    html_text = re.sub(r'<h(\d)>\s*Chapter\s+(\d+)(?::|\.)\s*(.*?)\s*</h\1>', r'<h\1>\2. \3</h\1>', html_text, flags=re.IGNORECASE)
+    
+    # 「Section X.Y: Title」の形式を「X.Y. タイトル」に変換
+    html_text = re.sub(r'<h(\d)>\s*Section\s+(\d+\.\d+)(?::|\.)\s*(.*?)\s*</h\1>', r'<h\1>\2. \3</h\1>', html_text, flags=re.IGNORECASE)
+    
+    # 1. Introduction のような形式を <h2>1. Introduction</h2> に変換
+    # ただし、既にHTMLタグがある場合は変換しない
+    chapter_pattern = re.compile(r'^(\d+\.\s+[^\n<]+)$', re.MULTILINE)
+    html_text = chapter_pattern.sub(r'<h2>\1</h2>', html_text)
+    
+    # 1.1. Method のような形式を <h3>1.1. Method</h3> に変換
+    subchapter_pattern = re.compile(r'^(\d+\.\d+\.\s+[^\n<]+)$', re.MULTILINE)
+    html_text = subchapter_pattern.sub(r'<h3>\1</h3>', html_text)
+    
+    # 見出しの重複を削除（同じ番号の見出しが連続する場合）
+    html_text = re.sub(
+        r'(<h(\d)>\s*(\d+(?:\.\d+)?)[\.:]?\s*[^<]+</h\2>)\s*<h\2>\s*\3[\.:]?\s*([^<]+)</h\2>',
+        r'\1',
+        html_text,
+        flags=re.IGNORECASE
+    )
+    
+    # 段落の処理: 見出しタグでも段落タグでもない文字列を段落タグで囲む
+    if not re.search(r'<p>', html_text):
+        # テキストを見出しタグで分割
+        parts = re.split(r'(<h\d>.*?</h\d>)', html_text)
+        processed_parts = []
+        
+        for part in parts:
+            # 見出しタグはそのまま保持
+            if re.match(r'<h\d>.*?</h\d>', part):
+                processed_parts.append(part)
+            elif part.strip():
+                # 非見出し部分を段落に分割
+                paragraphs = re.split(r'\n\s*\n', part)
+                for p in paragraphs:
+                    if p.strip():
+                        processed_parts.append(f"<p>{p.strip()}</p>")
+        
+        html_text = '\n\n'.join(processed_parts)
+    
+    # スクリプトタグ、iframe、style、linkタグなどの危険なタグを削除
+    html_text = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', html_text, flags=re.IGNORECASE)
+    html_text = re.sub(r'<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>', '', html_text, flags=re.IGNORECASE)
+    html_text = re.sub(r'<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>', '', html_text, flags=re.IGNORECASE)
+    html_text = re.sub(r'<link\b[^<]*(?:(?!>)(.|\n))*>', '', html_text, flags=re.IGNORECASE)
+    
+    # オンイベント属性（onClick, onLoadなど）を削除
+    html_text = re.sub(r'\bon\w+\s*=\s*"[^"]*"', '', html_text, flags=re.IGNORECASE)
     
     # 許可するタグのリスト
     allowed_tags = [
@@ -743,42 +998,14 @@ def sanitize_html(html_text: str) -> str:
         'sup', 'sub', 'span'
     ]
     
-    # 許可する属性のリスト
-    allowed_attrs = {
-        'span': ['style'],
-        'th': ['colspan', 'rowspan'],
-        'td': ['colspan', 'rowspan']
-    }
-    
-    # スクリプトタグとイベントハンドラを削除
-    html_text = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', html_text, flags=re.IGNORECASE)
-    html_text = re.sub(r'\bon\w+\s*=\s*"[^"]*"', '', html_text, flags=re.IGNORECASE)
-    
-    # iframeタグを削除
-    html_text = re.sub(r'<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>', '', html_text, flags=re.IGNORECASE)
-    
-    # styleタグとlinkタグを削除
-    html_text = re.sub(r'<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>', '', html_text, flags=re.IGNORECASE)
-    html_text = re.sub(r'<link\b[^<]*(?:(?!>)(.|\n))*>', '', html_text, flags=re.IGNORECASE)
-    
-    # 許可しないすべてのタグを削除
-    for tag in re.findall(r'</?(\w+)[^>]*>', html_text):
+    # 許可されないタグを削除
+    found_tags = set(re.findall(r'</?(\w+)[^>]*>', html_text))
+    for tag in found_tags:
         if tag.lower() not in allowed_tags:
-            pattern = r'<{0}[^>]*>.*?</{0}>'.format(tag)
-            html_text = re.sub(pattern, '', html_text, flags=re.DOTALL | re.IGNORECASE)
             html_text = re.sub(r'<{0}[^>]*>'.format(tag), '', html_text, flags=re.IGNORECASE)
             html_text = re.sub(r'</{0}[^>]*>'.format(tag), '', html_text, flags=re.IGNORECASE)
     
-    # 許可しない属性を削除
-    for tag in allowed_tags:
-        if tag in allowed_attrs:
-            for attr in allowed_attrs[tag]:
-                continue
-        else:
-            pattern = r'<{0}\s+[^>]*>'.format(tag)
-            for match in re.finditer(pattern, html_text, re.IGNORECASE):
-                old_tag = match.group(0)
-                new_tag = '<{0}>'.format(tag)
-                html_text = html_text.replace(old_tag, new_tag)
+    # 連続する改行を整理
+    html_text = re.sub(r'\n{3,}', '\n\n', html_text)
     
     return html_text
