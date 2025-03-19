@@ -23,7 +23,8 @@ import {
   getDownloadURL,
   deleteObject
 } from 'firebase/storage';
-import { db, storage } from './firebase';
+import { getIdToken } from 'firebase/auth';
+import { db, storage, auth } from './firebase';
 
 // 論文のメタデータ型定義
 export interface Author {
@@ -113,14 +114,40 @@ export interface TranslatedChapter {
 // 本番環境では環境変数から取得するなど、適切に設定する
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'https://us-central1-smart-paper-v2.cloudfunctions.net';
 
+// 現在の認証ユーザーからIDトークンを取得
+export const getCurrentUserToken = async (): Promise<string | null> => {
+  try {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      console.warn('No authenticated user found');
+      return null;
+    }
+    
+    const token = await getIdToken(currentUser, true);
+    return token;
+  } catch (error) {
+    console.error('Error getting auth token:', error);
+    return null;
+  }
+};
+
 // 翻訳をリクエスト
 export const requestTranslation = async (request: TranslationRequest): Promise<void> => {
   try {
+    // 認証トークンを取得
+    const token = await getCurrentUserToken();
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+    
+    // トークンがあれば追加
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const response = await fetch(`${API_BASE_URL}/translate_paper`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       mode: 'cors',
       body: JSON.stringify(request),
     });
@@ -151,11 +178,23 @@ export const uploadPDF = async (file: File, userId: string): Promise<string> => 
     const formData = new FormData();
     formData.append('file', file);
     
+    // 認証トークンを取得
+    const token = await getCurrentUserToken();
+    const headers: HeadersInit = {};
+    
+    // トークンがあれば追加
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+      console.log('Adding authorization token to request');
+    } else {
+      console.warn('No authorization token available, proceeding without authentication');
+    }
+    
     // Firebase Cloud Functionsのエンドポイント
     const response = await fetch(`${API_BASE_URL}/process_pdf`, {
       method: 'POST',
+      headers,
       body: formData,
-      // credentials: 'include' を削除し、モードを cors に設定
       mode: 'cors'
     });
     
@@ -179,11 +218,20 @@ export const uploadPDF = async (file: File, userId: string): Promise<string> => 
 // バックグラウンド処理を開始
 export const startPaperProcessing = async (paperId: string): Promise<void> => {
   try {
+    // 認証トークンを取得
+    const token = await getCurrentUserToken();
+    const headers: HeadersInit = { 
+      'Content-Type': 'application/json' 
+    };
+    
+    // トークンがあれば追加
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    
     const response = await fetch(`${API_BASE_URL}/process_pdf_background`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       mode: 'cors',
       body: JSON.stringify({ paper_id: paperId }),
     });
@@ -202,6 +250,9 @@ export const startPaperProcessing = async (paperId: string): Promise<void> => {
 // ユーザーの論文一覧を取得
 export const getUserPapers = async (userId: string): Promise<Paper[]> => {
   try {
+    // リクエストのデバッグログを追加
+    console.log(`Fetching papers for user: ${userId}`);
+    
     const q = query(
       collection(db, 'papers'),
       where('user_id', '==', userId),
@@ -210,6 +261,8 @@ export const getUserPapers = async (userId: string): Promise<Paper[]> => {
     
     const querySnapshot = await getDocs(q);
     const papers: Paper[] = [];
+    
+    console.log(`Found ${querySnapshot.size} papers for user ${userId}`);
     
     querySnapshot.forEach((doc) => {
       const data = doc.data();
@@ -232,6 +285,14 @@ export const getUserPapers = async (userId: string): Promise<Paper[]> => {
         obsidian: data.obsidian // Obsidian連携状態を追加
       });
     });
+    
+    // より詳細なデバッグログ
+    console.log(`Processed ${papers.length} papers:`, papers.map(p => ({
+      id: p.id, 
+      user_id: p.user_id,
+      status: p.status,
+      title: p.metadata?.title || 'No title'
+    })));
     
     return papers;
   } catch (error) {
@@ -285,13 +346,21 @@ export const getPaperTranslatedText = async (paper: Paper): Promise<string> => {
 
     // StorageにURLがある場合は取得
     if (paper.translated_text_path) {
+      // 認証トークンを取得
+      const token = await getCurrentUserToken();
+      const headers: HeadersInit = { 
+        'Content-Type': 'application/json' 
+      };
+      
+      // トークンがあれば追加
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
       // 署名付きURLを取得するCloud Function APIを呼び出す
       const response = await fetch(`${API_BASE_URL}/get_signed_url`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        // これを 'include' から 'cors' に変更
+        headers,
         mode: 'cors',
         body: JSON.stringify({ filePath: paper.translated_text_path }),
       });
@@ -327,13 +396,21 @@ export const getPaperPdfUrl = async (paper: Paper): Promise<string> => {
       throw new Error('PDFファイルのパスがありません');
     }
 
+    // 認証トークンを取得
+    const token = await getCurrentUserToken();
+    const headers: HeadersInit = { 
+      'Content-Type': 'application/json' 
+    };
+    
+    // トークンがあれば追加
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    
     // 署名付きURLを取得するCloud Function APIを呼び出す
     const response = await fetch(`${API_BASE_URL}/get_signed_url`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      // これを 'include' から 'cors' に変更
+      headers,
       mode: 'cors', 
       body: JSON.stringify({ filePath: paper.file_path }),
     });

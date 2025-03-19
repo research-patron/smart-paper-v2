@@ -9,6 +9,9 @@ import json
 import os
 import logging
 import time
+import firebase_admin
+from firebase_admin import auth as firebase_auth
+from firebase_admin import credentials
 
 # 自作モジュールのインポート
 from process_pdf import (
@@ -41,6 +44,20 @@ logging.basicConfig(level=logging.INFO)
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT")
 LOCATION = os.environ.get("FUNCTION_REGION", "us-central1")
 BUCKET_NAME = os.environ.get("BUCKET_NAME", f"{PROJECT_ID}.appspot.com")
+
+# Firebase Admin SDK初期化
+try:
+    # Firebase Admin SDKの初期化（既に初期化されていたら例外をキャッチ）
+    try:
+        firebase_app = firebase_admin.initialize_app()
+        log_info("Firebase", "Firebase Admin SDK initialized successfully")
+    except ValueError:
+        # 既に初期化されている場合
+        log_info("Firebase", "Firebase Admin SDK already initialized")
+        firebase_app = firebase_admin.get_app()
+except Exception as e:
+    log_error("FirebaseError", f"Failed to initialize Firebase Admin SDK: {str(e)}")
+    raise
 
 # Secret Managerからサービスアカウント認証情報を取得
 def get_credentials(secret_name="firebase-credentials"):
@@ -75,6 +92,39 @@ except Exception as e:
 def handle_api_error(error: APIError):
     """APIエラーをHTTPレスポンスに変換"""
     return jsonify(error.to_dict()), error.status_code
+
+# Firebaseの認証トークンを検証し、ユーザーIDを取得する関数
+def verify_firebase_token(request: Request):
+    """
+    リクエストヘッダーからFirebase認証トークンを取得・検証し、ユーザーIDを返す
+    
+    Args:
+        request: Flaskのリクエストオブジェクト
+    
+    Returns:
+        str: 検証されたユーザーID、または認証情報がない場合はNone
+    """
+    user_id = None
+    
+    try:
+        if 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            if auth_header.startswith('Bearer '):
+                token = auth_header[7:]  # 'Bearer 'の後の部分を取得
+                try:
+                    # Firebase Admin SDKを使用してIDトークンを検証
+                    decoded_token = firebase_auth.verify_id_token(token)
+                    user_id = decoded_token['uid']
+                    log_info("Auth", f"Successfully verified user token: {user_id}")
+                except Exception as e:
+                    log_error("AuthError", "Invalid ID token", {"error": str(e)})
+                    raise AuthenticationError("Invalid ID token")
+    except AuthenticationError:
+        raise
+    except Exception as e:
+        log_error("AuthError", "Error verifying token", {"error": str(e)})
+    
+    return user_id
 
 @functions_framework.http
 def process_pdf(request: Request):
@@ -120,20 +170,15 @@ def process_pdf(request: Request):
         add_step(session_id, temp_paper_id, "file_validation_complete", {"file_size": content_length, "filename": pdf_file.filename})
 
         # Firebase AuthenticationのIDトークン検証
-        user_id = None
-        if 'Authorization' in request.headers:
-            auth_header = request.headers['Authorization']
-            if auth_header.startswith('Bearer '):
-                token = auth_header[7:]  # 'Bearer 'の後の部分を取得
-                try:
-                    # Firebase Admin SDKを使用してIDトークンを検証
-                    # ここでは簡略化のため実装を省略
-                    # 本来はFirebase Admin SDKのauth.verify_id_token()を使用
-                    user_id = "test_user_id"  # 実際の実装ではトークンから取得したユーザーID
-                except Exception as e:
-                    log_error("AuthError", "Invalid ID token", {"error": str(e)})
-                    raise AuthenticationError("Invalid ID token")
-                    
+        user_id = verify_firebase_token(request)
+        
+        # 認証情報がない場合はエラー
+        if not user_id:
+            log_warning("Auth", "No user ID provided in request, operation might be limited")
+            # 認証情報がない場合は特別なユーザーIDを割り当て（テスト/開発環境用）
+            # 本番環境では認証を必須にするべきだが、開発中は許可
+            user_id = "anonymous_user"
+            
         add_step(session_id, temp_paper_id, "auth_complete", {"user_id": user_id})
 
         # Cloud StorageにPDFを保存
@@ -155,7 +200,7 @@ def process_pdf(request: Request):
         # Firestoreにドキュメントを作成
         doc_ref = db.collection("papers").document()
         doc_ref.set({
-            "user_id": user_id,
+            "user_id": user_id,  # 認証されたユーザーIDを保存
             "file_path": pdf_gs_path,
             "status": "pending",
             "uploaded_at": datetime.datetime.now(),
@@ -237,6 +282,13 @@ def process_pdf_background(request: Request):
             raise ValidationError("Paper ID is required")
             
         add_step(session_id, paper_id, "request_validation_complete", {"paper_id": paper_id})
+
+        # 認証確認（オプション）- バックグラウンド処理は認証が必須ではないケースも
+        user_id = verify_firebase_token(request)
+        if user_id:
+            log_info("Auth", f"Background process initiated by authenticated user: {user_id}")
+        else:
+            log_info("Auth", "Background process initiated without user authentication")
 
         # 論文ドキュメントを取得
         doc_ref = db.collection("papers").document(paper_id)
@@ -426,6 +478,13 @@ def get_signed_url(request: Request):
 
         bucket_name = parts[0]
         object_name = parts[1]
+
+        # 認証情報の確認
+        user_id = verify_firebase_token(request)
+        if user_id:
+            log_info("Auth", f"Signed URL requested by authenticated user: {user_id}")
+        else:
+            log_info("Auth", "Signed URL requested without user authentication")
 
         # 署名付きURL用の認証情報を取得
         try:

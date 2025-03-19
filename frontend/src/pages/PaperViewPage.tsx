@@ -37,6 +37,7 @@ import TocIcon from '@mui/icons-material/Toc';
 import CloudDoneIcon from '@mui/icons-material/CloudDone';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import RefreshIcon from '@mui/icons-material/Refresh'; // 追加: リフレッシュアイコン
 import { usePaperStore } from '../store/paperStore';
 import { useAuthStore } from '../store/authStore';
 import ErrorMessage from '../components/common/ErrorMessage';
@@ -59,6 +60,7 @@ import { db } from '../api/firebase';
 import { 
   getPaperPdfUrl, 
   getPaperTranslatedText, 
+  getPaper as getPaperOriginal, // 修正: 既存の関数を別名でインポート
   Paper as PaperType
 } from '../api/papers';
 
@@ -115,6 +117,25 @@ const PaperViewPage: React.FC = () => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [obsidianExportStatus, setObsidianExportStatus] = useState<'success' | 'error' | 'pending' | 'none'>('none');
+  const [isLoadingText, setIsLoadingText] = useState<boolean>(false); // 追加: テキスト読み込み中の状態
+
+  // カスタム関数: 論文データを取得して再読み込み
+  const refreshPaper = async () => {
+    if (!id) return;
+    
+    try {
+      setError(null); // エラーをクリア
+      console.log("Refreshing paper data...");
+      await fetchPaper(id);
+      console.log("Paper data refreshed successfully");
+      
+      // ローカルの翻訳テキストをクリア（再取得するため）
+      setLocalTranslatedText(null);
+    } catch (err) {
+      console.error("Error refreshing paper:", err);
+      setError("論文データの再読み込みに失敗しました");
+    }
+  };
   
   // ローカルストレージからObsidian連携状態を読み込む
   useEffect(() => {
@@ -338,21 +359,86 @@ const PaperViewPage: React.FC = () => {
     fetchPaperResources();
   }, [currentPaper]);
   
+  // 修正: 翻訳テキスト取得ロジックの改善
   useEffect(() => {
     const fetchTranslatedText = async () => {
-      if (currentPaper && currentPaper.status === 'completed' && 
-          !currentPaper.translated_text && currentPaper.translated_text_path) {
-        try {
-          const text = await getPaperTranslatedText(currentPaper);
-          setLocalTranslatedText(text);
-        } catch (error) {
-          console.error('Error fetching translated text:', error);
-          setError('翻訳テキストの読み込みに失敗しました');
+      // 既に翻訳テキストがある場合はスキップ
+      if (localTranslatedText || (currentPaper && currentPaper.translated_text)) {
+        return;
+      }
+      
+      // 論文がない、または完了していない場合はスキップ
+      if (!currentPaper || currentPaper.status !== 'completed') {
+        return;
+      }
+      
+      try {
+        setIsLoadingText(true);
+        console.log("Attempting to fetch translated text...");
+        console.log("Current paper state:", {
+          id: currentPaper.id,
+          hasTranslatedText: !!currentPaper.translated_text,
+          hasTranslatedTextPath: !!currentPaper.translated_text_path,
+          status: currentPaper.status
+        });
+        
+        let text = null;
+        
+        // Case 1: 論文に翻訳テキストが直接含まれている場合
+        if (currentPaper.translated_text) {
+          console.log("Using translated_text directly from paper object");
+          text = currentPaper.translated_text;
         }
+        // Case 2: 翻訳テキストへのパスがある場合
+        else if (currentPaper.translated_text_path) {
+          console.log("Fetching translated text from path:", currentPaper.translated_text_path);
+          text = await getPaperTranslatedText(currentPaper);
+          console.log("Fetched translated text successfully, length:", text?.length || 0);
+        }
+        // Case 3: どちらもない場合、論文データを再取得して確認
+        else {
+          console.log("No translation content available, retrying with fresh data...");
+          
+          if (currentPaper.id) {
+            try {
+              // 論文データを再取得
+              const refreshedPaper = await getPaperOriginal(currentPaper.id);
+              console.log("Refreshed paper data:", {
+                hasTranslatedText: !!refreshedPaper.translated_text,
+                hasTranslatedTextPath: !!refreshedPaper.translated_text_path
+              });
+              
+              if (refreshedPaper.translated_text) {
+                text = refreshedPaper.translated_text;
+                console.log("Got translated_text from refreshed paper");
+              } else if (refreshedPaper.translated_text_path) {
+                text = await getPaperTranslatedText(refreshedPaper);
+                console.log("Got translated_text from refreshed paper path");
+              } else {
+                console.warn("Refreshed paper still has no translation content");
+              }
+            } catch (refreshError) {
+              console.error("Error refreshing paper:", refreshError);
+            }
+          }
+        }
+        
+        if (text) {
+          setLocalTranslatedText(text);
+          setError(null); // エラーをクリア
+        } else {
+          console.warn("Unable to retrieve translated text after all attempts");
+        }
+      } catch (error) {
+        console.error('Error fetching translated text:', error);
+        setError('翻訳テキストの読み込みに失敗しました。再読み込みボタンをクリックしてください。');
+      } finally {
+        setIsLoadingText(false);
       }
     };
+    
     fetchTranslatedText();
-  }, [currentPaper]);
+  }, [currentPaper, localTranslatedText]);
   
   useEffect(() => {
     if (tabValue !== 0) {
@@ -474,17 +560,46 @@ const PaperViewPage: React.FC = () => {
     }
   };
   
+  // 修正: getSelectedChapterText関数の改良
   const getSelectedChapterText = () => {
     if (!currentPaper) return null;
-    if (localTranslatedText && !selectedChapter) return localTranslatedText;
-    if (!selectedChapter) return currentPaper?.translated_text;
+
+    // デバッグ情報
+    console.log("Getting chapter text, state:", {
+      hasLocalText: !!localTranslatedText, 
+      localTextLength: localTranslatedText?.length,
+      hasPaperText: !!currentPaper.translated_text,
+      paperTextLength: currentPaper.translated_text?.length,
+      selectedChapter: selectedChapter
+    });
     
-    const chapter = currentPaperChapters.find(c => c.chapter_number === selectedChapter);
-    if (chapter && chapter.translated_text) return chapter.translated_text;
-    
-    if (currentPaper?.translated_text || localTranslatedText) {
-      return currentPaper?.translated_text || localTranslatedText;
+    // 選択された章がない場合は全文を返す
+    if (!selectedChapter) {
+      // 優先順位: ローカルテキスト > 論文オブジェクトのテキスト
+      if (localTranslatedText && localTranslatedText.length > 0) {
+        return localTranslatedText;
+      }
+      if (currentPaper.translated_text && currentPaper.translated_text.length > 0) {
+        return currentPaper.translated_text;
+      }
+      // 両方ともない場合はnullを返す
+      return null;
     }
+    
+    // 選択された章がある場合は該当する章のテキストを返す
+    const chapter = currentPaperChapters.find(c => c.chapter_number === selectedChapter);
+    if (chapter && chapter.translated_text) {
+      return chapter.translated_text;
+    }
+    
+    // 章が選択されているが章のデータがない場合は全文を返す
+    if (localTranslatedText && localTranslatedText.length > 0) {
+      return localTranslatedText;
+    }
+    if (currentPaper.translated_text && currentPaper.translated_text.length > 0) {
+      return currentPaper.translated_text;
+    }
+    
     return null;
   };
   
@@ -769,6 +884,17 @@ const PaperViewPage: React.FC = () => {
                     </Button>
                   )}
                   
+                  {/* 再読み込みボタン (追加) */}
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    color="secondary"
+                    startIcon={<RefreshIcon />}
+                    onClick={refreshPaper}
+                  >
+                    再読み込み
+                  </Button>
+                  
                   {/* Zoteroエクスポートボタン */}
                   {currentPaper.metadata?.doi && (
                     <ZoteroExport paper={currentPaper} />
@@ -781,7 +907,13 @@ const PaperViewPage: React.FC = () => {
         </Card>
         
         {error && (
-          <ErrorMessage message={error} onRetry={() => setError(null)} />
+          <ErrorMessage 
+            message={error} 
+            onRetry={() => {
+              setError(null);
+              refreshPaper(); // エラー時は論文データを再読み込み
+            }} 
+          />
         )}
         
         <Box sx={{ 
@@ -824,9 +956,25 @@ const PaperViewPage: React.FC = () => {
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
                 <Typography>翻訳が完了するまでお待ちください...</Typography>
               </Box>
-            ) : !currentPaper.translated_text && !localTranslatedText && !currentPaper.translated_text_path ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                <Typography>翻訳テキストが見つかりません</Typography>
+            ) : isLoadingText ? (
+              // 翻訳テキスト読み込み中の表示 (追加)
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', flexDirection: 'column' }}>
+                <CircularProgress size={40} sx={{ mb: 2 }} />
+                <Typography>翻訳テキストを読み込み中...</Typography>
+              </Box>
+            ) : !getSelectedChapterText() ? (
+              // 翻訳テキストがない場合の表示 (修正)
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', flexDirection: 'column' }}>
+                <Typography gutterBottom>翻訳テキストが見つかりません</Typography>
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  startIcon={<RefreshIcon />}
+                  onClick={refreshPaper}
+                  sx={{ mt: 2 }}
+                >
+                  データを再読み込み
+                </Button>
               </Box>
             ) : (
               <Box sx={{ height: '100%', display: 'flex' }}>
@@ -866,8 +1014,17 @@ const PaperViewPage: React.FC = () => {
                 <Typography>要約が完了するまでお待ちください...</Typography>
               </Box>
             ) : !currentPaper.summary ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                <Typography>要約が見つかりません</Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', flexDirection: 'column' }}>
+                <Typography gutterBottom>要約が見つかりません</Typography>
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  startIcon={<RefreshIcon />}
+                  onClick={refreshPaper}
+                  sx={{ mt: 2 }}
+                >
+                  データを再読み込み
+                </Button>
               </Box>
             ) : (
               <Paper elevation={0} sx={{ p: 3, height: '100%', overflow: 'auto' }}>
@@ -882,8 +1039,17 @@ const PaperViewPage: React.FC = () => {
           
           <TabPanel value={tabValue} index={2}>
             {!currentPaper.metadata ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                <Typography>メタデータが見つかりません</Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', flexDirection: 'column' }}>
+                <Typography gutterBottom>メタデータが見つかりません</Typography>
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  startIcon={<RefreshIcon />}
+                  onClick={refreshPaper}
+                  sx={{ mt: 2 }}
+                >
+                  データを再読み込み
+                </Button>
               </Box>
             ) : (
               <Paper elevation={0} sx={{ p: 6, height: '100%', overflow: 'auto' }}>
