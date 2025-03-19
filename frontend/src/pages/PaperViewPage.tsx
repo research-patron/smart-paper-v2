@@ -884,17 +884,6 @@ const PaperViewPage: React.FC = () => {
                     </Button>
                   )}
                   
-                  {/* 再読み込みボタン (追加) */}
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    color="secondary"
-                    startIcon={<RefreshIcon />}
-                    onClick={refreshPaper}
-                  >
-                    再読み込み
-                  </Button>
-                  
                   {/* Zoteroエクスポートボタン */}
                   {currentPaper.metadata?.doi && (
                     <ZoteroExport paper={currentPaper} />
@@ -1053,130 +1042,100 @@ const PaperViewPage: React.FC = () => {
               </Box>
             ) : (
               <Paper elevation={0} sx={{ p: 6, height: '100%', overflow: 'auto' }}>
-                <Typography variant="h5" gutterBottom>
+                <Typography variant="h5" gutterBottom sx={{ mb: 3 }}>
                   <strong><u style={{ paddingTop: '5px', display: 'inline-block', textUnderlineOffset: '3px' }}>論文のメタデータ</u></strong>
                 </Typography>
                 
-                <List>
-                  <ListItem>
-                    <ListItemText 
-                      primary={
-                        <Typography variant="subtitle1"><strong>論文タイトル</strong></Typography>
-                      }
-                      secondary={
-                        <Typography component="div" variant="body2">{currentPaper.metadata.title}</Typography>
-                      }
-                    />
-                  </ListItem>
-                  <Divider component="li" />
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <Box sx={{ mb: 1 }}>
+                      <Typography variant="subtitle1" fontWeight="bold">論文タイトル</Typography>
+                      <Typography variant="body1" sx={{ mt: 0.5 }}>{currentPaper.metadata.title}</Typography>
+                    </Box>
+                    <Divider sx={{ my: 1.5 }} />
+                  </Grid>
                   
-                  <ListItem>
-                    <ListItemText 
-                      primary={
-                        <Typography variant="subtitle1"><strong>著者</strong></Typography>
-                      }
-                      secondary={
-                        <Box>
-                          {currentPaper.metadata.authors.map((author, index) => (
-                            <Typography key={index} component="div" variant="body2">
-                              {author.name}{author.affiliation ? ` (${author.affiliation})` : ''}
-                            </Typography>
-                          ))}
-                        </Box>
-                      }
-                    />
-                  </ListItem>
-                  <Divider component="li" />
-                  
-                  <ListItem>
-                    <ListItemText 
-                      primary={
-                        <Typography variant="subtitle1"><strong>ジャーナル</strong></Typography>
-                      }
-                      secondary={
-                        <Typography component="div" variant="body2">{currentPaper.metadata.journal}</Typography>
-                      }
-                    />
-                  </ListItem>
-                  <Divider component="li" />
-                  
-                  <ListItem>
-                    <ListItemText 
-                      primary={
-                        <Typography variant="subtitle1"><strong>出版年</strong></Typography>
-                      }
-                      secondary={
-                        <Typography component="div" variant="body2">{currentPaper.metadata.year}</Typography>
-                      }
-                    />
-                  </ListItem>
-                  <Divider component="li" />
-                  
-                  <ListItem>
-                    <ListItemText 
-                      primary={
-                        <Typography variant="subtitle1"><strong>DOI</strong></Typography>
-                      }
-                      secondary={
-                        <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
-                          <Typography component="div" variant="body2" sx={{ mr: 2 }}>
-                            {currentPaper.metadata.doi || '不明'}
+                  <Grid item xs={12}>
+                    <Box sx={{ mb: 1 }}>
+                      <Typography variant="subtitle1" fontWeight="bold">著者</Typography>
+                      <Box sx={{ mt: 0.5 }}>
+                        {currentPaper.metadata.authors.map((author, index) => (
+                          <Typography key={index} variant="body1">
+                            {author.name}{author.affiliation ? ` (${author.affiliation})` : ''}
                           </Typography>
-                          {currentPaper.metadata.doi && (
-                            <ZoteroExport paper={currentPaper} />
-                          )}
-                        </Box>
-                      }
-                    />
-                  </ListItem>
-                  <Divider component="li" />
+                        ))}
+                      </Box>
+                    </Box>
+                    <Divider sx={{ my: 1.5 }} />
+                  </Grid>
                   
-                  <ListItem>
-                    <ListItemText 
-                      primary={
-                        <Typography variant="subtitle1"><strong>キーワード</strong></Typography>
-                      }
-                      secondary={
-                        <Typography component="div" variant="body2">
-                          {currentPaper.metadata.keywords.join(', ') || '不明'}
+                  <Grid item xs={12}>
+                    <Box sx={{ mb: 1 }}>
+                      <Typography variant="subtitle1" fontWeight="bold">ジャーナル</Typography>
+                      <Typography variant="body1" sx={{ mt: 0.5 }}>{currentPaper.metadata.journal}</Typography>
+                    </Box>
+                    <Divider sx={{ my: 1.5 }} />
+                  </Grid>
+                  
+                  <Grid item xs={12}>
+                    <Box sx={{ mb: 1 }}>
+                      <Typography variant="subtitle1" fontWeight="bold">出版年</Typography>
+                      <Typography variant="body1" sx={{ mt: 0.5 }}>{currentPaper.metadata.year}</Typography>
+                    </Box>
+                    <Divider sx={{ my: 1.5 }} />
+                  </Grid>
+                  
+                  <Grid item xs={12}>
+                    <Box sx={{ mb: 1 }}>
+                      <Typography variant="subtitle1" fontWeight="bold">DOI</Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
+                        <Typography variant="body1" sx={{ mr: 2 }}>
+                          {currentPaper.metadata.doi || '不明'}
                         </Typography>
-                      }
-                    />
-                  </ListItem>
-                  <Divider component="li" />
+                        {currentPaper.metadata.doi && (
+                          <ZoteroExport paper={currentPaper} />
+                        )}
+                      </Box>
+                    </Box>
+                    <Divider sx={{ my: 1.5 }} />
+                  </Grid>
                   
-                  <ListItem>
-                    <ListItemText 
-                      primary={
-                        <Typography variant="subtitle1"><strong>アブストラクト</strong></Typography>
-                      }
-                      secondary={
-                        <Typography component="div" variant="body2">{currentPaper.metadata.abstract}</Typography>
-                      }
-                    />
-                  </ListItem>
-                </List>
+                  <Grid item xs={12}>
+                    <Box sx={{ mb: 1 }}>
+                      <Typography variant="subtitle1" fontWeight="bold">キーワード</Typography>
+                      <Typography variant="body1" sx={{ mt: 0.5 }}>
+                        {currentPaper.metadata.keywords.join(', ') || '不明'}
+                      </Typography>
+                    </Box>
+                    <Divider sx={{ my: 1.5 }} />
+                  </Grid>
+                  
+                  <Grid item xs={12}>
+                    <Box sx={{ mb: 1 }}>
+                      <Typography variant="subtitle1" fontWeight="bold">アブストラクト</Typography>
+                      <Typography variant="body1" sx={{ mt: 0.5 }}>{currentPaper.metadata.abstract}</Typography>
+                    </Box>
+                  </Grid>
+                </Grid>
                 
                 {currentPaper.chapters && currentPaper.chapters.length > 0 && (
                   <>
-                    <Typography variant="h6" gutterBottom sx={{ mt: 4 }}>
+                    <Typography variant="h6" sx={{ mt: 3, mb: 2 }}>
                       <strong>章構成</strong>
                     </Typography>
                     
-                    <List>
+                    <Grid container spacing={1.5}>
                       {currentPaper.chapters.map((chapter, index) => (
-                        <ListItem key={index}>
-                          <ListItemText 
-                            primary={
-                              <Typography variant="subtitle1">{`${chapter.chapter_number}. ${chapter.title}`}</Typography>
-                            }
-                            secondary={
-                              <Typography component="div" variant="body2">{`ページ: ${chapter.start_page}-${chapter.end_page}`}</Typography>
-                            }
-                          />
-                        </ListItem>
+                        <Grid item xs={12} key={index}>
+                          <Paper variant="outlined" sx={{ p: 1.5, mb: 1 }}>
+                            <Typography variant="subtitle1">{`${chapter.chapter_number}. ${chapter.title}`}</Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                              {`ページ: ${chapter.start_page}-${chapter.end_page}`}
+                            </Typography>
+                          </Paper>
+                        </Grid>
                       ))}
-                    </List>
+                    </Grid>
                   </>
                 )}
               </Paper>
