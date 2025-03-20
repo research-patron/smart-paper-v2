@@ -1,8 +1,11 @@
 // ~/Desktop/smart-paper-v2/frontend/src/components/subscription/SubscriptionInfoCard.tsx
-import { Box, Typography, Button, Chip, Paper, Divider } from '@mui/material';
+import { useState } from 'react';
+import { Box, Typography, Button, Chip, Paper, Divider, CircularProgress } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import CreditCardIcon from '@mui/icons-material/CreditCard';
+import StarIcon from '@mui/icons-material/Star';
+import { redirectToCardUpdate } from '../../api/stripe';
 
 interface SubscriptionInfoCardProps {
   userData: any;
@@ -10,19 +13,26 @@ interface SubscriptionInfoCardProps {
 
 const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData }) => {
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  
   const isPaid = userData?.subscription_status === 'paid';
+  const isCanceled = userData?.subscription_cancel_at_period_end === true;
+  
   const subscriptionEnd = userData?.subscription_end_date 
     ? new Date(userData.subscription_end_date.seconds * 1000) 
     : null;
   
-  // サブスクリプション開始日（仮のデータ - 実際のアプリではこれを本物のデータに置き換える）
-  const subscriptionStart = subscriptionEnd 
-    ? new Date(subscriptionEnd.getTime() - (30 * 24 * 60 * 60 * 1000)) // 30日前と仮定
-    : null;
+  // 仮の値を使用：実際にはAPIから取得するべき情報
+  // 例えば、サブスクリプション開始日はFirestoreに保存されていない場合
+  const subscriptionStart = userData?.subscription_start_date 
+    ? new Date(userData.subscription_start_date.seconds * 1000) 
+    : (subscriptionEnd 
+        ? new Date(subscriptionEnd.getTime() - (30 * 24 * 60 * 60 * 1000)) // 30日前と仮定
+        : null);
   
-  // 次回の請求日（仮のデータ - 実際のアプリではこれを本物のデータに置き換える）
+  // 次回の請求日を計算（実際にはAPIから取得するべき情報）
   const nextBillingDate = subscriptionEnd 
-    ? new Date(subscriptionEnd.getTime() - (3 * 24 * 60 * 60 * 1000)) // 3日前と仮定
+    ? new Date(subscriptionEnd.getTime()) // 期間終了日と同じと仮定
     : null;
   
   // 日付のフォーマット関数
@@ -36,6 +46,27 @@ const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData })
     });
   };
   
+  // サブスクリプションページへ移動
+  const goToSubscriptionPage = () => {
+    navigate('/subscription');
+  };
+  
+  // 支払い方法の更新
+  const handleUpdatePaymentMethod = async () => {
+    try {
+      setLoading(true);
+      
+      // カード更新ページにリダイレクト
+      await redirectToCardUpdate();
+      
+      // ここにはリダイレクト後は到達しない
+      
+    } catch (error) {
+      console.error('Error updating payment method:', error);
+      setLoading(false);
+    }
+  };
+  
   return (
     <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
       <Typography variant="subtitle2" color="text.secondary">
@@ -46,9 +77,9 @@ const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData })
           {isPaid ? 'プレミアムプラン' : '無料プラン'}
         </Typography>
         <Chip 
-          label={isPaid ? 'アクティブ' : '基本'} 
+          label={isPaid ? (isCanceled ? '期間終了時に解約' : 'アクティブ') : '基本'} 
           size="small" 
-          color={isPaid ? 'primary' : 'default'}
+          color={isPaid ? (isCanceled ? 'warning' : 'primary') : 'default'}
         />
       </Box>
       
@@ -71,12 +102,12 @@ const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData })
             </Box>
           )}
           
-          {/* 有効期限 */}
+          {/* 有効期限または次回更新日 */}
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
             <CalendarTodayIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
             <Box>
               <Typography variant="caption" color="text.secondary">
-                プラン有効期限
+                {isCanceled ? 'サービス終了日' : 'プラン有効期限'}
               </Typography>
               <Typography variant="body2">
                 {formatDate(subscriptionEnd)}
@@ -84,8 +115,8 @@ const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData })
             </Box>
           </Box>
           
-          {/* 次回請求日 */}
-          {nextBillingDate && (
+          {/* 次回請求日（解約していない場合のみ表示） */}
+          {!isCanceled && nextBillingDate && (
             <Box sx={{ display: 'flex', alignItems: 'center' }}>
               <CreditCardIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
               <Box>
@@ -98,6 +129,20 @@ const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData })
               </Box>
             </Box>
           )}
+          
+          {/* 支払い方法変更ボタン */}
+          <Box sx={{ mt: 2 }}>
+            <Button
+              startIcon={loading ? <CircularProgress size={16} /> : <CreditCardIcon />}
+              variant="outlined"
+              size="small"
+              fullWidth
+              onClick={handleUpdatePaymentMethod}
+              disabled={loading}
+            >
+              {loading ? '処理中...' : '支払い方法を変更'}
+            </Button>
+          </Box>
         </>
       )}
       
@@ -105,7 +150,8 @@ const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData })
         variant="contained"
         color="primary"
         fullWidth
-        onClick={() => navigate('/subscription')}
+        onClick={goToSubscriptionPage}
+        startIcon={isPaid ? null : <StarIcon />}
         sx={{ mt: 2 }}
       >
         {isPaid ? 'サブスクリプションを管理' : 'プランをアップグレード'}

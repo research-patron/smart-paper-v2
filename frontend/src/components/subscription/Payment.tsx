@@ -3,20 +3,16 @@ import { useState } from 'react';
 import {
   Box,
   Button,
-  TextField,
   Typography,
-  FormControlLabel,
-  Checkbox,
-  InputAdornment,
-  Divider,
   Alert,
+  AlertTitle,
   CircularProgress,
-  Paper
+  Paper,
+  Divider
 } from '@mui/material';
 import CreditCardIcon from '@mui/icons-material/CreditCard';
 import LockIcon from '@mui/icons-material/Lock';
-import EventIcon from '@mui/icons-material/Event';
-import SecurityIcon from '@mui/icons-material/Security';
+import { redirectToCheckout } from '../../api/stripe';
 
 interface PaymentProps {
   planId: string;
@@ -25,82 +21,28 @@ interface PaymentProps {
 }
 
 const Payment: React.FC<PaymentProps> = ({ planId, onPaymentComplete, onCancel }) => {
-  const [cardNumber, setCardNumber] = useState('');
-  const [cardName, setCardName] = useState('');
-  const [expiry, setExpiry] = useState('');
-  const [cvc, setCvc] = useState('');
-  const [saveCard, setSaveCard] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
   
   const isAnnualPlan = planId === 'annual';
   const planAmount = isAnnualPlan ? '3,000' : '300';
   
-  const handleExpiryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let value = e.target.value.replace(/\D/g, '');
-    if (value.length > 2) {
-      value = value.substring(0, 2) + '/' + value.substring(2, 4);
-    }
-    setExpiry(value);
-  };
-  
-  const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/\D/g, '');
-    let formattedValue = '';
-    
-    for (let i = 0; i < value.length; i++) {
-      if (i > 0 && i % 4 === 0) {
-        formattedValue += ' ';
-      }
-      formattedValue += value[i];
-    }
-    
-    setCardNumber(formattedValue);
-  };
-  
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    
-    // 入力検証
-    if (!cardNumber || !cardName || !expiry || !cvc) {
-      setError('すべての項目を入力してください');
-      setLoading(false);
-      return;
-    }
-    
-    // 実際にはStripe等の決済処理が行われますが、ここではモックで成功を返します
-    setTimeout(() => {
-      setLoading(false);
-      setSuccess(true);
+  const handleCheckout = async () => {
+    try {
+      setLoading(true);
+      setError(null);
       
-      // 1秒後に完了コールバックを呼び出す
-      setTimeout(() => {
-        if (onPaymentComplete) {
-          onPaymentComplete();
-        }
-      }, 1000);
-    }, 2000);
+      // Stripeチェックアウトページにリダイレクト
+      await redirectToCheckout(planId);
+      
+      // ここにはリダイレクト後は到達しない
+      
+    } catch (err) {
+      console.error('Checkout error:', err);
+      setError(err instanceof Error ? err.message : '決済処理の開始に失敗しました。しばらくしてから再度お試しください。');
+      setLoading(false);
+    }
   };
-  
-  if (success) {
-    return (
-      <Paper sx={{ p: 3, textAlign: 'center' }}>
-        <Alert severity="success" sx={{ mb: 2 }}>
-          支払いが完了しました！
-        </Alert>
-        <Typography variant="body1" paragraph>
-          ありがとうございます。プレミアムプランへのアップグレードが完了しました。
-        </Typography>
-        <CircularProgress size={20} sx={{ mb: 2 }} />
-        <Typography variant="body2" color="text.secondary">
-          ページをリロードしています...
-        </Typography>
-      </Paper>
-    );
-  }
   
   return (
     <Paper sx={{ p: 3 }}>
@@ -132,131 +74,61 @@ const Payment: React.FC<PaymentProps> = ({ planId, onPaymentComplete, onCancel }
       
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
+          <AlertTitle>エラー</AlertTitle>
           {error}
         </Alert>
       )}
       
-      <form onSubmit={handleSubmit}>
-        <TextField
-          label="カード番号"
-          value={cardNumber}
-          onChange={handleCardNumberChange}
-          fullWidth
-          margin="normal"
-          placeholder="1234 5678 9012 3456"
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <CreditCardIcon />
-              </InputAdornment>
-            ),
-          }}
-          inputProps={{ maxLength: 19 }}
-        />
+      <Alert severity="info" sx={{ mb: 3 }}>
+        <AlertTitle>安全なお支払い</AlertTitle>
+        <Typography variant="body2">
+          お支払いはStripeの安全な決済ページで行われます。クレジットカード情報は当サイトでは保存されません。
+        </Typography>
+      </Alert>
+      
+      <Box sx={{ display: 'flex', alignItems: 'center', mt: 2, mb: 2 }}>
+        <LockIcon color="action" fontSize="small" />
+        <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+          お支払い情報は安全に暗号化されます
+        </Typography>
+      </Box>
+      
+      <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
+        <Button
+          type="button"
+          variant="outlined"
+          onClick={onCancel}
+          sx={{ flex: 1 }}
+        >
+          キャンセル
+        </Button>
         
-        <TextField
-          label="カード名義人"
-          value={cardName}
-          onChange={(e) => setCardName(e.target.value)}
-          fullWidth
-          margin="normal"
-          placeholder="TARO YAMADA"
-        />
-        
-        <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-          <TextField
-            label="有効期限"
-            value={expiry}
-            onChange={handleExpiryChange}
-            placeholder="MM/YY"
-            margin="normal"
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <EventIcon />
-                </InputAdornment>
-              ),
-            }}
-            inputProps={{ maxLength: 5 }}
-            sx={{ flex: 1 }}
-          />
-          
-          <TextField
-            label="CVC"
-            value={cvc}
-            onChange={(e) => setCvc(e.target.value.replace(/\D/g, ''))}
-            placeholder="123"
-            margin="normal"
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SecurityIcon />
-                </InputAdornment>
-              ),
-            }}
-            inputProps={{ maxLength: 4 }}
-            sx={{ flex: 1 }}
-          />
-        </Box>
-        
-        <FormControlLabel
-          control={
-            <Checkbox
-              checked={saveCard}
-              onChange={(e) => setSaveCard(e.target.checked)}
-              color="primary"
-            />
-          }
-          label="カード情報を保存する"
-          sx={{ mt: 1 }}
-        />
-        
-        <Box sx={{ display: 'flex', alignItems: 'center', mt: 2, mb: 2 }}>
-          <LockIcon color="action" fontSize="small" />
-          <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-            お支払い情報は安全に暗号化されます
-          </Typography>
-        </Box>
-        
-        <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
-          <Button
-            type="button"
-            variant="outlined"
-            onClick={onCancel}
-            sx={{ flex: 1 }}
-          >
-            キャンセル
+        <Button
+          type="button"
+          variant="contained"
+          color="primary"
+          disabled={loading}
+          onClick={handleCheckout}
+          startIcon={loading ? <CircularProgress size={16} /> : <CreditCardIcon />}
+          sx={{ flex: 1 }}
+        >
+          {loading ? '処理中...' : `¥${planAmount}を支払う`}
+        </Button>
+      </Box>
+      
+      <Box sx={{ mt: 3, textAlign: 'center' }}>
+        <Typography variant="caption" color="text.secondary">
+          「¥{planAmount}を支払う」ボタンをクリックすることで、私たちの
+          <Button variant="text" size="small" sx={{ p: 0, minWidth: 'auto', textTransform: 'none' }}>
+            利用規約
           </Button>
-          
-          <Button
-            type="submit"
-            variant="contained"
-            color="primary"
-            disabled={loading}
-            sx={{ flex: 1 }}
-          >
-            {loading ? (
-              <CircularProgress size={24} />
-            ) : (
-              `¥${planAmount}を支払う`
-            )}
+          および
+          <Button variant="text" size="small" sx={{ p: 0, minWidth: 'auto', textTransform: 'none' }}>
+            プライバシーポリシー
           </Button>
-        </Box>
-        
-        <Box sx={{ mt: 3, textAlign: 'center' }}>
-          <Typography variant="caption" color="text.secondary">
-            「¥{planAmount}を支払う」ボタンをクリックすることで、私たちの
-            <Button variant="text" size="small" sx={{ p: 0, minWidth: 'auto', textTransform: 'none' }}>
-              利用規約
-            </Button>
-            および
-            <Button variant="text" size="small" sx={{ p: 0, minWidth: 'auto', textTransform: 'none' }}>
-              プライバシーポリシー
-            </Button>
-            に同意したものとみなされます。
-          </Typography>
-        </Box>
-      </form>
+          に同意したものとみなされます。
+        </Typography>
+      </Box>
     </Paper>
   );
 };

@@ -1,6 +1,6 @@
 // ~/Desktop/smart-paper-v2/frontend/src/pages/SubscriptionPage.tsx
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -12,6 +12,7 @@ import {
   StepLabel,
   Divider,
   Alert,
+  AlertTitle,
   Card,
   CardContent,
   List,
@@ -23,6 +24,7 @@ import {
   DialogContentText,
   DialogTitle,
   Slide,
+  CircularProgress
 } from '@mui/material';
 import { TransitionProps } from '@mui/material/transitions';
 import PaymentIcon from '@mui/icons-material/Payment';
@@ -36,6 +38,7 @@ import React from 'react';
 import { useAuthStore } from '../store/authStore';
 import Plans from '../components/subscription/Plans';
 import Payment from '../components/subscription/Payment';
+import { cancelSubscription, redirectToCardUpdate } from '../api/stripe';
 
 // スライドトランジション
 const Transition = React.forwardRef(function Transition(
@@ -49,18 +52,27 @@ const Transition = React.forwardRef(function Transition(
 
 const SubscriptionPage = () => {
   const navigate = useNavigate();
-  const { user, userData } = useAuthStore();
+  const location = useLocation();
+  const { user, userData, updateUserData } = useAuthStore();
   const [activeStep, setActiveStep] = useState(0);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
-
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // URLパラメータからステータスを取得
+  const urlParams = new URLSearchParams(location.search);
+  const isSuccess = urlParams.get('success') === 'true';
+  const isCanceled = urlParams.get('canceled') === 'true';
+  
   // userDataがない場合は、無料プランとして扱う
   // 必要な型定義の追加
   interface UserData {
     subscription_status: 'none' | 'free' | 'paid';
     subscription_end_date: { seconds: number } | null;
+    subscription_cancel_at_period_end?: boolean;
     name: string;
     email: string | null;
   }
@@ -80,6 +92,34 @@ const SubscriptionPage = () => {
     : null;
   
   const steps = ['プラン選択', '支払い情報', '完了'];
+  
+  // URLパラメータに基づいて支払い完了ステップを設定
+  useEffect(() => {
+    if (isSuccess) {
+      setActiveStep(2);
+      setPaymentSuccess(true);
+      
+      // URLをクリーンアップ
+      if (window.history && window.history.replaceState) {
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+      }
+      
+      // ユーザーデータを更新
+      if (user) {
+        updateUserData();
+      }
+    } else if (isCanceled) {
+      setActiveStep(0);
+      setError('お支払いがキャンセルされました。別のプランを選択するか、再度お試しください。');
+      
+      // URLをクリーンアップ
+      if (window.history && window.history.replaceState) {
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+      }
+    }
+  }, [isSuccess, isCanceled, user, updateUserData]);
   
   useEffect(() => {
     // ステップが支払いか完了の場合に未認証ユーザーはログインページにリダイレクト
@@ -129,11 +169,31 @@ const SubscriptionPage = () => {
     }
   };
   
-  const handleConfirmCancel = () => {
-    setCancelDialogOpen(false);
-    // ダウングレード完了
-    setActiveStep(2);
-    setPaymentSuccess(true);
+  const handleConfirmCancel = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // サブスクリプションを解約
+      const result = await cancelSubscription();
+      
+      // ダイアログを閉じる
+      setCancelDialogOpen(false);
+      
+      if (result.canceled) {
+        // ユーザーデータを更新
+        await updateUserData();
+        
+        // 完了画面に進む
+        setActiveStep(2);
+        setPaymentSuccess(true);
+      }
+    } catch (err) {
+      console.error('Error canceling subscription:', err);
+      setError(err instanceof Error ? err.message : 'サブスクリプションの解約に失敗しました');
+    } finally {
+      setLoading(false);
+    }
   };
   
   const handleRegisterConfirm = () => {
@@ -156,6 +216,23 @@ const SubscriptionPage = () => {
     navigate('/');
   };
   
+  const handleUpdatePaymentMethod = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // 支払い方法更新ページにリダイレクト
+      await redirectToCardUpdate();
+      
+      // ここにはリダイレクト後は到達しない
+      
+    } catch (err) {
+      console.error('Error updating payment method:', err);
+      setError(err instanceof Error ? err.message : '支払い方法の更新に失敗しました');
+      setLoading(false);
+    }
+  };
+  
   return (
     <Container maxWidth="md">
       <Box sx={{ my: 4 }}>
@@ -163,19 +240,41 @@ const SubscriptionPage = () => {
           あなたにぴったりのプランをお選びください
         </Typography>
         
+        {error && (
+          <Alert severity="error" sx={{ mb: 4 }}>
+            <AlertTitle>エラー</AlertTitle>
+            {error}
+          </Alert>
+        )}
+        
         {isPaid ? (
           <Alert severity="info" sx={{ mb: 4 }}>
-            現在、プレミアムプランをご利用中です。有効期限: {subscriptionEnd 
-              ? subscriptionEnd.toLocaleDateString('ja-JP', {year: 'numeric', month: 'long', day: 'numeric'}) 
-              : '無期限'}
+            <AlertTitle>プレミアムプラン利用中</AlertTitle>
+            <Typography variant="body2">
+              現在、プレミアムプランをご利用中です。有効期限: {subscriptionEnd 
+                ? subscriptionEnd.toLocaleDateString('ja-JP', {year: 'numeric', month: 'long', day: 'numeric'}) 
+                : '無期限'}
+            </Typography>
+            
+            {effectiveUserData.subscription_cancel_at_period_end && (
+              <Typography variant="body2" sx={{ mt: 1, fontWeight: 'bold' }}>
+                このサブスクリプションは期間終了時に自動更新されず、無料プランに戻ります。
+              </Typography>
+            )}
           </Alert>
         ) : user ? (
           <Alert severity="info" sx={{ mb: 4 }}>
-            現在、無料プランをご利用中です。機能をフル活用するにはプレミアムプランへのアップグレードをご検討ください。
+            <AlertTitle>無料プラン利用中</AlertTitle>
+            <Typography variant="body2">
+              現在、無料プランをご利用中です。機能をフル活用するにはプレミアムプランへのアップグレードをご検討ください。
+            </Typography>
           </Alert>
         ) : (
           <Alert severity="info" sx={{ mb: 4 }}>
-            非会員としてご利用中です。無料会員になるには会員登録が必要です。プレミアム機能を利用するには有料プランへのアップグレードをご検討ください。
+            <AlertTitle>非会員の方へ</AlertTitle>
+            <Typography variant="body2">
+              非会員としてご利用中です。無料会員になるには会員登録が必要です。プレミアム機能を利用するには有料プランへのアップグレードをご検討ください。
+            </Typography>
           </Alert>
         )}
         
@@ -208,14 +307,18 @@ const SubscriptionPage = () => {
                   <ReceiptIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
                   <ListItemText 
                     primary="料金プラン" 
-                    secondary="年額 ¥3,000（税込）" 
+                    secondary={subscriptionEnd && effectiveUserData.subscription_end_date 
+                      ? (new Date(effectiveUserData.subscription_end_date.seconds * 1000).getMonth() - new Date().getMonth() + 12) % 12 >= 11
+                        ? "年額 ¥3,000（税込）" 
+                        : "月額 ¥300（税込）"
+                      : "プレミアムプラン"} 
                   />
                 </ListItem>
                 
                 <ListItem disablePadding sx={{ mt: 1 }}>
                   <EventIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
                   <ListItemText 
-                    primary="次回更新日" 
+                    primary={effectiveUserData.subscription_cancel_at_period_end ? "サービス終了日" : "次回更新日"} 
                     secondary={subscriptionEnd ? 
                       subscriptionEnd.toLocaleDateString('ja-JP', {
                         year: 'numeric',
@@ -230,7 +333,7 @@ const SubscriptionPage = () => {
                   <PaymentIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
                   <ListItemText 
                     primary="支払い方法" 
-                    secondary="クレジットカード（下4桁: 4242）" 
+                    secondary="クレジットカード" 
                   />
                 </ListItem>
                 
@@ -238,7 +341,7 @@ const SubscriptionPage = () => {
                   <AutorenewIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
                   <ListItemText 
                     primary="自動更新" 
-                    secondary="有効" 
+                    secondary={effectiveUserData.subscription_cancel_at_period_end ? "無効（期間終了時に解約）" : "有効"} 
                   />
                 </ListItem>
               </List>
@@ -248,18 +351,23 @@ const SubscriptionPage = () => {
                   variant="outlined" 
                   color="primary" 
                   size="small"
-                  onClick={() => {}}
+                  onClick={handleUpdatePaymentMethod}
+                  disabled={loading}
                 >
-                  支払い方法を変更
+                  {loading ? <CircularProgress size={20} /> : "支払い方法を変更"}
                 </Button>
-                <Button 
-                  variant="outlined" 
-                  color="error" 
-                  size="small"
-                  onClick={() => setCancelDialogOpen(true)}
-                >
-                  サブスクリプションを解約
-                </Button>
+                
+                {!effectiveUserData.subscription_cancel_at_period_end && (
+                  <Button 
+                    variant="outlined" 
+                    color="error" 
+                    size="small"
+                    onClick={() => setCancelDialogOpen(true)}
+                    disabled={loading}
+                  >
+                    {loading ? <CircularProgress size={20} /> : "サブスクリプションを解約"}
+                  </Button>
+                )}
               </Box>
             </CardContent>
           </Card>
@@ -390,8 +498,12 @@ const SubscriptionPage = () => {
             <Button onClick={() => setCancelDialogOpen(false)}>
               キャンセル
             </Button>
-            <Button onClick={handleConfirmCancel} color="error">
-              解約する
+            <Button 
+              onClick={handleConfirmCancel} 
+              color="error"
+              disabled={loading}
+            >
+              {loading ? <CircularProgress size={20} /> : "解約する"}
             </Button>
           </DialogActions>
         </Dialog>
