@@ -415,8 +415,6 @@ const savePdfBlobToDirectory = async (pdfBlob: Blob, directoryHandle: FileSystem
   }
 };
 
-// 新しく追加する関数 - フォルダパスの存在確認
-
 /**
  * 指定されたフォルダパスが存在するか確認する関数
  * @param rootHandle ルートディレクトリハンドル
