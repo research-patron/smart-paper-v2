@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/pages/SubscriptionPage.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Container,
@@ -62,9 +62,10 @@ const SubscriptionPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshingUserData, setRefreshingUserData] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false); // 初期化完了フラグを追加
   
   // URLパラメータからステータスを取得
-  const urlParams = new URLSearchParams(location.search);
+  const urlParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const isSuccess = urlParams.get('success') === 'true';
   const isCanceled = urlParams.get('canceled') === 'true';
   
@@ -78,25 +79,36 @@ const SubscriptionPage = () => {
     email: string | null;
   }
 
-  const defaultUserData: UserData = {
+  const defaultUserData: UserData = useMemo(() => ({
     subscription_status: 'none',
     subscription_end_date: null,
     name: user?.displayName || user?.email?.split('@')[0] || 'ユーザー',
     email: user?.email || null
-  };
+  }), [user]);
 
-  const effectiveUserData = userData as UserData || defaultUserData;
+  const effectiveUserData = useMemo(() => 
+    userData as UserData || defaultUserData, 
+    [userData, defaultUserData]
+  );
   
   const isPaid = effectiveUserData.subscription_status === 'paid';
-  const subscriptionEnd = effectiveUserData.subscription_end_date
-    ? new Date(effectiveUserData.subscription_end_date.seconds * 1000)
-    : null;
+  
+  const subscriptionEnd = useMemo(() => {
+    if (!effectiveUserData.subscription_end_date) return null;
+    
+    try {
+      return new Date(effectiveUserData.subscription_end_date.seconds * 1000);
+    } catch (error) {
+      console.error('Error parsing subscription end date:', error);
+      return null;
+    }
+  }, [effectiveUserData.subscription_end_date]);
   
   const steps = ['プラン選択', '支払い情報', '完了'];
   
   // 強制的にユーザーデータを更新する関数
-  const refreshUserData = async () => {
-    if (!user) return;
+  const refreshUserData = useCallback(async () => {
+    if (!user || refreshingUserData) return;
     
     setRefreshingUserData(true);
     try {
@@ -108,7 +120,7 @@ const SubscriptionPage = () => {
     } finally {
       setRefreshingUserData(false);
     }
-  };
+  }, [user, refreshingUserData, forceRefreshUserData]);
   
   // URLパラメータに基づいて支払い完了ステップを設定
   useEffect(() => {
@@ -122,34 +134,23 @@ const SubscriptionPage = () => {
         window.history.replaceState({}, document.title, newUrl);
       }
       
-      // ユーザーデータを更新（3回試行を行う - より確実にデータが反映されるように）
-      if (user) {
-        const refreshUserDataMultipleTimes = async () => {
+      // ユーザーデータを更新（初期化済みでなければ）
+      if (user && !isInitialized) {
+        const refreshUserDataOnce = async () => {
           setRefreshingUserData(true);
           
           try {
-            console.log('First attempt to refresh user data...');
+            console.log('Refreshing user data after successful payment...');
             await forceRefreshUserData();
-            
-            // 少し待ってから2回目の更新を試行
-            setTimeout(async () => {
-              console.log('Second attempt to refresh user data...');
-              await forceRefreshUserData();
-              
-              // さらに少し待ってから3回目の更新を試行
-              setTimeout(async () => {
-                console.log('Third attempt to refresh user data...');
-                await forceRefreshUserData();
-                setRefreshingUserData(false);
-              }, 3000);
-            }, 2000);
+            setIsInitialized(true); // 初期化完了をマーク
           } catch (err) {
             console.error('Error refreshing user data:', err);
+          } finally {
             setRefreshingUserData(false);
           }
         };
         
-        refreshUserDataMultipleTimes();
+        refreshUserDataOnce();
       }
     } else if (isCanceled) {
       setActiveStep(0);
@@ -161,23 +162,43 @@ const SubscriptionPage = () => {
         window.history.replaceState({}, document.title, newUrl);
       }
     }
-  }, [isSuccess, isCanceled, user, forceRefreshUserData]);
+  }, [isSuccess, isCanceled, user, forceRefreshUserData, isInitialized]);
   
+  // 初回レンダリング時にユーザーデータを更新 (一度だけ)
   useEffect(() => {
-    // 初回レンダリング時にユーザーデータを更新
-    if (user) {
-      refreshUserData();
+    if (user && !isInitialized && !refreshingUserData) {
+      const initUserData = async () => {
+        setRefreshingUserData(true);
+        try {
+          console.log('Initializing user data...');
+          await updateUserData(true);
+          setIsInitialized(true);
+        } catch (err) {
+          console.error('Error initializing user data:', err);
+        } finally {
+          setRefreshingUserData(false);
+        }
+      };
+      
+      initUserData();
     }
-  }, [user]);
+  }, [user, isInitialized, refreshingUserData, updateUserData]);
   
+  // クリーンアップ: コンポーネントのアンマウント時に更新フラグをリセット
   useEffect(() => {
-    // ステップが支払いか完了の場合に未認証ユーザーはログインページにリダイレクト
+    return () => {
+      setRefreshingUserData(false);
+    };
+  }, []);
+  
+  // ステップが支払いか完了の場合に未認証ユーザーはログインページにリダイレクト
+  useEffect(() => {
     if (activeStep > 0 && !user) {
       navigate('/login', { state: { returnUrl: '/subscription' } });
     }
   }, [user, navigate, activeStep]);
   
-  const handleSelectPlan = (planId: string, requiresPayment: boolean) => {
+  const handleSelectPlan = useCallback((planId: string, requiresPayment: boolean) => {
     setSelectedPlan(planId);
     
     // 未ログインユーザーが無料会員を選択した場合、ログインを促す
@@ -216,9 +237,11 @@ const SubscriptionPage = () => {
       }
       return;
     }
-  };
+  }, [user, userData, isPaid]);
   
   const handleConfirmCancel = async () => {
+    if (loading) return;
+    
     try {
       setLoading(true);
       setError(null);
@@ -266,6 +289,8 @@ const SubscriptionPage = () => {
   };
   
   const handleUpdatePaymentMethod = async () => {
+    if (loading) return;
+    
     try {
       setLoading(true);
       setError(null);
@@ -330,7 +355,7 @@ const SubscriptionPage = () => {
                 variant="outlined"
                 onClick={refreshUserData}
                 disabled={refreshingUserData}
-                startIcon={refreshingUserData ? <CircularProgress size={16} /> : null}
+                startIcon={refreshingUserData ? <CircularProgress size={16} /> : <AutorenewIcon />}
               >
                 会員情報を更新
               </Button>
@@ -350,7 +375,7 @@ const SubscriptionPage = () => {
                 variant="outlined"
                 onClick={refreshUserData}
                 disabled={refreshingUserData}
-                startIcon={refreshingUserData ? <CircularProgress size={16} /> : null}
+                startIcon={refreshingUserData ? <CircularProgress size={16} /> : <AutorenewIcon />}
               >
                 会員情報を更新
               </Button>
@@ -366,7 +391,7 @@ const SubscriptionPage = () => {
         )}
         
         {/* 現在のプラン情報 - 有料会員の場合のみ表示 */}
-        {isPaid && (
+        {isPaid && isInitialized && (
           <Card variant="outlined" sx={{ mb: 4 }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -643,4 +668,5 @@ const SubscriptionPage = () => {
   );
 };
 
-export default SubscriptionPage;
+// React.memoでコンポーネントをメモ化して不要な再レンダリングを防止
+export default React.memo(SubscriptionPage);

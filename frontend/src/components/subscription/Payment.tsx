@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/components/subscription/Payment.tsx
-import { useState } from 'react';
+import { useState, memo, useMemo } from 'react';
 import {
   Box,
   Button,
@@ -25,9 +25,14 @@ const Payment: React.FC<PaymentProps> = ({ planId, onPaymentComplete, onCancel }
   const [error, setError] = useState<string | null>(null);
   
   const isAnnualPlan = planId === 'annual';
-  const planAmount = isAnnualPlan ? '3,000' : '300';
+  const planAmount = useMemo(() => 
+    isAnnualPlan ? '3,000' : '300',
+    [isAnnualPlan]
+  );
   
   const handleCheckout = async () => {
+    if (loading) return;
+    
     try {
       setLoading(true);
       setError(null);
@@ -99,6 +104,7 @@ const Payment: React.FC<PaymentProps> = ({ planId, onPaymentComplete, onCancel }
           variant="outlined"
           onClick={onCancel}
           sx={{ flex: 1 }}
+          disabled={loading}
         >
           キャンセル
         </Button>
@@ -133,4 +139,5 @@ const Payment: React.FC<PaymentProps> = ({ planId, onPaymentComplete, onCancel }
   );
 };
 
-export default Payment;
+// React.memoでコンポーネントをメモ化して不要な再レンダリングを防止
+export default memo(Payment);

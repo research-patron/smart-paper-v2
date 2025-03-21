@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/pages/ProfilePage.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -67,19 +67,21 @@ const ProfilePage = () => {
   const navigate = useNavigate();
   
   const [editMode, setEditMode] = useState(false);
-  const [userName, setUserName] = useState(user?.displayName || '');
+  const [userName, setUserName] = useState('');
   const [updateLoading, setUpdateLoading] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateSuccess, setUpdateSuccess] = useState(false);
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
   const [tabValue, setTabValue] = useState(0);
+  const [dataInitialized, setDataInitialized] = useState(false);
   
-  // userDataが変更されたらuserNameも更新
+  // userDataが変更されたらuserNameも更新（依存配列を最適化）
   useEffect(() => {
-    if (userData) {
+    if (userData && !dataInitialized) {
       setUserName(userData.name || user?.displayName || '');
+      setDataInitialized(true);
     }
-  }, [userData, user]);
+  }, [userData, user, dataInitialized]);
 
   // タブの切り替え
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
@@ -102,7 +104,7 @@ const ProfilePage = () => {
       });
       
       // ユーザーデータを再取得
-      await updateUserData();
+      await updateUserData(true);
       
       setUpdateSuccess(true);
       setEditMode(false);
@@ -125,8 +127,10 @@ const ProfilePage = () => {
   };
   
   // サブスクリプションの表示テキストを取得
-  const getSubscriptionText = () => {
-    switch (effectiveUserData.subscription_status) {
+  const getSubscriptionText = useCallback(() => {
+    if (!userData) return '非会員';
+    
+    switch (userData.subscription_status) {
       case 'paid':
         return '有料会員';
       case 'free':
@@ -134,31 +138,45 @@ const ProfilePage = () => {
       default:
         return '非会員';
     }
-  };
+  }, [userData]);
   
   // サブスクリプションの期限を表示
-  const getSubscriptionEndDate = () => {
-    if (!effectiveUserData.subscription_end_date) return '無期限';
+  const getSubscriptionEndDate = useCallback(() => {
+    if (!userData || !userData.subscription_end_date) return '無期限';
     
-    // Firestoreの Timestamp 型を適切に処理
-    let date;
-    if (typeof effectiveUserData.subscription_end_date.toDate === 'function') {
-      // Firestoreの Timestamp オブジェクトの場合
-      date = effectiveUserData.subscription_end_date.toDate();
-    } else if (effectiveUserData.subscription_end_date instanceof Date) {
-      // JavaScript の Date オブジェクトの場合
-      date = effectiveUserData.subscription_end_date;
-    } else {
-      // 文字列や数値の場合
-      date = new Date(effectiveUserData.subscription_end_date as any);
+    try {
+      // Firestoreの Timestamp 型を適切に処理
+      let date;
+      if (typeof userData.subscription_end_date.toDate === 'function') {
+        // Firestoreの Timestamp オブジェクトの場合
+        date = userData.subscription_end_date.toDate();
+      } else if (userData.subscription_end_date instanceof Date) {
+        // JavaScript の Date オブジェクトの場合
+        date = userData.subscription_end_date;
+      } else {
+        // 文字列や数値の場合
+        date = new Date(userData.subscription_end_date as any);
+      }
+        
+      return date.toLocaleDateString('ja-JP', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    } catch (error) {
+      console.error('Error formatting subscription end date:', error);
+      return '日付不明';
     }
-      
-    return date.toLocaleDateString('ja-JP', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-  };
+  }, [userData]);
+  
+  // 初回マウント時にのみユーザーデータを更新
+  useEffect(() => {
+    if (user && !dataInitialized) {
+      updateUserData(true).catch(err => {
+        console.error('Failed to update user data:', err);
+      });
+    }
+  }, [user, dataInitialized, updateUserData]);
   
   if (loading) {
     return (
@@ -371,7 +389,7 @@ const ProfilePage = () => {
                 サブスクリプション情報
               </Typography>
               
-              <SubscriptionInfoCard userData={effectiveUserData} />
+              {userData && <SubscriptionInfoCard userData={userData} />}
             </Box>
           </TabPanel>
           
@@ -387,7 +405,7 @@ const ProfilePage = () => {
             </Typography>
             
             <Box sx={{ mb: 4 }}>
-              <SubscriptionInfoCard userData={effectiveUserData} />
+              {userData && <SubscriptionInfoCard userData={userData} />}
               
               {effectiveUserData.subscription_status === 'paid' && (
                 <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>

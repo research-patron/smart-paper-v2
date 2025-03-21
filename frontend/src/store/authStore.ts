@@ -30,6 +30,7 @@ interface AuthState {
   error: string | null;
   userData: UserData | null;
   lastUserDataUpdate: number; // 最後のユーザーデータ更新タイムスタンプ
+  isUpdatingUserData: boolean; // ユーザーデータ更新中フラグ
   
   // 認証アクション
   login: (email: string, password: string) => Promise<UserCredential>;
@@ -69,6 +70,7 @@ export const useAuthStore = create<AuthState>()(
         error: null,
         userData: null,
         lastUserDataUpdate: 0,
+        isUpdatingUserData: false,
         
         login: async (email, password) => {
           try {
@@ -192,8 +194,14 @@ export const useAuthStore = create<AuthState>()(
         },
         
         updateUserData: async (forceRefresh = false) => {
-          const { user, lastUserDataUpdate } = get();
+          const { user, lastUserDataUpdate, isUpdatingUserData } = get();
           if (!user) return;
+          
+          // 既に更新中なら新しい更新をスキップ
+          if (isUpdatingUserData) {
+            console.log('User data update already in progress, skipping');
+            return;
+          }
           
           const now = Date.now();
           const TIME_THRESHOLD = 10000; // 10秒
@@ -205,7 +213,8 @@ export const useAuthStore = create<AuthState>()(
           }
           
           try {
-            set({ loading: true });
+            // 更新中フラグをセット
+            set({ isUpdatingUserData: true, loading: true });
             
             // getUserData関数を呼び出す代わりに、直接Firestoreから最新データを取得
             const userRef = doc(db, 'users', user.uid);
@@ -220,19 +229,21 @@ export const useAuthStore = create<AuthState>()(
               set({ 
                 userData, 
                 loading: false,
-                lastUserDataUpdate: now
+                lastUserDataUpdate: now,
+                isUpdatingUserData: false
               });
             } else {
               console.warn('No user data found for:', user.uid);
               set({ 
                 userData: null, 
                 loading: false,
-                lastUserDataUpdate: now
+                lastUserDataUpdate: now,
+                isUpdatingUserData: false
               });
             }
           } catch (error) {
             console.error('Error fetching user data:', error);
-            set({ loading: false });
+            set({ loading: false, isUpdatingUserData: false });
           }
         },
         

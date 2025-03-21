@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/components/subscription/SubscriptionInfoCard.tsx
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { Box, Typography, Button, Chip, Paper, Divider, CircularProgress } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
@@ -15,20 +15,43 @@ const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData })
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   
+  if (!userData) {
+    return (
+      <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+        <Typography variant="subtitle2" color="text.secondary">
+          現在のプラン
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+          <Typography variant="body1" sx={{ fontWeight: 'bold', flex: 1 }}>
+            無料プラン
+          </Typography>
+          <Chip 
+            label="基本" 
+            size="small" 
+            color="default"
+          />
+        </Box>
+        
+        <Button
+          variant="contained"
+          color="primary"
+          fullWidth
+          onClick={() => navigate('/subscription')}
+          startIcon={<StarIcon />}
+          sx={{ mt: 2 }}
+        >
+          プランをアップグレード
+        </Button>
+      </Paper>
+    );
+  }
+  
   const isPaid = userData?.subscription_status === 'paid';
   const isCanceled = userData?.subscription_cancel_at_period_end === true;
   
   const subscriptionEnd = userData?.subscription_end_date 
     ? new Date(userData.subscription_end_date.seconds * 1000) 
     : null;
-  
-  // 仮の値を使用：実際にはAPIから取得するべき情報
-  // 例えば、サブスクリプション開始日はFirestoreに保存されていない場合
-  const subscriptionStart = userData?.subscription_start_date 
-    ? new Date(userData.subscription_start_date.seconds * 1000) 
-    : (subscriptionEnd 
-        ? new Date(subscriptionEnd.getTime() - (30 * 24 * 60 * 60 * 1000)) // 30日前と仮定
-        : null);
   
   // 次回の請求日を計算（実際にはAPIから取得するべき情報）
   const nextBillingDate = subscriptionEnd 
@@ -39,11 +62,16 @@ const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData })
   const formatDate = (date: Date | null) => {
     if (!date) return '不明';
     
-    return date.toLocaleDateString('ja-JP', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
+    try {
+      return date.toLocaleDateString('ja-JP', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    } catch (error) {
+      console.error('Date formatting error:', error);
+      return '日付形式エラー';
+    }
   };
   
   // サブスクリプションページへ移動
@@ -53,6 +81,8 @@ const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData })
   
   // 支払い方法の更新
   const handleUpdatePaymentMethod = async () => {
+    if (loading) return;
+    
     try {
       setLoading(true);
       
@@ -86,21 +116,6 @@ const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData })
       {isPaid && subscriptionEnd && (
         <>
           <Divider sx={{ my: 1.5 }} />
-          
-          {/* サブスクリプション開始日 */}
-          {subscriptionStart && (
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-              <CalendarTodayIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
-              <Box>
-                <Typography variant="caption" color="text.secondary">
-                  ご利用開始日
-                </Typography>
-                <Typography variant="body2">
-                  {formatDate(subscriptionStart)}
-                </Typography>
-              </Box>
-            </Box>
-          )}
           
           {/* 有効期限または次回更新日 */}
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
@@ -160,4 +175,5 @@ const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData })
   );
 };
 
-export default SubscriptionInfoCard;
+// React.memoでコンポーネントをメモ化して不要な再レンダリングを防止
+export default memo(SubscriptionInfoCard);
