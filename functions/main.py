@@ -37,6 +37,14 @@ from performance import (
     save_summary_text
 )
 
+# StripeのCloud Functionsをインポート - この部分を追加する
+from stripe_functions import (
+    create_stripe_checkout,
+    cancel_stripe_subscription,
+    update_payment_method,
+    stripe_webhook
+)
+
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
 

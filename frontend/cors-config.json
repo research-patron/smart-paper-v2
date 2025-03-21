@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://smart-paper-v2.web.app", "https://smart-paper-v2.firebaseapp.com", "http://localhost:3000"],
+    "method": ["GET", "HEAD", "PUT", "POST", "DELETE"],
+    "responseHeader": ["Content-Type", "Content-Length", "Content-Range", "Content-Disposition", "Cache-Control"],
+    "maxAgeSeconds": 3600
+  }
+]

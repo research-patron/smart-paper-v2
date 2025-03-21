@@ -503,39 +503,68 @@ export const exportToObsidian = async (
     }
     
     // 保存先ディレクトリの決定
-    let targetDirHandle: FileSystemDirectoryHandle;
+    let baseDir: FileSystemDirectoryHandle;
     
-    // フォルダパスが設定されている場合
+    // フォルダパスが設定されている場合、ベースディレクトリを取得または作成
     if (settings.folder_path && settings.folder_path.trim() !== '') {
-      // 指定されたパスが存在するか確認
-      const folderHandle = await checkFolderExists(vaultHandle, settings.folder_path);
-      
-      if (folderHandle) {
-        // 指定フォルダが存在する場合は、そのディレクトリをターゲットに
-        targetDirHandle = folderHandle;
-        console.log(`Using specified folder path: ${settings.folder_path}`);
-      } else {
-        // 指定フォルダが存在しない場合はエラー
+      try {
+        // まずベースパスの各部分を分割して存在確認と作成を行う
+        const pathParts = settings.folder_path.split('/').filter(p => p.trim() !== '');
+        let currentDir = vaultHandle;
+        
+        for (const part of pathParts) {
+          try {
+            // フォルダが存在するか確認
+            currentDir = await currentDir.getDirectoryHandle(part);
+          } catch (e) {
+            // 存在しない場合は作成
+            currentDir = await currentDir.getDirectoryHandle(part, { create: true });
+            console.log(`Created directory: ${part}`);
+          }
+        }
+        
+        baseDir = currentDir;
+        console.log(`Using base directory: ${settings.folder_path}`);
+      } catch (error) {
+        console.error(`Failed to create or access base directory: ${settings.folder_path}`, error);
         return {
           exported: false,
-          error: `指定されたフォルダ「${settings.folder_path}」がObsidian vaultに存在しません。フォルダ名を確認してください。`
+          error: `ベースディレクトリ「${settings.folder_path}」の作成または確認に失敗しました。`
         };
       }
     } else {
-      // フォルダパスが設定されていない場合は従来通り smart-paper-v2 フォルダを使用
+      // フォルダパスが設定されていない場合はデフォルトの smart-paper-v2 を使用
       try {
-        // すでに存在するか確認
         try {
-          targetDirHandle = await vaultHandle.getDirectoryHandle('smart-paper-v2');
+          baseDir = await vaultHandle.getDirectoryHandle('smart-paper-v2');
         } catch (e) {
-          // 存在しない場合は作成
-          targetDirHandle = await vaultHandle.getDirectoryHandle('smart-paper-v2', { create: true });
+          baseDir = await vaultHandle.getDirectoryHandle('smart-paper-v2', { create: true });
+          console.log('Created default smart-paper-v2 directory');
         }
-        console.log('Using default smart-paper-v2 folder');
       } catch (error) {
-        console.error('Failed to create or access smart-paper-v2 folder:', error);
-        throw new Error('Obsidian vaultにフォルダを作成できませんでした');
+        console.error('Failed to create or access smart-paper-v2 directory:', error);
+        throw new Error('Obsidian vaultにベースディレクトリを作成できませんでした');
       }
+    }
+    
+    // 日付フォルダを作成（YYYY-MM-DD形式）- ローカル時間に基づく日付を使用
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    console.log('Creating/accessing date folder for:', today);
+
+    let dateFolderHandle: FileSystemDirectoryHandle;
+    try {
+      // すでに存在するか確認
+      try {
+        dateFolderHandle = await baseDir.getDirectoryHandle(today);
+      } catch (e) {
+        // 存在しない場合は作成
+        dateFolderHandle = await baseDir.getDirectoryHandle(today, { create: true });
+        console.log(`Created date directory: ${today}`);
+      }
+    } catch (error) {
+      console.error(`Failed to create or access date folder: ${today}`, error);
+      throw new Error(`日付フォルダ「${today}」を作成できませんでした`);
     }
     
     // 添付ファイルフォルダの作成（PDFを埋め込む場合）
@@ -548,10 +577,11 @@ export const exportToObsidian = async (
       try {
         // すでに存在するか確認
         try {
-          attachmentsHandle = await targetDirHandle.getDirectoryHandle('添付ファイル');
+          attachmentsHandle = await dateFolderHandle.getDirectoryHandle('添付ファイル');
         } catch (e) {
           // 存在しない場合は作成
-          attachmentsHandle = await targetDirHandle.getDirectoryHandle('添付ファイル', { create: true });
+          attachmentsHandle = await dateFolderHandle.getDirectoryHandle('添付ファイル', { create: true });
+          console.log('Created attachments directory');
         }
       } catch (error) {
         console.error('Failed to create or access attachments folder:', error);
@@ -586,25 +616,6 @@ export const exportToObsidian = async (
       }
     }
     
-    // 日付フォルダを作成（YYYY-MM-DD形式）- ローカル時間に基づく日付を使用
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    console.log('Creating/accessing date folder for:', today);
-
-    let dateFolderHandle: FileSystemDirectoryHandle;
-    try {
-      // すでに存在するか確認
-      try {
-        dateFolderHandle = await targetDirHandle.getDirectoryHandle(today);
-      } catch (e) {
-        // 存在しない場合は作成
-        dateFolderHandle = await targetDirHandle.getDirectoryHandle(today, { create: true });
-      }
-    } catch (error) {
-      console.error(`Failed to create or access date folder: ${today}`, error);
-      throw new Error(`日付フォルダ「${today}」を作成できませんでした`);
-    }
-    
     // Markdown生成
     let markdown = '';
     if (settings.file_type === 'md') {
@@ -626,6 +637,7 @@ export const exportToObsidian = async (
       const writable = await fileHandle.createWritable();
       await writable.write(new Blob([markdown], { type: settings.file_type === 'md' ? 'text/markdown' : 'text/plain' }));
       await writable.close();
+      console.log(`Markdown file written successfully: ${fullFileName}`);
     } catch (error) {
       console.error(`Failed to write file: ${fullFileName}`, error);
       throw new Error(`ファイル「${fullFileName}」の書き込みに失敗しました`);
@@ -635,14 +647,11 @@ export const exportToObsidian = async (
     result.exported = true;
     
     // エクスポートパスの設定
-    // カスタムフォルダパスが設定されている場合はそれを使用
-    if (settings.folder_path && settings.folder_path.trim() !== '') {
-      result.export_path = `${settings.folder_path}/${today}/${fullFileName}`;
-    } else {
-      // デフォルトパスの場合
-      result.export_path = `smart-paper-v2/${today}/${fullFileName}`;
-    }
+    const basePath = settings.folder_path && settings.folder_path.trim() !== '' 
+                    ? settings.folder_path 
+                    : 'smart-paper-v2';
     
+    result.export_path = `${basePath}/${today}/${fullFileName}`;
     result.exported_at = new Date();
     
     // エクスポート状態をローカルストレージに保存

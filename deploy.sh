@@ -74,7 +74,8 @@ google-cloud-secret-manager>=2.0.0
 Flask>=2.0.0
 python-dateutil>=2.8.2
 requests>=2.25.0
-firebase-admin>=6.0.0" > requirements.txt
+firebase-admin>=6.0.0
+stripe==5.0.0" > requirements.txt
 
 # ローカル環境に依存関係をインストール（古いライブラリがある場合はクリーンアップ）
 rm -rf lib
@@ -87,6 +88,13 @@ cd ..
 echo -e "\n${BLUE}性能計測モジュールの確認...${NC}"
 if [ ! -f "functions/performance.py" ]; then
   echo -e "${RED}Error: functions/performance.py が見つかりません${NC}"
+  exit 1
+fi
+
+# stripe_functions.pyが存在することを確認
+echo -e "\n${BLUE}Stripeモジュールの確認...${NC}"
+if [ ! -f "functions/stripe_functions.py" ]; then
+  echo -e "${RED}Error: functions/stripe_functions.py が見つかりません${NC}"
   exit 1
 fi
 
@@ -127,11 +135,66 @@ gcloud functions deploy get_signed_url \
   --allow-unauthenticated \
   --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
 
+# Stripe関連のCloud Functions をデプロイ
+echo -e "\n${BLUE}Stripe関連のCloud Functionsをデプロイしています...${NC}"
+
+echo -e "\n${BLUE}create_stripe_checkout 関数をデプロイしています...${NC}"
+gcloud functions deploy create_stripe_checkout \
+  --region=${REGION} \
+  --runtime=python310 \
+  --trigger-http \
+  --source=./functions \
+  --entry-point=create_stripe_checkout \
+  --memory=256MB \
+  --timeout=60s \
+  --allow-unauthenticated \
+  --set-env-vars=STRIPE_SUCCESS_URL=https://${PROJECT_ID}.web.app/subscription?success=true,STRIPE_CANCEL_URL=https://${PROJECT_ID}.web.app/subscription?canceled=true,GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
+
+echo -e "\n${BLUE}cancel_stripe_subscription 関数をデプロイしています...${NC}"
+gcloud functions deploy cancel_stripe_subscription \
+  --region=${REGION} \
+  --runtime=python310 \
+  --trigger-http \
+  --source=./functions \
+  --entry-point=cancel_stripe_subscription \
+  --memory=256MB \
+  --timeout=60s \
+  --allow-unauthenticated \
+  --set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
+
+echo -e "\n${BLUE}update_payment_method 関数をデプロイしています...${NC}"
+gcloud functions deploy update_payment_method \
+  --region=${REGION} \
+  --runtime=python310 \
+  --trigger-http \
+  --source=./functions \
+  --entry-point=update_payment_method \
+  --memory=256MB \
+  --timeout=60s \
+  --allow-unauthenticated \
+  --set-env-vars=STRIPE_RETURN_URL=https://${PROJECT_ID}.web.app/subscription,GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
+
+echo -e "\n${BLUE}stripe_webhook 関数をデプロイしています...${NC}"
+gcloud functions deploy stripe_webhook \
+  --region=${REGION} \
+  --runtime=python310 \
+  --trigger-http \
+  --source=./functions \
+  --entry-point=stripe_webhook \
+  --memory=256MB \
+  --timeout=60s \
+  --allow-unauthenticated \
+  --set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
+
 echo -e "\n${GREEN}デプロイが完了しました！${NC}"
 echo -e "以下のURLでCloud Functionsにアクセスできます:"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf_background${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/get_signed_url${NC}"
+echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/create_stripe_checkout${NC}"
+echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/cancel_stripe_subscription${NC}"
+echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/update_payment_method${NC}"
+echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/stripe_webhook${NC}"
 
 # Firestoreコレクションの存在確認とインデックス作成
 echo -e "\n${BLUE}Firestoreインデックスの設定...${NC}"
