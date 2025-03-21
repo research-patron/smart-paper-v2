@@ -1,6 +1,6 @@
 // ~/Desktop/smart-paper-v2/frontend/src/App.tsx
 import { useEffect, useState } from 'react';
-import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Routes, Navigate, useLocation } from 'react-router-dom';
 import { Box, CssBaseline, ThemeProvider, CircularProgress, Container } from '@mui/material';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
@@ -53,6 +53,26 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   // return <>{children}</>;
 };
 
+// ナビゲーション監視コンポーネント
+const RouteObserver: React.FC = () => {
+  const location = useLocation();
+  const { forceRefreshUserData } = useAuthStore();
+  
+  useEffect(() => {
+    // サブスクリプションページのクエリパラメータをチェック
+    if (location.pathname === '/subscription') {
+      const searchParams = new URLSearchParams(location.search);
+      if (searchParams.get('success') === 'true') {
+        console.log('Detected successful subscription payment, refreshing user data...');
+        // ユーザーデータを強制更新
+        forceRefreshUserData();
+      }
+    }
+  }, [location, forceRefreshUserData]);
+  
+  return null;
+};
+
 // DocumentData を UserData に変換する関数
 const convertToUserData = (data: any) => {
   if (!data) return null;
@@ -60,6 +80,7 @@ const convertToUserData = (data: any) => {
   return {
     subscription_status: (data.subscription_status as 'none' | 'free' | 'paid') || 'none',
     subscription_end_date: data.subscription_end_date || null,
+    subscription_cancel_at_period_end: data.subscription_cancel_at_period_end || false,
     name: data.name,
     email: data.email,
     created_at: data.created_at,
@@ -68,7 +89,7 @@ const convertToUserData = (data: any) => {
 };
 
 function App() {
-  const { setUser, setUserData } = useAuthStore();
+  const { setUser, setUserData, forceRefreshUserData } = useAuthStore();
   const { fetchUserPapers } = usePaperStore(); // 追加: PaperStoreから関数を取得
   const [appReady, setAppReady] = useState(false);
   
@@ -83,6 +104,7 @@ function App() {
       if (user) {
         // ユーザーデータをFirestoreから取得
         try {
+          // 強制的にFirestoreから最新データを取得
           const docRef = doc(db, 'users', user.uid);
           const docSnap = await getDoc(docRef);
           
@@ -120,6 +142,23 @@ function App() {
     return () => unsubscribe();
   }, [setUser, setUserData, fetchUserPapers]); // fetchUserPapers を依存配列に追加
   
+  // 定期的にユーザーデータを更新する効果
+  useEffect(() => {
+    // 最初のロード時にはappReadyがfalseなのでスキップ
+    if (!appReady) return;
+    
+    // 60秒ごとにユーザーデータを更新
+    const interval = setInterval(() => {
+      const user = auth.currentUser;
+      if (user) {
+        console.log("Running scheduled user data refresh");
+        forceRefreshUserData();
+      }
+    }, 60000);
+    
+    return () => clearInterval(interval);
+  }, [appReady, forceRefreshUserData]);
+  
   // アプリが初期化される前はローディング表示
   if (!appReady) {
     return (
@@ -143,6 +182,7 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Router>
+        <RouteObserver />
         <Box
           sx={{
             display: 'flex',
