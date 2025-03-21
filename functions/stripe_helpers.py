@@ -141,10 +141,20 @@ def update_user_subscription_status(user_id, subscription_data):
         
         # Firestoreを更新
         user_ref.update(update_data)
+        
+        # 更新後、再度データを取得して変更が反映されたか確認
+        updated_doc = user_ref.get()
+        updated_data = updated_doc.to_dict()
+        log_info("UserSubscriptionUpdateResult", 
+                f"User {user_id} subscription updated", 
+                {"new_status": updated_data.get('subscription_status'),
+                 "stripe_subscription_id": updated_data.get('stripe_subscription_id')})
+                 
         return True
         
     except Exception as e:
-        log_error("UserUpdateError", f"Failed to update user subscription: {str(e)}")
+        log_error("UserUpdateError", f"Failed to update user subscription: {str(e)}", 
+                 {"user_id": user_id, "subscription_data": subscription_data})
         return False
 
 # サブスクリプションセッションの作成
@@ -257,6 +267,9 @@ def create_checkout_session(user_id, plan_id):
             cancel_url=cancel_url,
             metadata=metadata,
         )
+        
+        log_info("CheckoutSessionCreated", f"Created checkout session for user: {user_id}", 
+                {"plan_id": plan_id, "session_id": session.id})
         
         return {
             'session_id': session.id,
@@ -469,7 +482,6 @@ def handle_webhook_event(payload, sig_header):
         log_error("WebhookError", f"Error handling webhook event: {str(e)}")
         raise APIError(f"Error handling webhook event: {str(e)}", 500)
 
-# Webhookイベントハンドラー関数
 def handle_checkout_session_completed(session):
     """
     チェックアウトセッション完了イベントを処理
@@ -484,6 +496,9 @@ def handle_checkout_session_completed(session):
     metadata = session.get('metadata', {})
     user_id = metadata.get('user_id')
     plan_id = metadata.get('plan_id')
+    
+    log_info("CheckoutSessionCompleted", f"Processing checkout session completed for user {user_id}", 
+            {"plan_id": plan_id, "session_id": session.get('id')})
     
     if not user_id or not plan_id:
         log_warning("CheckoutSessionWarning", "Missing user_id or plan_id in session metadata")
@@ -552,6 +567,24 @@ def handle_checkout_session_completed(session):
             time.sleep(2)
             success = update_user_subscription_status(user_id, update_data)
             log_info("UserUpdate", f"Second attempt {'succeeded' if success else 'failed'}")
+        
+        # 3回目のトライ（最終手段）
+        if not success:
+            log_info("UserUpdate", "Last attempt for user subscription update...")
+            time.sleep(3)
+            
+            # 最終手段：直接 subscription_status のみを更新
+            try:
+                db = get_db()
+                user_ref = db.collection('users').document(user_id)
+                user_ref.update({
+                    'subscription_status': 'paid',
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                })
+                log_info("UserUpdate", "Final attempt to update subscription status completed")
+                success = True
+            except Exception as final_err:
+                log_error("UserUpdateFinalError", f"Final update attempt failed: {str(final_err)}")
         
         return {
             'status': 'success',

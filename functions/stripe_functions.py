@@ -86,13 +86,20 @@ def create_stripe_checkout(request: Request):
         if not plan_id:
             raise ValidationError("plan_idは必須です")
 
+        log_info("StripeCheckout", f"Creating checkout session for user {user_id}, plan {plan_id}")
+
         # サブスクリプションセッションを作成
         result = create_checkout_session(user_id, plan_id)
+        
+        # 詳細なログ出力
+        log_info("StripeCheckout", f"Checkout session created successfully", 
+                {"user_id": user_id, "plan_id": plan_id, "session_id": result.get('session_id')})
         
         # 成功レスポンスを返す
         return jsonify(result), 200, headers
 
     except APIError as e:
+        log_error("CreateCheckoutError", f"API error occurred: {e.message}", {"details": e.details})
         return jsonify(e.to_dict()), e.status_code, headers
     except Exception as e:
         log_error("CreateCheckoutError", f"Unhandled error: {str(e)}")
@@ -121,13 +128,20 @@ def cancel_stripe_subscription(request: Request):
         if not user_id:
             raise AuthenticationError("認証が必要です")
 
+        log_info("CancelSubscription", f"Cancelling subscription for user {user_id}")
+
         # サブスクリプションを解約
         result = cancel_subscription(user_id)
+        
+        # 詳細なログ出力
+        log_info("CancelSubscription", f"Subscription cancelled successfully", 
+                {"user_id": user_id, "end_date": result.get('end_date')})
         
         # 成功レスポンスを返す
         return jsonify(result), 200, headers
 
     except APIError as e:
+        log_error("CancelSubscriptionError", f"API error occurred: {e.message}", {"details": e.details})
         return jsonify(e.to_dict()), e.status_code, headers
     except Exception as e:
         log_error("CancelSubscriptionError", f"Unhandled error: {str(e)}")
@@ -156,13 +170,20 @@ def update_payment_method(request: Request):
         if not user_id:
             raise AuthenticationError("認証が必要です")
 
+        log_info("UpdatePaymentMethod", f"Creating payment update session for user {user_id}")
+
         # カード更新セッションを作成
         result = create_card_update_session(user_id)
+        
+        # 詳細なログ出力
+        log_info("UpdatePaymentMethod", f"Payment update session created successfully", 
+                {"user_id": user_id})
         
         # 成功レスポンスを返す
         return jsonify(result), 200, headers
 
     except APIError as e:
+        log_error("UpdatePaymentMethodError", f"API error occurred: {e.message}", {"details": e.details})
         return jsonify(e.to_dict()), e.status_code, headers
     except Exception as e:
         log_error("UpdatePaymentMethodError", f"Unhandled error: {str(e)}")
@@ -174,20 +195,32 @@ def stripe_webhook(request: Request):
     Stripeからのwebhookイベントを処理するAPI
     """
     try:
+        # リクエストの詳細をログに記録
+        log_info("StripeWebhook", "Received webhook request", {
+            "method": request.method,
+            "path": request.path,
+            "content_length": request.content_length,
+            "headers": {k: v for k, v in request.headers.items() if k.lower() not in ['authorization']}
+        })
+        
         # webhookのシグネチャを検証するために生のデータが必要
         payload = request.data
         sig_header = request.headers.get('Stripe-Signature')
 
         if not sig_header:
+            log_error("StripeWebhook", "Missing Stripe-Signature header")
             raise ValidationError("Stripe-Signatureヘッダーがありません")
 
         # webhookイベントを処理
+        log_info("StripeWebhook", "Processing webhook event", {"payload_size": len(payload) if payload else 0})
         result = handle_webhook_event(payload, sig_header)
         
         # 成功レスポンスを返す
+        log_info("StripeWebhook", "Webhook processed successfully", {"result": result})
         return jsonify({"received": True, "result": result}), 200
 
     except APIError as e:
+        log_error("WebhookError", f"API error: {e.message}", {"details": e.details})
         return jsonify(e.to_dict()), e.status_code
     except Exception as e:
         log_error("WebhookError", f"Unhandled error: {str(e)}")

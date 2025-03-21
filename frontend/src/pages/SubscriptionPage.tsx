@@ -24,7 +24,8 @@ import {
   DialogContentText,
   DialogTitle,
   Slide,
-  CircularProgress
+  CircularProgress,
+  LinearProgress
 } from '@mui/material';
 import { TransitionProps } from '@mui/material/transitions';
 import PaymentIcon from '@mui/icons-material/Payment';
@@ -63,11 +64,19 @@ const SubscriptionPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [refreshingUserData, setRefreshingUserData] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false); // 初期化完了フラグを追加
+  // 新しく追加: 支払い成功後のリトライ処理のための状態
+  const [retryCount, setRetryCount] = useState(0);
+  const [retryProgress, setRetryProgress] = useState(false);
+  const MAX_RETRIES = 10; // 最大リトライ回数
+  const RETRY_DELAY = 2000; // リトライ間隔（ms）
   
   // データ更新タイマーと更新要求フラグ
   const updateTimerRef = useRef<number | null>(null);
   const dataUpdateRequestedRef = useRef(false);
   const lastUpdateTimeRef = useRef(0);
+  // 新規追加: リトライ処理を追跡するための参照
+  const retryTimerRef = useRef<number | null>(null);
+  const isRetryingRef = useRef(false);
   
   // URLパラメータからステータスを取得
   const urlParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
@@ -144,7 +153,65 @@ const SubscriptionPage = () => {
     }
   }, [user, refreshingUserData, forceRefreshUserData]);
   
-  // URLパラメータによる処理 - success=true の場合
+  // 新規追加: サブスクリプションステータス更新リトライ関数
+  const retryRefreshUserData = useCallback(async () => {
+    if (!user || isRetryingRef.current) return;
+    
+    // リトライカウンターを増やし、実行中フラグを設定
+    isRetryingRef.current = true;
+    const currentRetry = retryCount + 1;
+    setRetryCount(currentRetry);
+    setRetryProgress(true);
+    
+    try {
+      console.log(`Retry ${currentRetry}/${MAX_RETRIES}: Refreshing user data...`);
+      await forceRefreshUserData();
+      
+      // 更新後のステータスをチェック
+      if (userData?.subscription_status === 'paid') {
+        console.log('Success! Subscription status updated to paid.');
+        isRetryingRef.current = false;
+        setRetryProgress(false);
+        return true; // 成功
+      }
+      
+      console.log(`Retry ${currentRetry}/${MAX_RETRIES}: Status still ${userData?.subscription_status}`);
+      
+      // 最大リトライ回数をチェック
+      if (currentRetry >= MAX_RETRIES) {
+        console.log(`Maximum retries (${MAX_RETRIES}) reached. Stopping retries.`);
+        isRetryingRef.current = false;
+        setRetryProgress(false);
+        return false; // 失敗
+      }
+      
+      // 次のリトライをスケジュール
+      retryTimerRef.current = window.setTimeout(() => {
+        isRetryingRef.current = false; // フラグをリセット（次のリトライ用）
+        setRetryCount(currentRetry);
+        retryRefreshUserData();
+      }, RETRY_DELAY);
+      
+      return false; // まだ成功していない
+    } catch (err) {
+      console.error(`Error during retry ${currentRetry}:`, err);
+      
+      // エラーが発生しても最大回数に達していなければリトライ
+      if (currentRetry < MAX_RETRIES) {
+        retryTimerRef.current = window.setTimeout(() => {
+          isRetryingRef.current = false;
+          retryRefreshUserData();
+        }, RETRY_DELAY);
+      } else {
+        isRetryingRef.current = false;
+        setRetryProgress(false);
+      }
+      
+      return false;
+    }
+  }, [user, userData, retryCount, forceRefreshUserData]);
+  
+  // URLパラメータによる処理 - success=true の場合（リトライロジック追加）
   useEffect(() => {
     if (isSuccess && !paymentSuccess) {
       setActiveStep(2);
@@ -156,22 +223,17 @@ const SubscriptionPage = () => {
         window.history.replaceState({}, document.title, newUrl);
       }
       
-      // 支払い成功時のみデータ更新をリクエスト（遅延実行）
+      // 支払い成功時のみデータ更新をリクエスト
       if (user) {
-        // リクエストフラグを設定
-        dataUpdateRequestedRef.current = true;
-        
-        // 短い遅延後に更新を実行（ページレンダリング優先）
-        if (updateTimerRef.current !== null) {
-          window.clearTimeout(updateTimerRef.current);
-        }
-        
-        updateTimerRef.current = window.setTimeout(() => {
-          refreshUserData();
-        }, 1500);
+        // Webhookの処理完了を待つために少し待機してからリトライ処理を開始
+        console.log('Payment success detected, starting status check in 3 seconds...');
+        setTimeout(() => {
+          setRetryCount(0); // リトライカウンターをリセット
+          retryRefreshUserData(); // リトライ処理開始
+        }, 3000);
       }
     }
-  }, [isSuccess, user, refreshUserData, paymentSuccess]);
+  }, [isSuccess, user, retryRefreshUserData, paymentSuccess]);
   
   // URLパラメータによる処理 - canceled=true の場合
   useEffect(() => {
@@ -198,10 +260,16 @@ const SubscriptionPage = () => {
   useEffect(() => {
     return () => {
       dataUpdateRequestedRef.current = false;
+      isRetryingRef.current = false;
       
       if (updateTimerRef.current !== null) {
         window.clearTimeout(updateTimerRef.current);
         updateTimerRef.current = null;
+      }
+      
+      if (retryTimerRef.current !== null) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
       }
     };
   }, []);
@@ -325,8 +393,18 @@ const SubscriptionPage = () => {
   
   // ボタンクリックで強制的にデータ更新
   const handleManualRefresh = () => {
-    dataUpdateRequestedRef.current = true;
-    refreshUserData();
+    // リトライ処理の進行中ならキャンセルして再開
+    if (isRetryingRef.current) {
+      if (retryTimerRef.current) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+      isRetryingRef.current = false;
+    }
+    
+    // 新しいリトライ処理を開始
+    setRetryCount(0);
+    retryRefreshUserData();
   };
   
   return (
@@ -343,6 +421,28 @@ const SubscriptionPage = () => {
               <CircularProgress size={20} sx={{ mr: 1 }} />
               <Typography variant="body2">
                 最新の会員情報を取得しています。しばらくお待ちください。
+              </Typography>
+            </Box>
+          </Alert>
+        )}
+        
+        {/* 支払い後のステータス更新中の表示 */}
+        {retryProgress && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            <AlertTitle>決済処理の確認中...</AlertTitle>
+            <Box>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                サブスクリプション情報を確認しています。完了まで少しお待ちください。
+                これには最大30秒程度かかる場合があります。
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <LinearProgress sx={{ flexGrow: 1, mr: 1 }} />
+                <Typography variant="caption">
+                  {retryCount}/{MAX_RETRIES}
+                </Typography>
+              </Box>
+              <Typography variant="caption" color="text.secondary">
+                注: この処理はページを閉じても継続されます。あとで再確認いただくこともできます。
               </Typography>
             </Box>
           </Alert>
@@ -376,8 +476,8 @@ const SubscriptionPage = () => {
                 color="primary" 
                 variant="outlined"
                 onClick={handleManualRefresh}
-                disabled={refreshingUserData}
-                startIcon={refreshingUserData ? <CircularProgress size={16} /> : <AutorenewIcon />}
+                disabled={refreshingUserData || retryProgress}
+                startIcon={refreshingUserData || retryProgress ? <CircularProgress size={16} /> : <AutorenewIcon />}
               >
                 会員情報を更新
               </Button>
@@ -396,8 +496,8 @@ const SubscriptionPage = () => {
                 color="primary" 
                 variant="outlined"
                 onClick={handleManualRefresh}
-                disabled={refreshingUserData}
-                startIcon={refreshingUserData ? <CircularProgress size={16} /> : <AutorenewIcon />}
+                disabled={refreshingUserData || retryProgress}
+                startIcon={refreshingUserData || retryProgress ? <CircularProgress size={16} /> : <AutorenewIcon />}
               >
                 会員情報を更新
               </Button>
@@ -580,7 +680,21 @@ const SubscriptionPage = () => {
                 : 'おめでとうございます！すべての機能を無制限でご利用いただけるようになりました。'}
             </Typography>
             
-            {refreshingUserData ? (
+            {/* ステータスの特別表示 - 有料プラン選択時にステータスがまだ更新されていない場合 */}
+            {selectedPlan !== 'free' && userData?.subscription_status !== 'paid' && (
+              <Alert severity="info" sx={{ mb: 3 }}>
+                <AlertTitle>プラン更新状況</AlertTitle>
+                <Typography variant="body2">
+                  現在の会員ステータス: <strong>{userData?.subscription_status === 'free' ? '無料会員' : '非会員'}</strong>
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  決済処理は完了しましたが、システム上の反映に少し時間がかかることがあります。
+                  もしプレミアム機能が利用できない場合は、下のボタンで会員情報を更新してください。
+                </Typography>
+              </Alert>
+            )}
+            
+            {refreshingUserData || retryProgress ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, mb: 2 }}>
                 <CircularProgress size={24} />
                 <Typography variant="body2" sx={{ ml: 2 }}>
