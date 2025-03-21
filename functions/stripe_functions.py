@@ -192,36 +192,138 @@ def update_payment_method(request: Request):
 @functions_framework.http
 def stripe_webhook(request: Request):
     """
-    Stripeからのwebhookイベントを処理するAPI
+    Stripeからのwebhookイベントを処理するAPI（改良版）
+    """
+    # 詳細なデバッグログを追加
+    method = request.method
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in ['authorization']}
+    content_length = request.content_length
+    remote_addr = request.remote_addr
+    
+    log_info("StripeWebhookDebug", "Request received", {
+        "method": method,
+        "remote_addr": remote_addr,
+        "content_length": content_length,
+        "headers": headers
+    })
+    
+    try:
+        if request.method == 'OPTIONS':
+            # CORSプリフライトリクエスト対応
+            headers = {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Stripe-Signature',
+                'Access-Control-Max-Age': '3600'
+            }
+            log_info("StripeWebhookDebug", "Responding to OPTIONS request")
+            return ('', 204, headers)
+            
+        # レスポンスヘッダー
+        response_headers = {'Access-Control-Allow-Origin': '*'}
+        
+        # 最小確認として、GETリクエストには単純なレスポンスを返す（デバッグ用）
+        if request.method == 'GET':
+            log_info("StripeWebhookDebug", "Responding to GET request (health check)")
+            return jsonify({"status": "webhook endpoint is up"}), 200, response_headers
+        
+        # POSTリクエスト（実際のWebhook）の処理
+        # リクエストボディを取得
+        try:
+            payload = request.data
+            log_info("StripeWebhookDebug", "Request payload received", {"payload_size": len(payload) if payload else 0})
+            
+            # ペイロードの先頭部分をログに記録（機密情報に注意）
+            if payload:
+                payload_preview = payload[:200].decode('utf-8') if payload else "EMPTY"
+                log_info("StripeWebhookDebug", "Payload preview", {"preview": payload_preview[:50] + "..."})
+        except Exception as payload_err:
+            log_error("StripeWebhookDebug", f"Error reading payload: {str(payload_err)}")
+            payload = None
+            
+        # Stripeシグネチャを取得
+        sig_header = request.headers.get('Stripe-Signature')
+        if not sig_header:
+            log_error("StripeWebhookDebug", "Missing Stripe-Signature header")
+            return jsonify({"error": "Stripe-Signature header is missing"}), 400, response_headers
+            
+        log_info("StripeWebhookDebug", "Webhook handling", {
+            "signature_header_length": len(sig_header) if sig_header else 0,
+            "payload_size": len(payload) if payload else 0
+        })
+        
+        # リクエストを処理し結果を返す
+        result = handle_webhook_event(payload, sig_header)
+        
+        # 成功レスポンスを返す
+        log_info("StripeWebhookDebug", "Webhook processed successfully", {"result": result})
+        return jsonify({"received": True, "result": result}), 200, response_headers
+    
+    except APIError as e:
+        log_error("WebhookError", f"API error: {e.message}", {"details": e.details})
+        return jsonify(e.to_dict()), e.status_code, {'Access-Control-Allow-Origin': '*'}
+    except Exception as e:
+        # 全体的な例外処理
+        log_error("StripeWebhookDebug", f"Global exception: {str(e)}")
+        return jsonify({"error": "Internal server error", "message": str(e)}), 500, {'Access-Control-Allow-Origin': '*'}
+
+@functions_framework.http
+def stripe_webhook_test(request: Request):
+    """
+    Stripe Webhook用のシンプルテストエンドポイント
+    署名検証をスキップして、リクエスト情報のみをログに出力する
     """
     try:
-        # リクエストの詳細をログに記録
-        log_info("StripeWebhook", "Received webhook request", {
+        # CORSヘッダーの設定
+        if request.method == 'OPTIONS':
+            headers = {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Stripe-Signature',
+                'Access-Control-Max-Age': '3600'
+            }
+            return ('', 204, headers)
+
+        headers = {'Access-Control-Allow-Origin': '*'}
+
+        # リクエスト情報をログに記録
+        log_info("WebhookTest", "Webhook test endpoint called", {
             "method": request.method,
             "path": request.path,
             "content_length": request.content_length,
             "headers": {k: v for k, v in request.headers.items() if k.lower() not in ['authorization']}
         })
-        
-        # webhookのシグネチャを検証するために生のデータが必要
-        payload = request.data
-        sig_header = request.headers.get('Stripe-Signature')
 
-        if not sig_header:
-            log_error("StripeWebhook", "Missing Stripe-Signature header")
-            raise ValidationError("Stripe-Signatureヘッダーがありません")
+        # リクエストボディを取得して記録
+        if request.method == 'POST':
+            try:
+                payload = request.data
+                if payload:
+                    payload_text = payload.decode('utf-8')[:500]  # 長すぎる場合は切り詰める
+                    log_info("WebhookTest", "Request payload", {"payload_preview": payload_text[:100] + "..."})
+                    
+                    # JSON解析を試みる
+                    try:
+                        payload_json = json.loads(payload)
+                        event_type = payload_json.get('type', 'unknown')
+                        event_id = payload_json.get('id', 'unknown')
+                        log_info("WebhookTest", "Parsed JSON payload", {
+                            "event_type": event_type,
+                            "event_id": event_id
+                        })
+                    except json.JSONDecodeError:
+                        log_warning("WebhookTest", "Could not parse payload as JSON")
+            except Exception as e:
+                log_error("WebhookTest", f"Error reading payload: {str(e)}")
 
-        # webhookイベントを処理
-        log_info("StripeWebhook", "Processing webhook event", {"payload_size": len(payload) if payload else 0})
-        result = handle_webhook_event(payload, sig_header)
-        
         # 成功レスポンスを返す
-        log_info("StripeWebhook", "Webhook processed successfully", {"result": result})
-        return jsonify({"received": True, "result": result}), 200
+        return jsonify({
+            "status": "success",
+            "message": "Webhook test endpoint received request",
+            "method": request.method,
+            "timestamp": str(int(time.time()))
+        }), 200, headers
 
-    except APIError as e:
-        log_error("WebhookError", f"API error: {e.message}", {"details": e.details})
-        return jsonify(e.to_dict()), e.status_code
     except Exception as e:
-        log_error("WebhookError", f"Unhandled error: {str(e)}")
-        return jsonify({"error": {"message": "内部サーバーエラーが発生しました"}}), 500
+        log_error("WebhookTestError", f"Unhandled error: {str(e)}")
+        return jsonify({"error": str(e)}), 500, {'Access-Control-Allow-Origin': '*'}

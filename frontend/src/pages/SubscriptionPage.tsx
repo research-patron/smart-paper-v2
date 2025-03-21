@@ -67,7 +67,7 @@ const SubscriptionPage = () => {
   // 新しく追加: 支払い成功後のリトライ処理のための状態
   const [retryCount, setRetryCount] = useState(0);
   const [retryProgress, setRetryProgress] = useState(false);
-  const MAX_RETRIES = 10; // 最大リトライ回数
+  const MAX_RETRIES = 0; // 最大リトライ回数
   const RETRY_DELAY = 2000; // リトライ間隔（ms）
   
   // データ更新タイマーと更新要求フラグ

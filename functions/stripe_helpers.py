@@ -44,35 +44,79 @@ SUBSCRIPTION_PLANS = {
 _stripe_initialized = False
 _db = None
 
-# Secret Managerからストライプの秘密鍵を取得する関数
-def get_stripe_secret_key():
-    """Secret ManagerからStripeの秘密鍵を取得"""
+# Secret Managerからシークレットを取得する汎用関数
+def get_secret(secret_name, fallback_env_var=None):
+    """Secret Managerから最新のシークレットを取得する汎用関数"""
     try:
         project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
+        if not project_id:
+            log_error("SecretManagerError", "GOOGLE_CLOUD_PROJECT environment variable not set")
+            if fallback_env_var and os.environ.get(fallback_env_var):
+                return os.environ.get(fallback_env_var)
+            return ""
+            
         client = secretmanager.SecretManagerServiceClient()
-        name = f"projects/{project_id}/secrets/STRIPE_SECRET_KEY/versions/latest"
-        response = client.access_secret_version(request={"name": name})
-        secret_key = response.payload.data.decode("UTF-8")
-        return secret_key.strip()
+        name = f"projects/{project_id}/secrets/{secret_name}/versions/latest"
+        
+        log_info("SecretManager", f"Fetching latest version of secret: {secret_name}")
+        
+        try:
+            response = client.access_secret_version(request={"name": name})
+            secret_value = response.payload.data.decode("UTF-8").strip()
+            
+            # シークレットの長さをログに記録（値自体は記録しない）
+            log_info("SecretManager", f"Successfully retrieved secret", {
+                "secret_name": secret_name,
+                "length": len(secret_value),
+                "version": "latest"
+            })
+            
+            # 取得したシークレットが空でないことを確認
+            if not secret_value:
+                log_warning("SecretManager", f"Retrieved secret is empty: {secret_name}")
+                if fallback_env_var and os.environ.get(fallback_env_var):
+                    log_info("SecretManager", f"Using fallback from environment variable: {fallback_env_var}")
+                    return os.environ.get(fallback_env_var)
+            
+            return secret_value
+            
+        except Exception as e:
+            log_error("SecretManagerError", f"Error accessing secret: {str(e)}", 
+                     {"secret_name": secret_name, "error_type": type(e).__name__})
+            
+            # フォールバック: 環境変数から取得
+            if fallback_env_var and os.environ.get(fallback_env_var):
+                log_info("SecretManager", f"Using fallback from environment variable: {fallback_env_var}")
+                return os.environ.get(fallback_env_var)
+            
+            return ""
     except Exception as e:
-        log_error("StripeSecretError", f"Failed to get Stripe secret key: {str(e)}")
-        # 開発環境ではフォールバックとして環境変数から取得
-        return os.environ.get("STRIPE_SECRET_KEY", "")
+        log_error("SecretManagerError", f"Unexpected error: {str(e)}", 
+                 {"secret_name": secret_name, "error_type": type(e).__name__})
+        
+        # フォールバック: 環境変数から取得
+        if fallback_env_var and os.environ.get(fallback_env_var):
+            log_info("SecretManager", f"Using fallback from environment variable: {fallback_env_var}")
+            return os.environ.get(fallback_env_var)
+        
+        return ""
+
+# Secret ManagerからStripeの秘密鍵を取得する関数
+def get_stripe_secret_key():
+    """Secret ManagerからStripeの秘密鍵を取得（最新バージョン）"""
+    return get_secret("STRIPE_SECRET_KEY", "STRIPE_SECRET_KEY")
 
 # Secret ManagerからStripeのWebhook Secretを取得する関数
 def get_stripe_webhook_secret():
-    """Secret ManagerからStripeのWebhook Secretを取得"""
-    try:
-        project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
-        client = secretmanager.SecretManagerServiceClient()
-        name = f"projects/{project_id}/secrets/STRIPE_WEBHOOK_SECRET/versions/latest"
-        response = client.access_secret_version(request={"name": name})
-        webhook_secret = response.payload.data.decode("UTF-8")
-        return webhook_secret.strip()
-    except Exception as e:
-        log_error("StripeWebhookSecretError", f"Failed to get Stripe webhook secret: {str(e)}")
-        # 開発環境ではフォールバックとして環境変数から取得
-        return os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+    """Secret ManagerからStripeのWebhook Secretを取得（最新バージョン）"""
+    # 環境変数から直接取得を試みる（デバッグ用）
+    if "STRIPE_WEBHOOK_SECRET" in os.environ and os.environ.get("STRIPE_WEBHOOK_SECRET"):
+        secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
+        log_info("StripeWebhook", "Using webhook secret from environment variable", {"length": len(secret)})
+        return secret
+        
+    # Secret Managerから最新バージョンを取得
+    return get_secret("STRIPE_WEBHOOK_SECRET", "STRIPE_WEBHOOK_SECRET")
 
 # Stripeの初期化
 def initialize_stripe():
@@ -416,6 +460,13 @@ def handle_webhook_event(payload, sig_header):
         log_error("WebhookSecretError", "Stripe webhook secret is not provided")
         raise APIError("Stripe webhook secret is not configured", 500)
     
+    # ログを追加
+    log_info("StripeWebhook", "Processing webhook with signature", {
+        "signature_length": len(sig_header) if sig_header else 0,
+        "webhook_secret_length": len(webhook_secret) if webhook_secret else 0,
+        "payload_size": len(payload) if payload else 0
+    })
+    
     try:
         # イベントを検証
         event = stripe.Webhook.construct_event(
@@ -473,7 +524,10 @@ def handle_webhook_event(payload, sig_header):
         return result
     
     except stripe.error.SignatureVerificationError as e:
-        log_error("WebhookSignatureError", f"Invalid signature: {str(e)}")
+        log_error("WebhookSignatureError", f"Invalid signature: {str(e)}", {
+            "signature_length": len(sig_header) if sig_header else 0,
+            "webhook_secret_length": len(webhook_secret) if webhook_secret else 0
+        })
         raise APIError("Invalid webhook signature", 400)
     except json.JSONDecodeError as e:
         log_error("WebhookJsonError", f"Invalid payload: {str(e)}")
