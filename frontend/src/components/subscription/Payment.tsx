@@ -30,6 +30,14 @@ const Payment: React.FC<PaymentProps> = ({ planId, onPaymentComplete, onCancel }
     [isAnnualPlan]
   );
   
+  // 支払いボタンのテキストをより明確な表現に変更
+  const buttonText = useMemo(() => {
+    if (loading) return '処理中...';
+    return isAnnualPlan 
+      ? `年額プランに登録する (¥${planAmount})` 
+      : `月額プランに登録する (¥${planAmount})`;
+  }, [loading, isAnnualPlan, planAmount]);
+  
   const handleCheckout = async () => {
     if (loading) return;
     
@@ -118,13 +126,13 @@ const Payment: React.FC<PaymentProps> = ({ planId, onPaymentComplete, onCancel }
           startIcon={loading ? <CircularProgress size={16} /> : <CreditCardIcon />}
           sx={{ flex: 1 }}
         >
-          {loading ? '処理中...' : `¥${planAmount}を支払う`}
+          {buttonText}
         </Button>
       </Box>
       
       <Box sx={{ mt: 3, textAlign: 'center' }}>
         <Typography variant="caption" color="text.secondary">
-          「¥{planAmount}を支払う」ボタンをクリックすることで、私たちの
+          「{buttonText}」ボタンをクリックすることで、私たちの
           <Button variant="text" size="small" sx={{ p: 0, minWidth: 'auto', textTransform: 'none' }}>
             利用規約
           </Button>
