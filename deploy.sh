@@ -98,8 +98,74 @@ if [ ! -f "functions/stripe_functions.py" ]; then
   exit 1
 fi
 
-# Cloud Functions のデプロイ
+# ==========================================
+# Secret Managerのシークレット取得と設定
+# ==========================================
+echo -e "\n${BLUE}Secret Managerからシークレットキーを取得中...${NC}"
+
+# Stripe Webhook Secret Keyを取得
+WEBHOOK_SECRET=$(gcloud secrets versions access latest --secret=STRIPE_WEBHOOK_SECRET --project=${PROJECT_ID} 2>/dev/null || echo "")
+
+if [ -z "$WEBHOOK_SECRET" ]; then
+  echo -e "${YELLOW}Secret Manager に STRIPE_WEBHOOK_SECRET が見つかりません${NC}"
+  
+  # 手動入力を求める
+  echo -e "${YELLOW}Stripeダッシュボードから新しいシークレットキーを取得し、入力してください${NC}"
+  echo -e "${YELLOW}ウェブフック > エンドポイント > シークレットキーの表示${NC}"
+  read -s -p "Webhook Secret Key: " WEBHOOK_SECRET
+  
+  if [ -z "$WEBHOOK_SECRET" ]; then
+    echo -e "\n${RED}キーが入力されていません。${NC}"
+    echo -e "${YELLOW}警告: Webhook関数はStripe Webhookを処理できない可能性があります${NC}"
+  else
+    echo -e "\n${GREEN}シークレットキーを受け取りました。Secret Manager に保存します...${NC}"
+    
+    # 新しいシークレットをSecret Managerに保存
+    echo -n "$WEBHOOK_SECRET" | gcloud secrets versions add STRIPE_WEBHOOK_SECRET --data-file=- --project=${PROJECT_ID}
+    
+    if [ $? -ne 0 ]; then
+      echo -e "${RED}シークレットの保存に失敗しました。権限を確認してください。${NC}"
+      WEBHOOK_SECRET=""
+    else
+      echo -e "${GREEN}シークレットを Secret Manager に保存しました。${NC}"
+    fi
+  fi
+else
+  echo -e "${GREEN}Webhook Secret Key を Secret Manager から取得しました (${#WEBHOOK_SECRET} 文字)${NC}"
+fi
+
+# Stripeの秘密鍵を取得
+STRIPE_SECRET_KEY=$(gcloud secrets versions access latest --secret=STRIPE_SECRET_KEY --project=${PROJECT_ID} 2>/dev/null || echo "")
+
+if [ -z "$STRIPE_SECRET_KEY" ]; then
+  echo -e "${YELLOW}Secret Manager に STRIPE_SECRET_KEY が見つかりません${NC}"
+  read -s -p "Stripe Secret Key (sk_...): " STRIPE_SECRET_KEY
+  
+  if [ -z "$STRIPE_SECRET_KEY" ]; then
+    echo -e "\n${RED}キーが入力されていません。${NC}"
+    echo -e "${YELLOW}警告: Stripe決済機能は動作しません${NC}"
+  else
+    echo -e "\n${GREEN}Stripe Secret Key を受け取りました。Secret Manager に保存します...${NC}"
+    echo -n "$STRIPE_SECRET_KEY" | gcloud secrets versions add STRIPE_SECRET_KEY --data-file=- --project=${PROJECT_ID}
+    
+    if [ $? -ne 0 ]; then
+      echo -e "${RED}シークレットの保存に失敗しました。権限を確認してください。${NC}"
+      STRIPE_SECRET_KEY=""
+    else
+      echo -e "${GREEN}シークレットを Secret Manager に保存しました。${NC}"
+    fi
+  fi
+else
+  echo -e "${GREEN}Stripe Secret Key を Secret Manager から取得しました (${#STRIPE_SECRET_KEY} 文字)${NC}"
+fi
+
+# ==========================================
+# Cloud Functionsのデプロイ
+# ==========================================
 echo -e "\n${BLUE}Cloud Functions をデプロイしています...${NC}"
+
+# PDF処理関連の関数
+echo -e "\n${BLUE}process_pdf 関数をデプロイしています...${NC}"
 gcloud functions deploy process_pdf \
   --region=${REGION} \
   --runtime=python310 \
@@ -135,7 +201,7 @@ gcloud functions deploy get_signed_url \
   --allow-unauthenticated \
   --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
 
-# Stripe関連のCloud Functions をデプロイ
+# Stripe関連のCloud Functions
 echo -e "\n${BLUE}Stripe関連のCloud Functionsをデプロイしています...${NC}"
 
 echo -e "\n${BLUE}create_stripe_checkout 関数をデプロイしています...${NC}"
@@ -145,10 +211,10 @@ gcloud functions deploy create_stripe_checkout \
   --trigger-http \
   --source=./functions \
   --entry-point=create_stripe_checkout \
-  --memory=256MB \
+  --memory=512MB \
   --timeout=60s \
   --allow-unauthenticated \
-  --set-env-vars=STRIPE_SUCCESS_URL=https://${PROJECT_ID}.web.app/subscription?success=true,STRIPE_CANCEL_URL=https://${PROJECT_ID}.web.app/subscription?canceled=true,GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
+  --set-env-vars=STRIPE_SUCCESS_URL=https://${PROJECT_ID}.web.app/subscription?success=true,STRIPE_CANCEL_URL=https://${PROJECT_ID}.web.app/subscription?canceled=true,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
 
 echo -e "\n${BLUE}cancel_stripe_subscription 関数をデプロイしています...${NC}"
 gcloud functions deploy cancel_stripe_subscription \
@@ -157,10 +223,10 @@ gcloud functions deploy cancel_stripe_subscription \
   --trigger-http \
   --source=./functions \
   --entry-point=cancel_stripe_subscription \
-  --memory=256MB \
+  --memory=512MB \
   --timeout=60s \
   --allow-unauthenticated \
-  --set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
+  --set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
 
 echo -e "\n${BLUE}update_payment_method 関数をデプロイしています...${NC}"
 gcloud functions deploy update_payment_method \
@@ -169,11 +235,12 @@ gcloud functions deploy update_payment_method \
   --trigger-http \
   --source=./functions \
   --entry-point=update_payment_method \
-  --memory=256MB \
+  --memory=512MB \
   --timeout=60s \
   --allow-unauthenticated \
-  --set-env-vars=STRIPE_RETURN_URL=https://${PROJECT_ID}.web.app/subscription,GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
+  --set-env-vars=STRIPE_RETURN_URL=https://${PROJECT_ID}.web.app/subscription,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
 
+# Stripe Webhook関数
 echo -e "\n${BLUE}stripe_webhook 関数をデプロイしています...${NC}"
 gcloud functions deploy stripe_webhook \
   --region=${REGION} \
@@ -181,10 +248,23 @@ gcloud functions deploy stripe_webhook \
   --trigger-http \
   --source=./functions \
   --entry-point=stripe_webhook \
+  --memory=512MB \
+  --timeout=60s \
+  --allow-unauthenticated \
+  --set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},STRIPE_WEBHOOK_SECRET=${WEBHOOK_SECRET},STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+
+# テスト用Webhook関数
+echo -e "\n${BLUE}stripe_webhook_test 関数をデプロイしています...${NC}"
+gcloud functions deploy stripe_webhook_test \
+  --region=${REGION} \
+  --runtime=python310 \
+  --trigger-http \
+  --source=./functions \
+  --entry-point=stripe_webhook_test \
   --memory=256MB \
   --timeout=60s \
   --allow-unauthenticated \
-  --set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
+  --set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},STRIPE_WEBHOOK_SECRET=${WEBHOOK_SECRET},STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
 
 echo -e "\n${GREEN}デプロイが完了しました！${NC}"
 echo -e "以下のURLでCloud Functionsにアクセスできます:"
@@ -195,6 +275,7 @@ echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/create_stri
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/cancel_stripe_subscription${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/update_payment_method${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/stripe_webhook${NC}"
+echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/stripe_webhook_test${NC}"
 
 # Firestoreコレクションの存在確認とインデックス作成
 echo -e "\n${BLUE}Firestoreインデックスの設定...${NC}"
@@ -221,6 +302,19 @@ echo "{
     }
   ]
 }" > firestore.indexes.json
+
+# Stripe Webhook設定の確認方法を表示
+echo -e "\n${BLUE}Stripe Webhook 設定方法:${NC}"
+echo -e "1. Stripeダッシュボードで以下のURLを登録:"
+echo -e "   ${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/stripe_webhook${NC}"
+echo -e "2. イベントを追加 (以下のイベントが必要):"
+echo -e "   - checkout.session.completed"
+echo -e "   - customer.subscription.created"
+echo -e "   - customer.subscription.updated"
+echo -e "   - customer.subscription.deleted"
+echo -e "   - invoice.payment_succeeded"
+echo -e "   - invoice.payment_failed"
+echo -e "3. シークレットを確認 (既に Secret Manager に保存済み)"
 
 echo -e "\n${GREEN}設定が完了しました！${NC}"
 echo -e "${YELLOW}Firestoreの'process_time'コレクションに処理時間データが記録されます${NC}"
