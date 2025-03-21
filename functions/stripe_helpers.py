@@ -97,6 +97,56 @@ def get_db():
         _db = firestore.client()
     return _db
 
+# ユーザーデータを更新する共通関数
+def update_user_subscription_status(user_id, subscription_data):
+    """
+    ユーザーのサブスクリプション状態を更新する共通関数
+    
+    Args:
+        user_id: ユーザーID
+        subscription_data: 更新するサブスクリプションデータの辞書
+    
+    Returns:
+        bool: 更新が成功したかどうか
+    """
+    try:
+        db = get_db()
+        user_ref = db.collection('users').document(user_id)
+        
+        # 最新のユーザーデータを取得して確認
+        user_doc = user_ref.get()
+        if not user_doc.exists:
+            log_warning("UserUpdateWarning", f"User document does not exist: {user_id}")
+            return False
+        
+        # ユーザーデータを取得
+        user_data = user_doc.to_dict()
+        
+        # 更新データを加工（Noneの値は削除）
+        update_data = {k: v for k, v in subscription_data.items() if v is not None}
+        
+        # サブスクリプションステータスを明示的に設定
+        if 'subscription_status' not in update_data and 'stripe_subscription_id' in update_data:
+            update_data['subscription_status'] = 'paid'
+        
+        # 常に更新タイムスタンプを設定
+        update_data['updated_at'] = firestore.SERVER_TIMESTAMP
+        
+        # ログを追加
+        log_info("UserSubscriptionUpdate", 
+                f"Updating user {user_id} subscription data", 
+                {"current_status": user_data.get('subscription_status'),
+                 "new_status": update_data.get('subscription_status', "未変更"), 
+                 "update_data": update_data})
+        
+        # Firestoreを更新
+        user_ref.update(update_data)
+        return True
+        
+    except Exception as e:
+        log_error("UserUpdateError", f"Failed to update user subscription: {str(e)}")
+        return False
+
 # サブスクリプションセッションの作成
 def create_checkout_session(user_id, plan_id):
     """
@@ -461,16 +511,8 @@ def handle_checkout_session_completed(session):
                 'message': 'Invalid plan ID'
             }
         
-        # サブスクリプション情報をFirestoreに保存
-        db = get_db()
-        user_ref = db.collection('users').document(user_id)
-        
-        # サブスクリプション終了日を計算
-        duration_days = plan.get('duration_days', 30)
-        now = datetime.now()
-        end_date = now + timedelta(days=duration_days)
-        
         # 最新のサブスクリプション情報をStripeから取得
+        end_date = None
         try:
             sub = stripe.Subscription.retrieve(subscription_id)
             # 実際の期間終了日が取得できれば、それを使用
@@ -480,6 +522,9 @@ def handle_checkout_session_completed(session):
         except Exception as stripe_err:
             log_warning("SubscriptionWarning", f"Could not retrieve subscription from Stripe: {str(stripe_err)}")
             # エラー発生時はデフォルトの計算値を使用
+            duration_days = plan.get('duration_days', 30)
+            now = datetime.now()
+            end_date = now + timedelta(days=duration_days)
             log_info("SubscriptionEndDate", f"Using calculated subscription end date: {end_date}")
         
         # ユーザー情報を更新
@@ -487,22 +532,33 @@ def handle_checkout_session_completed(session):
             'subscription_status': 'paid',
             'stripe_subscription_id': subscription_id,
             'subscription_plan': plan_id,
-            'subscription_start_date': now,
+            'subscription_start_date': datetime.now(),
             'subscription_end_date': end_date,
             'subscription_cancel_at_period_end': False,
-            'updated_at': firestore.SERVER_TIMESTAMP
         }
         
-        log_info("UserUpdate", f"Updating user with subscription data", {"user_id": user_id, "update_data": update_data})
+        # ユーザーデータを更新
+        success = update_user_subscription_status(user_id, update_data)
         
-        # Firestoreを更新
-        user_ref.update(update_data)
+        # 成功したかどうかをログに記録
+        log_info("UserUpdate", f"User subscription update {'succeeded' if success else 'failed'}", 
+                {"user_id": user_id, "update_data": update_data})
+        
+        # 2回目のトライを試みる（念のため）
+        if not success:
+            log_info("UserUpdate", "Retrying user subscription update...")
+            # 少し待機してから再試行
+            import time
+            time.sleep(2)
+            success = update_user_subscription_status(user_id, update_data)
+            log_info("UserUpdate", f"Second attempt {'succeeded' if success else 'failed'}")
         
         return {
             'status': 'success',
             'user_id': user_id,
             'plan_id': plan_id,
-            'subscription_id': subscription_id
+            'subscription_id': subscription_id,
+            'update_success': success
         }
     except Exception as e:
         log_error("CheckoutCompletedError", f"Error processing checkout completed: {str(e)}")
@@ -556,29 +612,40 @@ def handle_subscription_created(subscription):
         current_period_start = subscription.get('current_period_start')
         current_period_end = subscription.get('current_period_end')
         
+        # ユーザー情報を更新
+        update_data = {
+            'subscription_status': 'paid' if status == 'active' else 'pending',
+            'stripe_subscription_id': subscription.get('id'),
+        }
+        
         if current_period_start and current_period_end:
             start_date = datetime.fromtimestamp(current_period_start)
             end_date = datetime.fromtimestamp(current_period_end)
             
-            # ユーザー情報を更新
-            update_data = {
-                'subscription_status': 'paid' if status == 'active' else 'pending',
-                'stripe_subscription_id': subscription.get('id'),
-                'subscription_start_date': start_date,
-                'subscription_end_date': end_date,
-                'updated_at': firestore.SERVER_TIMESTAMP
-            }
-            
-            log_info("UserUpdate", f"Updating user with subscription created data", 
-                    {"user_id": user_id, "update_data": update_data})
-            
-            # Firestoreを更新
-            user_ref.update(update_data)
+            update_data['subscription_start_date'] = start_date
+            update_data['subscription_end_date'] = end_date
+        
+        # ユーザーデータを更新
+        success = update_user_subscription_status(user_id, update_data)
+        
+        # 成功したかどうかをログに記録
+        log_info("UserUpdate", f"User subscription creation update {'succeeded' if success else 'failed'}", 
+                {"user_id": user_id, "update_data": update_data})
+        
+        # 2回目のトライを試みる（念のため）
+        if not success:
+            log_info("UserUpdate", "Retrying user subscription update for creation...")
+            # 少し待機してから再試行
+            import time
+            time.sleep(2)
+            success = update_user_subscription_status(user_id, update_data)
+            log_info("UserUpdate", f"Second attempt for creation {'succeeded' if success else 'failed'}")
         
         return {
             'status': 'success',
             'user_id': user_id,
-            'subscription_status': status
+            'subscription_status': status,
+            'update_success': success
         }
     except Exception as e:
         log_error("SubscriptionCreatedError", f"Error processing subscription created: {str(e)}")
@@ -636,7 +703,6 @@ def handle_subscription_updated(subscription):
         
         update_data = {
             'subscription_status': 'paid' if status == 'active' else status,
-            'updated_at': firestore.SERVER_TIMESTAMP
         }
         
         if current_period_end:
@@ -646,17 +712,28 @@ def handle_subscription_updated(subscription):
         # 期間終了時の解約フラグを更新
         update_data['subscription_cancel_at_period_end'] = cancel_at_period_end
         
-        log_info("UserUpdate", f"Updating user with subscription updated data", 
+        # ユーザーデータを更新
+        success = update_user_subscription_status(user_id, update_data)
+        
+        # 成功したかどうかをログに記録
+        log_info("UserUpdate", f"User subscription update {'succeeded' if success else 'failed'}", 
                 {"user_id": user_id, "update_data": update_data})
         
-        # ユーザー情報を更新
-        user_ref.update(update_data)
+        # 2回目のトライを試みる（念のため）
+        if not success:
+            log_info("UserUpdate", "Retrying user subscription update...")
+            # 少し待機してから再試行
+            import time
+            time.sleep(2)
+            success = update_user_subscription_status(user_id, update_data)
+            log_info("UserUpdate", f"Second attempt {'succeeded' if success else 'failed'}")
         
         return {
             'status': 'success',
             'user_id': user_id,
             'subscription_status': status,
-            'cancel_at_period_end': cancel_at_period_end
+            'cancel_at_period_end': cancel_at_period_end,
+            'update_success': success
         }
     except Exception as e:
         log_error("SubscriptionUpdatedError", f"Error processing subscription updated: {str(e)}")
@@ -711,19 +788,29 @@ def handle_subscription_deleted(subscription):
             'stripe_subscription_id': None,
             'subscription_plan': None,
             'subscription_cancel_at_period_end': False,
-            'updated_at': firestore.SERVER_TIMESTAMP
         }
         
-        log_info("UserUpdate", f"Updating user with subscription deleted data", 
+        # ユーザーデータを更新
+        success = update_user_subscription_status(user_id, update_data)
+        
+        # 成功したかどうかをログに記録
+        log_info("UserUpdate", f"User subscription deletion update {'succeeded' if success else 'failed'}", 
                 {"user_id": user_id, "update_data": update_data})
         
-        # Firestoreを更新
-        user_ref.update(update_data)
+        # 2回目のトライを試みる（念のため）
+        if not success:
+            log_info("UserUpdate", "Retrying user subscription update for deletion...")
+            # 少し待機してから再試行
+            import time
+            time.sleep(2)
+            success = update_user_subscription_status(user_id, update_data)
+            log_info("UserUpdate", f"Second attempt for deletion {'succeeded' if success else 'failed'}")
         
         return {
             'status': 'success',
             'user_id': user_id,
-            'subscription_status': 'free'
+            'subscription_status': 'free',
+            'update_success': success
         }
     except Exception as e:
         log_error("SubscriptionDeletedError", f"Error processing subscription deleted: {str(e)}")
@@ -772,10 +859,9 @@ def handle_payment_succeeded(invoice):
         user_ref = user_list[0].reference
         user_id = user_ref.id
         
-        # ユーザーの支払いステータスを更新 (必ず有料会員にする)
+        # ユーザーデータを明示的に'paid'に設定
         update_data = {
             'subscription_status': 'paid',  # 支払い成功したら必ず paid にする
-            'updated_at': firestore.SERVER_TIMESTAMP
         }
         
         # 最新のサブスクリプション情報をStripeから取得
@@ -789,11 +875,21 @@ def handle_payment_succeeded(invoice):
         except Exception as stripe_err:
             log_warning("SubscriptionWarning", f"Could not retrieve subscription from Stripe: {str(stripe_err)}")
         
-        log_info("UserUpdate", f"Updating user after payment succeeded", 
+        # ユーザーデータを更新
+        success = update_user_subscription_status(user_id, update_data)
+        
+        # 成功したかどうかをログに記録
+        log_info("UserUpdate", f"User payment succeeded update {'succeeded' if success else 'failed'}", 
                 {"user_id": user_id, "update_data": update_data})
         
-        # Firestoreを更新
-        user_ref.update(update_data)
+        # 2回目のトライを試みる（念のため）
+        if not success:
+            log_info("UserUpdate", "Retrying user subscription update after payment...")
+            # 少し待機してから再試行
+            import time
+            time.sleep(2)
+            success = update_user_subscription_status(user_id, update_data)
+            log_info("UserUpdate", f"Second attempt after payment {'succeeded' if success else 'failed'}")
         
         # 支払い履歴コレクションに追加
         payment_ref = db.collection('users').document(user_id).collection('payments').document()
@@ -809,7 +905,8 @@ def handle_payment_succeeded(invoice):
         return {
             'status': 'success',
             'user_id': user_id,
-            'invoice_id': invoice.get('id')
+            'invoice_id': invoice.get('id'),
+            'update_success': success
         }
     except Exception as e:
         log_error("PaymentSucceededError", f"Error processing payment succeeded: {str(e)}")
@@ -863,12 +960,23 @@ def handle_payment_failed(invoice):
         
         # 支払い失敗が3回以上の場合はステータスを変更
         if attempt_count >= 3:
-            user_ref.update({
+            # ユーザーデータの更新
+            update_data = {
                 'subscription_status': 'payment_failed',
-                'updated_at': firestore.SERVER_TIMESTAMP
-            })
+            }
+            success = update_user_subscription_status(user_id, update_data)
+            
             log_info("UserUpdate", "Updated user status to payment_failed due to multiple failed attempts", 
-                    {"user_id": user_id, "attempt_count": attempt_count})
+                    {"user_id": user_id, "attempt_count": attempt_count, "success": success})
+            
+            # 2回目のトライを試みる（念のため）
+            if not success:
+                log_info("UserUpdate", "Retrying user subscription update for payment failure...")
+                # 少し待機してから再試行
+                import time
+                time.sleep(2)
+                success = update_user_subscription_status(user_id, update_data)
+                log_info("UserUpdate", f"Second attempt for payment failure {'succeeded' if success else 'failed'}")
         
         # 支払い履歴コレクションに追加
         payment_ref = db.collection('users').document(user_id).collection('payments').document()

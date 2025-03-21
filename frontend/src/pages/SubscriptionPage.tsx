@@ -53,7 +53,7 @@ const Transition = React.forwardRef(function Transition(
 const SubscriptionPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, userData, updateUserData } = useAuthStore();
+  const { user, userData, updateUserData, forceRefreshUserData } = useAuthStore();
   const [activeStep, setActiveStep] = useState(0);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
@@ -61,6 +61,7 @@ const SubscriptionPage = () => {
   const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshingUserData, setRefreshingUserData] = useState(false);
   
   // URLパラメータからステータスを取得
   const urlParams = new URLSearchParams(location.search);
@@ -93,6 +94,22 @@ const SubscriptionPage = () => {
   
   const steps = ['プラン選択', '支払い情報', '完了'];
   
+  // 強制的にユーザーデータを更新する関数
+  const refreshUserData = async () => {
+    if (!user) return;
+    
+    setRefreshingUserData(true);
+    try {
+      console.log('Forcing refresh of user data...');
+      await forceRefreshUserData();
+      console.log('User data refreshed successfully.');
+    } catch (err) {
+      console.error('Error refreshing user data:', err);
+    } finally {
+      setRefreshingUserData(false);
+    }
+  };
+  
   // URLパラメータに基づいて支払い完了ステップを設定
   useEffect(() => {
     if (isSuccess) {
@@ -105,9 +122,34 @@ const SubscriptionPage = () => {
         window.history.replaceState({}, document.title, newUrl);
       }
       
-      // ユーザーデータを更新
+      // ユーザーデータを更新（3回試行を行う - より確実にデータが反映されるように）
       if (user) {
-        updateUserData();
+        const refreshUserDataMultipleTimes = async () => {
+          setRefreshingUserData(true);
+          
+          try {
+            console.log('First attempt to refresh user data...');
+            await forceRefreshUserData();
+            
+            // 少し待ってから2回目の更新を試行
+            setTimeout(async () => {
+              console.log('Second attempt to refresh user data...');
+              await forceRefreshUserData();
+              
+              // さらに少し待ってから3回目の更新を試行
+              setTimeout(async () => {
+                console.log('Third attempt to refresh user data...');
+                await forceRefreshUserData();
+                setRefreshingUserData(false);
+              }, 3000);
+            }, 2000);
+          } catch (err) {
+            console.error('Error refreshing user data:', err);
+            setRefreshingUserData(false);
+          }
+        };
+        
+        refreshUserDataMultipleTimes();
       }
     } else if (isCanceled) {
       setActiveStep(0);
@@ -119,7 +161,14 @@ const SubscriptionPage = () => {
         window.history.replaceState({}, document.title, newUrl);
       }
     }
-  }, [isSuccess, isCanceled, user, updateUserData]);
+  }, [isSuccess, isCanceled, user, forceRefreshUserData]);
+  
+  useEffect(() => {
+    // 初回レンダリング時にユーザーデータを更新
+    if (user) {
+      refreshUserData();
+    }
+  }, [user]);
   
   useEffect(() => {
     // ステップが支払いか完了の場合に未認証ユーザーはログインページにリダイレクト
@@ -181,8 +230,8 @@ const SubscriptionPage = () => {
       setCancelDialogOpen(false);
       
       if (result.canceled) {
-        // ユーザーデータを更新
-        await updateUserData();
+        // ユーザーデータを更新（強制更新を実行）
+        await refreshUserData();
         
         // 完了画面に進む
         setActiveStep(2);
@@ -240,6 +289,18 @@ const SubscriptionPage = () => {
           あなたにぴったりのプランをお選びください
         </Typography>
         
+        {refreshingUserData && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            <AlertTitle>ユーザー情報を更新中...</AlertTitle>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <CircularProgress size={20} sx={{ mr: 1 }} />
+              <Typography variant="body2">
+                最新の会員情報を取得しています。しばらくお待ちください。
+              </Typography>
+            </Box>
+          </Alert>
+        )}
+        
         {error && (
           <Alert severity="error" sx={{ mb: 4 }}>
             <AlertTitle>エラー</AlertTitle>
@@ -261,6 +322,19 @@ const SubscriptionPage = () => {
                 このサブスクリプションは期間終了時に自動更新されず、無料プランに戻ります。
               </Typography>
             )}
+            
+            <Box sx={{ mt: 1 }}>
+              <Button 
+                size="small" 
+                color="primary" 
+                variant="outlined"
+                onClick={refreshUserData}
+                disabled={refreshingUserData}
+                startIcon={refreshingUserData ? <CircularProgress size={16} /> : null}
+              >
+                会員情報を更新
+              </Button>
+            </Box>
           </Alert>
         ) : user ? (
           <Alert severity="info" sx={{ mb: 4 }}>
@@ -268,6 +342,19 @@ const SubscriptionPage = () => {
             <Typography variant="body2">
               現在、無料プランをご利用中です。機能をフル活用するにはプレミアムプランへのアップグレードをご検討ください。
             </Typography>
+            
+            <Box sx={{ mt: 1 }}>
+              <Button 
+                size="small" 
+                color="primary" 
+                variant="outlined"
+                onClick={refreshUserData}
+                disabled={refreshingUserData}
+                startIcon={refreshingUserData ? <CircularProgress size={16} /> : null}
+              >
+                会員情報を更新
+              </Button>
+            </Box>
           </Alert>
         ) : (
           <Alert severity="info" sx={{ mb: 4 }}>
@@ -445,6 +532,27 @@ const SubscriptionPage = () => {
                    : '無料会員プランへアップグレードされました。より多くの機能をご利用いただけます。')
                 : 'おめでとうございます！すべての機能を無制限でご利用いただけるようになりました。'}
             </Typography>
+            
+            {refreshingUserData ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, mb: 2 }}>
+                <CircularProgress size={24} />
+                <Typography variant="body2" sx={{ ml: 2 }}>
+                  会員情報を更新中...
+                </Typography>
+              </Box>
+            ) : (
+              <Box sx={{ mt: 2, mb: 3 }}>
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  size="small"
+                  onClick={refreshUserData}
+                  startIcon={<AutorenewIcon />}
+                >
+                  会員情報を再取得
+                </Button>
+              </Box>
+            )}
             
             <Box sx={{ mt: 3 }}>
               <Button

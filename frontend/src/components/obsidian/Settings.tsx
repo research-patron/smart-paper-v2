@@ -32,7 +32,7 @@ import SaveIcon from '@mui/icons-material/Save';
 import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../../api/firebase';
 import { useAuthStore } from '../../store/authStore';
-import { selectObsidianVault, checkFolderExists, getVault } from '../../api/obsidian';
+import { selectObsidianVault, checkFolderExists, getVault, removeDateFolderFromPath } from '../../api/obsidian';
 
 interface ObsidianSettingsProps {
   onSaved?: () => void;
@@ -119,11 +119,21 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
         if (settingsSnap.exists()) {
           const data = settingsSnap.data();
           
+          // フォルダパスから日付フォーマットを取り除く (追加: 既存設定の修正)
+          let cleanedFolderPath = data.folder_path || '';
+          if (cleanedFolderPath) {
+            cleanedFolderPath = removeDateFolderFromPath(cleanedFolderPath);
+            if (!cleanedFolderPath || cleanedFolderPath.trim() === '') {
+              cleanedFolderPath = 'smart-paper-v2'; // デフォルト値
+            }
+            console.log(`Original folder path: ${data.folder_path}, Cleaned folder path: ${cleanedFolderPath}`);
+          }
+          
           // 初期値として保存
           initialSettings.current = {
             vault_dir: data.vault_dir || '',
             vault_name: data.vault_name || '',
-            folder_path: data.folder_path || '',
+            folder_path: cleanedFolderPath, // 修正: クリーニングされたパスを使用
             file_name_format: data.file_name_format || '{authors}_{title}_{year}',
             file_type: data.file_type || 'md',
             open_after_export: data.open_after_export !== false,
@@ -215,10 +225,20 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
         finalFileNameFormat = customFormat;
       }
       
+      // フォルダパスから日付フォーマットを取り除く (追加: 保存時にも確認)
+      let cleanedFolderPath = folderPath.trim();
+      if (cleanedFolderPath) {
+        cleanedFolderPath = removeDateFolderFromPath(cleanedFolderPath);
+        if (!cleanedFolderPath || cleanedFolderPath.trim() === '') {
+          cleanedFolderPath = 'smart-paper-v2'; // デフォルト値
+        }
+        console.log(`Saving - Original folder path: ${folderPath}, Cleaned folder path: ${cleanedFolderPath}`);
+      }
+      
       const settingsData = {
         vault_dir: vaultDir,
         vault_name: vaultName,
-        folder_path: folderPath,
+        folder_path: cleanedFolderPath, // 修正: クリーニングされたパスを保存
         file_name_format: finalFileNameFormat,
         file_type: fileType,
         open_after_export: openAfterExport,
@@ -247,7 +267,7 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
       initialSettings.current = {
         vault_dir: vaultDir,
         vault_name: vaultName,
-        folder_path: folderPath,
+        folder_path: cleanedFolderPath, // 修正されたパスを初期値にセット
         file_name_format: finalFileNameFormat,
         file_type: fileType,
         open_after_export: openAfterExport,
@@ -255,6 +275,9 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
         create_embed_folder: createEmbedFolder,
         auto_export: autoExport
       };
+      
+      // 表示もクリーンアップされたパスに更新
+      setFolderPath(cleanedFolderPath);
       
       // 保存が成功したら変更フラグを更新
       setSettingsChanged(false);
@@ -308,6 +331,8 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
       path = path.substring(0, path.length - 1);
     }
     
+    // 修正: 日付フォーマットを消去せず、ユーザー入力そのままを保持
+    // (保存時にクリーニングするため)
     setFolderPath(path);
   };
   
@@ -428,6 +453,10 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
                   <br />
                   <Typography variant="caption" component="span">
                     空の場合はVault直下に「smart-paper-v2」フォルダを自動作成します。
+                  </Typography>
+                  <br />
+                  <Typography variant="caption" component="span" color="primary">
+                    各ファイルは自動的に日付フォルダ (例: 2025-03-21) の下に保存されます。
                   </Typography>
                 </>
               }

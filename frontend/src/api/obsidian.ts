@@ -39,7 +39,7 @@ declare global {
 export const DEFAULT_OBSIDIAN_SETTINGS: ObsidianSettings = {
   vault_dir: '',
   vault_name: '',
-  folder_path: 'smart-paper-v2/' + new Date().toISOString().split('T')[0],
+  folder_path: 'smart-paper-v2', // 修正: 日付を含めない
   file_name_format: '{authors}_{title}_{year}',
   file_type: 'md',
   open_after_export: true,
@@ -91,6 +91,31 @@ export const getCachedPdfBlob = (paperId: string): Blob | null => {
 export const extractVaultName = (dirPath: string): string => {
   // パスの最後のディレクトリ名をVault名として使用
   return dirPath.split('/').pop() || dirPath.split('\\').pop() || 'vault';
+};
+
+/**
+ * 文字列が日付形式（YYYY-MM-DD）かどうかをチェック
+ * @param str チェックする文字列
+ * @returns 日付形式ならtrue、そうでなければfalse
+ */
+export const isDateString = (str: string): boolean => {
+  return /^\d{4}-\d{2}-\d{2}$/.test(str);
+};
+
+/**
+ * フォルダパスから日付フォルダを取り除く
+ * @param path フォルダパス
+ * @returns 日付フォルダを取り除いたパス
+ */
+export const removeDateFolderFromPath = (path: string): string => {
+  // パスをセグメントに分割
+  const segments = path.split('/').filter(s => s);
+  
+  // 各セグメントをチェックし、日付形式のセグメントを取り除く
+  const filteredSegments = segments.filter(segment => !isDateString(segment));
+  
+  // フィルタリングされたセグメントを結合して返す
+  return filteredSegments.join('/');
 };
 
 /**
@@ -227,6 +252,31 @@ export const createDirectoryPath = async (rootHandle: FileSystemDirectoryHandle,
   }
   
   return currentHandle;
+};
+
+/**
+ * 単一のディレクトリを作成または取得
+ * @param parentHandle 親ディレクトリハンドル
+ * @param folderName 作成するフォルダ名
+ * @returns 作成または取得したディレクトリハンドル
+ */
+export const createOrGetDirectory = async (
+  parentHandle: FileSystemDirectoryHandle,
+  folderName: string
+): Promise<FileSystemDirectoryHandle> => {
+  try {
+    // フォルダが存在するか確認
+    try {
+      return await parentHandle.getDirectoryHandle(folderName);
+    } catch (e) {
+      // 存在しない場合は作成
+      console.log(`Creating directory: ${folderName}`);
+      return await parentHandle.getDirectoryHandle(folderName, { create: true });
+    }
+  } catch (error) {
+    console.error(`Error creating/getting directory: ${folderName}`, error);
+    throw new Error(`Failed to create/get directory: ${folderName}`);
+  }
 };
 
 /**
@@ -501,128 +551,67 @@ export const exportToObsidian = async (
         error: 'Obsidian vaultが選択されていません。「Obsidianに保存」ボタンをクリックして保存先を設定してください。'
       };
     }
-    
-    // 保存先ディレクトリの決定
-    let baseDir: FileSystemDirectoryHandle;
-    
-    // フォルダパスが設定されている場合、ベースディレクトリを取得または作成
-    if (settings.folder_path && settings.folder_path.trim() !== '') {
-      try {
-        // まずベースパスの各部分を分割して存在確認と作成を行う
-        const pathParts = settings.folder_path.split('/').filter(p => p.trim() !== '');
-        let currentDir = vaultHandle;
-        
-        for (const part of pathParts) {
-          try {
-            // フォルダが存在するか確認
-            currentDir = await currentDir.getDirectoryHandle(part);
-          } catch (e) {
-            // 存在しない場合は作成
-            currentDir = await currentDir.getDirectoryHandle(part, { create: true });
-            console.log(`Created directory: ${part}`);
-          }
-        }
-        
-        baseDir = currentDir;
-        console.log(`Using base directory: ${settings.folder_path}`);
-      } catch (error) {
-        console.error(`Failed to create or access base directory: ${settings.folder_path}`, error);
-        return {
-          exported: false,
-          error: `ベースディレクトリ「${settings.folder_path}」の作成または確認に失敗しました。`
-        };
-      }
-    } else {
-      // フォルダパスが設定されていない場合はデフォルトの smart-paper-v2 を使用
-      try {
-        try {
-          baseDir = await vaultHandle.getDirectoryHandle('smart-paper-v2');
-        } catch (e) {
-          baseDir = await vaultHandle.getDirectoryHandle('smart-paper-v2', { create: true });
-          console.log('Created default smart-paper-v2 directory');
-        }
-      } catch (error) {
-        console.error('Failed to create or access smart-paper-v2 directory:', error);
-        throw new Error('Obsidian vaultにベースディレクトリを作成できませんでした');
-      }
-    }
-    
-    // 日付フォルダを作成（YYYY-MM-DD形式）- ローカル時間に基づく日付を使用
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    console.log('Creating/accessing date folder for:', today);
 
-    let dateFolderHandle: FileSystemDirectoryHandle;
-    try {
-      // すでに存在するか確認
-      try {
-        dateFolderHandle = await baseDir.getDirectoryHandle(today);
-      } catch (e) {
-        // 存在しない場合は作成
-        dateFolderHandle = await baseDir.getDirectoryHandle(today, { create: true });
-        console.log(`Created date directory: ${today}`);
-      }
-    } catch (error) {
-      console.error(`Failed to create or access date folder: ${today}`, error);
-      throw new Error(`日付フォルダ「${today}」を作成できませんでした`);
+    // ===== 大幅修正: フォルダ階層の作成部分 =====
+
+    // 1. ベースフォルダパスの決定 (日付フォルダを含まないパス)
+    let baseFolderPath = settings.folder_path || 'smart-paper-v2';
+    
+    // 2. 日付フォルダの除去 (既に含まれている場合)
+    baseFolderPath = removeDateFolderFromPath(baseFolderPath);
+    if (!baseFolderPath) baseFolderPath = 'smart-paper-v2';
+    
+    console.log(`Using cleaned base folder path: ${baseFolderPath}`);
+    
+    // 3. 一つずつフォルダを作成/取得
+    const folderSegments = baseFolderPath.split('/').filter(segment => segment.trim() !== '');
+    
+    // まずベースフォルダを作成
+    let currentDir = vaultHandle;
+    for (const segment of folderSegments) {
+      currentDir = await createOrGetDirectory(currentDir, segment);
     }
     
-    // 添付ファイルフォルダの作成（PDFを埋め込む場合）
-    let attachmentsHandle: FileSystemDirectoryHandle | null = null;
+    // 4. 現在の日付フォルダを作成/取得
+    const now = new Date();
+    const dateFolder = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     
-    // 「原文PDFも埋め込む」が有効な場合のみPDF関連処理を実行
+    console.log(`Creating/getting date folder: ${dateFolder}`);
+    const dateFolderHandle = await createOrGetDirectory(currentDir, dateFolder);
+    
+    // 5. 添付ファイルフォルダの処理 (必要な場合)
+    let attachmentsHandle: FileSystemDirectoryHandle | null = null;
     let pdfFileName = '';
+    
     if (settings.include_pdf) {
-      // PDFを保存する添付ファイルフォルダを作成
       try {
-        // すでに存在するか確認
-        try {
-          attachmentsHandle = await dateFolderHandle.getDirectoryHandle('添付ファイル');
-        } catch (e) {
-          // 存在しない場合は作成
-          attachmentsHandle = await dateFolderHandle.getDirectoryHandle('添付ファイル', { create: true });
-          console.log('Created attachments directory');
+        // 添付ファイルフォルダの作成/取得
+        attachmentsHandle = await createOrGetDirectory(dateFolderHandle, '添付ファイル');
+        
+        // PDFファイル名の生成
+        pdfFileName = formatPdfFileName(paper);
+        
+        // PDFデータの取得とファイル保存
+        let pdfBlob: Blob | null = localPdfBlob || null;
+        if (!pdfBlob && paper.id) {
+          pdfBlob = getCachedPdfBlob(paper.id);
         }
-      } catch (error) {
-        console.error('Failed to create or access attachments folder:', error);
-        // 添付ファイルフォルダの作成に失敗してもMarkdownの保存は続行
-        // ただしPDFの保存はスキップ
-      }
-      
-      // PDFファイル名をメタデータを使用して「著者名(刊行年)_論文タイトル.pdf」形式で生成
-      pdfFileName = formatPdfFileName(paper);
-      
-      // PDF Blobを取得
-      let pdfBlob: Blob | null = null;
-      
-      // 1. 引数で渡されたBlobを優先使用
-      if (localPdfBlob) {
-        pdfBlob = localPdfBlob;
-      } 
-      // 2. キャッシュからBlobを取得
-      else if (paper.id) {
-        pdfBlob = getCachedPdfBlob(paper.id);
-      }
-      
-      // PDFが存在する場合、添付ファイルフォルダに保存
-      if (pdfBlob && attachmentsHandle) {
-        try {
+        
+        if (pdfBlob && attachmentsHandle) {
           await savePdfBlobToDirectory(pdfBlob, attachmentsHandle, pdfFileName);
           console.log(`PDFを添付ファイルフォルダに保存しました: ${pdfFileName}`);
-        } catch (pdfError) {
-          console.error('PDF保存エラー:', pdfError);
-          // PDFの保存に失敗してもMarkdownの保存は続行
         }
+      } catch (error) {
+        console.error('PDF保存エラー:', error);
+        // PDFの保存に失敗してもMarkdownの保存は続行
       }
     }
     
-    // Markdown生成
+    // 6. Markdownの生成と保存
     let markdown = '';
     if (settings.file_type === 'md') {
-      // カスタムMarkdownを生成
       markdown = MarkdownExporter.generateFullMarkdown(paper, chapters);
       
-      // 「原文PDFも埋め込む」が有効かつPDFが存在する場合のみリンクを追加
       if (settings.include_pdf && pdfFileName) {
         markdown += '\n\n## PDF原文\n\n';
         markdown += `![[添付ファイル/${pdfFileName}]]\n`;
@@ -631,7 +620,7 @@ export const exportToObsidian = async (
       markdown = MarkdownExporter.generateFullMarkdown(paper, chapters);
     }
     
-    // Markdownファイルを日付フォルダに書き込み
+    // Markdownファイルの書き込み
     try {
       const fileHandle = await dateFolderHandle.getFileHandle(fullFileName, { create: true });
       const writable = await fileHandle.createWritable();
@@ -643,15 +632,9 @@ export const exportToObsidian = async (
       throw new Error(`ファイル「${fullFileName}」の書き込みに失敗しました`);
     }
     
-    // 結果を更新
+    // 結果情報の設定
     result.exported = true;
-    
-    // エクスポートパスの設定
-    const basePath = settings.folder_path && settings.folder_path.trim() !== '' 
-                    ? settings.folder_path 
-                    : 'smart-paper-v2';
-    
-    result.export_path = `${basePath}/${today}/${fullFileName}`;
+    result.export_path = `${baseFolderPath}/${dateFolder}/${fullFileName}`;
     result.exported_at = new Date();
     
     // エクスポート状態をローカルストレージに保存
