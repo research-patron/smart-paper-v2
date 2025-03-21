@@ -12,17 +12,27 @@ from error_handling import (
     ValidationError
 )
 
+# Webhookイベントのロギング機能をインポート
+try:
+    from webhook_logger import log_webhook_event
+except ImportError:
+    # ロガーがインポートできない場合は空の関数を定義
+    def log_webhook_event(event_type, event_data, result=None):
+        log_info("WebhookEvent", f"Event: {event_type}", {"result": result})
+
 # サブスクリプションプラン情報
+# 注意: price_idは実際のStripeダッシュボードで作成したプランのIDに置き換えてください
+# Stripeダッシュボードの「製品」タブから作成したプランのIDを確認できます
 SUBSCRIPTION_PLANS = {
     'monthly': {
-        'price_id': 'price_1R4bJwHI4NoEudKd1ZhXt8mX',  # 実際のStripeプランIDに置き換える必要あり
+        'price_id': 'price_1R4bJwHI4NoEudKd1ZhXt8mX',  # 月額プランのStripe Price ID - 実際のIDに置き換え必須
         'name': 'プレミアムプラン(月額)',
         'amount': 300,  # 月額300円
         'interval': 'month',
         'duration_days': 30,
     },
     'annual': {
-        'price_id': 'price_1R4bKrHI4NoEudKdA7ZqlmVm',  # 実際のStripeプランIDに置き換える必要あり
+        'price_id': 'price_1R4bKrHI4NoEudKdA7ZqlmVm',  # 年額プランのStripe Price ID - 実際のIDに置き換え必須
         'name': 'プレミアムプラン(年額)',
         'amount': 3000,  # 年額3000円
         'interval': 'year',
@@ -114,10 +124,42 @@ def create_checkout_session(user_id, plan_id):
         user_ref = db.collection('users').document(user_id)
         user_doc = user_ref.get()
         
-        if not user_doc.exists:
-            raise ValidationError(f"User not found: {user_id}")
-        
-        user_data = user_doc.to_dict()
+        user_data = {}
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+        else:
+            # ユーザードキュメントが存在しない場合、Firebase Authからユーザー情報を取得
+            try:
+                from firebase_admin import auth
+                auth_user = auth.get_user(user_id)
+                
+                # 基本的なユーザー情報を設定
+                user_data = {
+                    'email': auth_user.email,
+                    'name': auth_user.display_name or auth_user.email.split('@')[0],
+                    'created_at': datetime.now(),
+                    'updated_at': datetime.now(),
+                    'subscription_status': 'free',
+                    'subscription_end_date': None
+                }
+                
+                # Firestoreにユーザー情報を保存
+                user_ref.set(user_data)
+                log_info("UserCreated", f"Created user document for user: {user_id}")
+            except Exception as auth_error:
+                log_error("AuthError", f"Failed to get user from Firebase Auth: {str(auth_error)}")
+                # 最小限の情報でユーザーを作成（Emailなど取得できない場合）
+                user_data = {
+                    'email': f"user_{user_id}@example.com",  # ダミーemail
+                    'name': f"User {user_id[:6]}",  # 短縮ユーザーID
+                    'created_at': datetime.now(),
+                    'updated_at': datetime.now(),
+                    'subscription_status': 'free',
+                    'subscription_end_date': None
+                }
+                # Firestoreにユーザー情報を保存
+                user_ref.set(user_data)
+                log_info("UserCreated", f"Created minimal user document for user: {user_id}")
         
         # 既存のStripeカスタマーIDを取得または新規作成
         customer_id = user_data.get('stripe_customer_id')
@@ -324,37 +366,48 @@ def handle_webhook_event(payload, sig_header):
         # データオブジェクトを取得
         data_obj = event['data']['object']
         
+        # Webhookイベントをログに記録
+        log_webhook_event(event_type, data_obj)
+        
         # 各イベントタイプに応じた処理
+        result = None
         if event_type == 'checkout.session.completed':
             # チェックアウト完了イベント
-            return handle_checkout_session_completed(data_obj)
+            result = handle_checkout_session_completed(data_obj)
             
         elif event_type == 'customer.subscription.created':
             # サブスクリプション作成イベント
-            return handle_subscription_created(data_obj)
+            result = handle_subscription_created(data_obj)
             
         elif event_type == 'customer.subscription.updated':
             # サブスクリプション更新イベント
-            return handle_subscription_updated(data_obj)
+            result = handle_subscription_updated(data_obj)
             
         elif event_type == 'customer.subscription.deleted':
             # サブスクリプション削除イベント
-            return handle_subscription_deleted(data_obj)
+            result = handle_subscription_deleted(data_obj)
             
         elif event_type == 'invoice.payment_succeeded':
             # 支払い成功イベント
-            return handle_payment_succeeded(data_obj)
+            result = handle_payment_succeeded(data_obj)
             
         elif event_type == 'invoice.payment_failed':
             # 支払い失敗イベント
-            return handle_payment_failed(data_obj)
+            result = handle_payment_failed(data_obj)
+        
+        # 処理結果をログに記録
+        if result:
+            log_webhook_event(event_type, data_obj, result)
             
         # その他のイベントは単純にログ記録
-        log_info("StripeWebhook", f"Unhandled webhook event type: {event_type}")
-        return {
-            'status': 'ignored',
-            'event_type': event_type
-        }
+        if not result:
+            log_info("StripeWebhook", f"Unhandled webhook event type: {event_type}")
+            result = {
+                'status': 'ignored',
+                'event_type': event_type
+            }
+            
+        return result
     
     except stripe.error.SignatureVerificationError as e:
         log_error("WebhookSignatureError", f"Invalid signature: {str(e)}")
@@ -417,15 +470,33 @@ def handle_checkout_session_completed(session):
         now = datetime.now()
         end_date = now + timedelta(days=duration_days)
         
+        # 最新のサブスクリプション情報をStripeから取得
+        try:
+            sub = stripe.Subscription.retrieve(subscription_id)
+            # 実際の期間終了日が取得できれば、それを使用
+            if sub.current_period_end:
+                end_date = datetime.fromtimestamp(sub.current_period_end)
+                log_info("SubscriptionEndDate", f"Using actual subscription end date from Stripe: {end_date}")
+        except Exception as stripe_err:
+            log_warning("SubscriptionWarning", f"Could not retrieve subscription from Stripe: {str(stripe_err)}")
+            # エラー発生時はデフォルトの計算値を使用
+            log_info("SubscriptionEndDate", f"Using calculated subscription end date: {end_date}")
+        
         # ユーザー情報を更新
-        user_ref.update({
+        update_data = {
             'subscription_status': 'paid',
             'stripe_subscription_id': subscription_id,
             'subscription_plan': plan_id,
             'subscription_start_date': now,
             'subscription_end_date': end_date,
+            'subscription_cancel_at_period_end': False,
             'updated_at': firestore.SERVER_TIMESTAMP
-        })
+        }
+        
+        log_info("UserUpdate", f"Updating user with subscription data", {"user_id": user_id, "update_data": update_data})
+        
+        # Firestoreを更新
+        user_ref.update(update_data)
         
         return {
             'status': 'success',
@@ -490,13 +561,19 @@ def handle_subscription_created(subscription):
             end_date = datetime.fromtimestamp(current_period_end)
             
             # ユーザー情報を更新
-            user_ref.update({
+            update_data = {
                 'subscription_status': 'paid' if status == 'active' else 'pending',
                 'stripe_subscription_id': subscription.get('id'),
                 'subscription_start_date': start_date,
                 'subscription_end_date': end_date,
                 'updated_at': firestore.SERVER_TIMESTAMP
-            })
+            }
+            
+            log_info("UserUpdate", f"Updating user with subscription created data", 
+                    {"user_id": user_id, "update_data": update_data})
+            
+            # Firestoreを更新
+            user_ref.update(update_data)
         
         return {
             'status': 'success',
@@ -569,6 +646,9 @@ def handle_subscription_updated(subscription):
         # 期間終了時の解約フラグを更新
         update_data['subscription_cancel_at_period_end'] = cancel_at_period_end
         
+        log_info("UserUpdate", f"Updating user with subscription updated data", 
+                {"user_id": user_id, "update_data": update_data})
+        
         # ユーザー情報を更新
         user_ref.update(update_data)
         
@@ -626,13 +706,19 @@ def handle_subscription_deleted(subscription):
         user_id = user_ref.id
         
         # ユーザー情報を更新
-        user_ref.update({
+        update_data = {
             'subscription_status': 'free',  # 無料会員に戻す
             'stripe_subscription_id': None,
             'subscription_plan': None,
             'subscription_cancel_at_period_end': False,
             'updated_at': firestore.SERVER_TIMESTAMP
-        })
+        }
+        
+        log_info("UserUpdate", f"Updating user with subscription deleted data", 
+                {"user_id": user_id, "update_data": update_data})
+        
+        # Firestoreを更新
+        user_ref.update(update_data)
         
         return {
             'status': 'success',
@@ -685,6 +771,29 @@ def handle_payment_succeeded(invoice):
         
         user_ref = user_list[0].reference
         user_id = user_ref.id
+        
+        # ユーザーの支払いステータスを更新 (必ず有料会員にする)
+        update_data = {
+            'subscription_status': 'paid',  # 支払い成功したら必ず paid にする
+            'updated_at': firestore.SERVER_TIMESTAMP
+        }
+        
+        # 最新のサブスクリプション情報をStripeから取得
+        try:
+            sub = stripe.Subscription.retrieve(subscription_id)
+            # 実際の期間終了日が取得できれば、それを使用
+            if sub.current_period_end:
+                end_date = datetime.fromtimestamp(sub.current_period_end)
+                update_data['subscription_end_date'] = end_date
+                log_info("SubscriptionEndDate", f"Using actual subscription end date from Stripe: {end_date}")
+        except Exception as stripe_err:
+            log_warning("SubscriptionWarning", f"Could not retrieve subscription from Stripe: {str(stripe_err)}")
+        
+        log_info("UserUpdate", f"Updating user after payment succeeded", 
+                {"user_id": user_id, "update_data": update_data})
+        
+        # Firestoreを更新
+        user_ref.update(update_data)
         
         # 支払い履歴コレクションに追加
         payment_ref = db.collection('users').document(user_id).collection('payments').document()
@@ -749,6 +858,18 @@ def handle_payment_failed(invoice):
         user_ref = user_list[0].reference
         user_id = user_ref.id
         
+        # 支払い失敗回数
+        attempt_count = invoice.get('attempt_count', 1)
+        
+        # 支払い失敗が3回以上の場合はステータスを変更
+        if attempt_count >= 3:
+            user_ref.update({
+                'subscription_status': 'payment_failed',
+                'updated_at': firestore.SERVER_TIMESTAMP
+            })
+            log_info("UserUpdate", "Updated user status to payment_failed due to multiple failed attempts", 
+                    {"user_id": user_id, "attempt_count": attempt_count})
+        
         # 支払い履歴コレクションに追加
         payment_ref = db.collection('users').document(user_id).collection('payments').document()
         payment_ref.set({
@@ -757,18 +878,15 @@ def handle_payment_failed(invoice):
             'amount': invoice.get('amount_due', 0),
             'currency': invoice.get('currency', 'jpy'),
             'status': 'failed',
-            'attempt_count': invoice.get('attempt_count', 1),
+            'attempt_count': attempt_count,
             'created_at': firestore.SERVER_TIMESTAMP
         })
-        
-        # 支払い失敗回数に応じた処理（オプション）
-        # 複数回失敗した場合にサブスクリプションステータスを変更するなど
         
         return {
             'status': 'success',
             'user_id': user_id,
             'invoice_id': invoice.get('id'),
-            'attempt_count': invoice.get('attempt_count', 1)
+            'attempt_count': attempt_count
         }
     except Exception as e:
         log_error("PaymentFailedError", f"Error processing payment failed: {str(e)}")
