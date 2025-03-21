@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/App.tsx
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { BrowserRouter as Router, Route, Routes, Navigate, useLocation } from 'react-router-dom';
 import { Box, CssBaseline, ThemeProvider, CircularProgress, Container } from '@mui/material';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -57,16 +57,26 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 const RouteObserver: React.FC = () => {
   const location = useLocation();
   const { forceRefreshUserData } = useAuthStore();
+  const refreshTriggeredRef = useRef(false);
   
   useEffect(() => {
     // サブスクリプションページのクエリパラメータをチェック
     if (location.pathname === '/subscription') {
       const searchParams = new URLSearchParams(location.search);
-      if (searchParams.get('success') === 'true') {
+      if (searchParams.get('success') === 'true' && !refreshTriggeredRef.current) {
         console.log('Detected successful subscription payment, refreshing user data...');
-        // ユーザーデータを強制更新
-        forceRefreshUserData();
+        // ユーザーデータを強制更新（1回のみ）
+        refreshTriggeredRef.current = true;
+        forceRefreshUserData().finally(() => {
+          // 3秒後にフラグをリセット
+          setTimeout(() => {
+            refreshTriggeredRef.current = false;
+          }, 3000);
+        });
       }
+    } else {
+      // 他のページに移動したらフラグをリセット
+      refreshTriggeredRef.current = false;
     }
   }, [location, forceRefreshUserData]);
   
@@ -89,9 +99,47 @@ const convertToUserData = (data: any) => {
 };
 
 function App() {
-  const { setUser, setUserData, forceRefreshUserData } = useAuthStore();
+  const { setUser, setUserData } = useAuthStore();
   const { fetchUserPapers } = usePaperStore(); // 追加: PaperStoreから関数を取得
   const [appReady, setAppReady] = useState(false);
+  
+  // 初期化フラグ
+  const isInitializedRef = useRef(false);
+  
+  // 自動更新インターバルを保持するためのref
+  const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // メモ化したユーザーデータ更新関数
+  const refreshUserData = useCallback(async (uid: string) => {
+    try {
+      // 強制的にFirestoreから最新データを取得
+      const docRef = doc(db, 'users', uid);
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        // 取得したデータを変換してからstoreにセット
+        const userData = convertToUserData(docSnap.data());
+        setUserData(userData);
+        console.log("User data loaded:", userData?.subscription_status);
+      } else {
+        console.log("No user data found in Firestore");
+        setUserData(null);
+      }
+    } catch (error) {
+      console.error('Error fetching user data:', error);
+    }
+  }, [setUserData]);
+  
+  // 論文データの取得（メモ化）
+  const fetchPapers = useCallback(async (uid: string) => {
+    try {
+      console.log("Fetching user papers...");
+      await fetchUserPapers(uid);
+      console.log("User papers loaded successfully");
+    } catch (error) {
+      console.error("Failed to load user papers:", error);
+    }
+  }, [fetchUserPapers]);
   
   useEffect(() => {
     console.log("App initializing...");
@@ -102,62 +150,65 @@ function App() {
       setUser(user);
       
       if (user) {
-        // ユーザーデータをFirestoreから取得
-        try {
-          // 強制的にFirestoreから最新データを取得
-          const docRef = doc(db, 'users', user.uid);
-          const docSnap = await getDoc(docRef);
+        // 最初の初期化処理（アプリ起動時に一度だけ実行）
+        if (!isInitializedRef.current) {
+          isInitializedRef.current = true;
           
-          if (docSnap.exists()) {
-            // 取得したデータを変換してからstoreにセット
-            const userData = convertToUserData(docSnap.data());
-            setUserData(userData);
-            console.log("User data loaded:", userData);
-          } else {
-            console.log("No user data found in Firestore");
-            setUserData(null);
-          }
+          // 1. ユーザーデータを取得
+          await refreshUserData(user.uid);
           
-          // 追加: ユーザーの論文データを取得
-          try {
-            console.log("Fetching user papers...");
-            await fetchUserPapers(user.uid);
-            console.log("User papers loaded successfully");
-          } catch (paperError) {
-            console.error("Failed to load user papers:", paperError);
-          }
-          
-        } catch (error) {
-          console.error('Error fetching user data:', error);
-          setUserData(null);
+          // 2. 論文データを取得
+          await fetchPapers(user.uid);
         }
       } else {
         setUserData(null);
+        // ユーザーがログアウトしたらフラグをリセット
+        isInitializedRef.current = false;
       }
       
       setAppReady(true);
     });
     
     // コンポーネントのアンマウント時にリスナーを解除
-    return () => unsubscribe();
-  }, [setUser, setUserData, fetchUserPapers]); // fetchUserPapers を依存配列に追加
+    return () => {
+      unsubscribe();
+      
+      // インターバルがあれば解除
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+        updateIntervalRef.current = null;
+      }
+    };
+  }, [setUser, setUserData, refreshUserData, fetchPapers]);
   
-  // 定期的にユーザーデータを更新する効果
+  // 定期的なユーザーデータ更新のインターバル設定
+  // 依存配列から forceRefreshUserData を除外
   useEffect(() => {
     // 最初のロード時にはappReadyがfalseなのでスキップ
-    if (!appReady) return;
+    if (!appReady || !auth.currentUser) return;
+    
+    // すでにインターバルが設定されていればスキップ
+    if (updateIntervalRef.current) return;
     
     // 60秒ごとにユーザーデータを更新
-    const interval = setInterval(() => {
+    updateIntervalRef.current = setInterval(() => {
       const user = auth.currentUser;
       if (user) {
         console.log("Running scheduled user data refresh");
-        forceRefreshUserData();
+        // 直接refreshUserDataを呼び出して状態更新を最小限に
+        refreshUserData(user.uid).catch(err => {
+          console.error("Scheduled refresh failed:", err);
+        });
       }
     }, 60000);
     
-    return () => clearInterval(interval);
-  }, [appReady, forceRefreshUserData]);
+    return () => {
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+        updateIntervalRef.current = null;
+      }
+    };
+  }, [appReady, refreshUserData]);
   
   // アプリが初期化される前はローディング表示
   if (!appReady) {

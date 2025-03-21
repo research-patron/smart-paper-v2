@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/pages/ProfilePage.tsx
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -63,7 +63,7 @@ const TabPanel = (props: TabPanelProps) => {
 };
 
 const ProfilePage = () => {
-  const { user, userData, logout, updateUserData, loading } = useAuthStore();
+  const { user, userData, logout, forceRefreshUserData, loading } = useAuthStore();
   const navigate = useNavigate();
   
   const [editMode, setEditMode] = useState(false);
@@ -74,6 +74,11 @@ const ProfilePage = () => {
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
   const [tabValue, setTabValue] = useState(0);
   const [dataInitialized, setDataInitialized] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // デバウンスと重複実行防止のための参照
+  const isUpdatingRef = useRef(false);
+  const lastUpdateTimeRef = useRef(0);
   
   // userDataが変更されたらuserNameも更新（依存配列を最適化）
   useEffect(() => {
@@ -87,6 +92,31 @@ const ProfilePage = () => {
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
+  
+  // データ更新のスロットル付き関数
+  const refreshUserData = useCallback(async () => {
+    // 最後の更新から3秒以内または更新中ならスキップ
+    const now = Date.now();
+    if (now - lastUpdateTimeRef.current < 3000 || isUpdatingRef.current || isRefreshing) {
+      console.log('Skipping redundant user data update');
+      return;
+    }
+    
+    try {
+      setIsRefreshing(true);
+      isUpdatingRef.current = true;
+      lastUpdateTimeRef.current = now;
+      
+      await forceRefreshUserData();
+      console.log('User data refreshed successfully');
+      
+    } catch (err) {
+      console.error('Failed to refresh user data:', err);
+    } finally {
+      setIsRefreshing(false);
+      isUpdatingRef.current = false;
+    }
+  }, [forceRefreshUserData, isRefreshing]);
   
   // ユーザー名を更新
   const handleUpdateUserName = async () => {
@@ -104,7 +134,7 @@ const ProfilePage = () => {
       });
       
       // ユーザーデータを再取得
-      await updateUserData(true);
+      await refreshUserData();
       
       setUpdateSuccess(true);
       setEditMode(false);
@@ -171,14 +201,35 @@ const ProfilePage = () => {
   
   // 初回マウント時にのみユーザーデータを更新
   useEffect(() => {
-    if (user && !dataInitialized) {
-      updateUserData(true).catch(err => {
-        console.error('Failed to update user data:', err);
-      });
+    if (user && !dataInitialized && !isUpdatingRef.current) {
+      isUpdatingRef.current = true;
+      
+      const initData = async () => {
+        try {
+          setIsRefreshing(true);
+          await forceRefreshUserData();
+          setDataInitialized(true);
+        } catch (err) {
+          console.error('Failed to initialize user data:', err);
+        } finally {
+          setIsRefreshing(false);
+          isUpdatingRef.current = false;
+          lastUpdateTimeRef.current = Date.now();
+        }
+      };
+      
+      initData();
     }
-  }, [user, dataInitialized, updateUserData]);
+  }, [user, dataInitialized, forceRefreshUserData]);
   
-  if (loading) {
+  // クリーンアップ
+  useEffect(() => {
+    return () => {
+      isUpdatingRef.current = false;
+    };
+  }, []);
+  
+  if (loading && !userData) {
     return (
       <Container maxWidth="md">
         <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
@@ -258,6 +309,17 @@ const ProfilePage = () => {
           {updateSuccess && (
             <Alert severity="success" sx={{ mb: 2 }}>
               プロフィールを更新しました。
+            </Alert>
+          )}
+          
+          {isRefreshing && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <CircularProgress size={20} sx={{ mr: 1 }} />
+                <Typography variant="body2">
+                  データを更新中...
+                </Typography>
+              </Box>
             </Alert>
           )}
           

@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/pages/SubscriptionPage.tsx
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Container,
@@ -53,7 +53,7 @@ const Transition = React.forwardRef(function Transition(
 const SubscriptionPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, userData, updateUserData, forceRefreshUserData } = useAuthStore();
+  const { user, userData, forceRefreshUserData } = useAuthStore();
   const [activeStep, setActiveStep] = useState(0);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
@@ -63,6 +63,11 @@ const SubscriptionPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [refreshingUserData, setRefreshingUserData] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false); // 初期化完了フラグを追加
+  
+  // データ更新タイマーと更新要求フラグ
+  const updateTimerRef = useRef<number | null>(null);
+  const dataUpdateRequestedRef = useRef(false);
+  const lastUpdateTimeRef = useRef(0);
   
   // URLパラメータからステータスを取得
   const urlParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
@@ -106,25 +111,42 @@ const SubscriptionPage = () => {
   
   const steps = ['プラン選択', '支払い情報', '完了'];
   
-  // 強制的にユーザーデータを更新する関数
+  // メモ化した関数：ユーザーデータを強制更新
   const refreshUserData = useCallback(async () => {
-    if (!user || refreshingUserData) return;
+    // 直前の更新から3秒以内なら何もしない
+    const now = Date.now();
+    if (now - lastUpdateTimeRef.current < 3000) {
+      console.log('Throttling update request - too recent');
+      return;
+    }
+    
+    if (!user || refreshingUserData || !dataUpdateRequestedRef.current) return;
+    
+    // 更新要求フラグをリセット（二重実行防止）
+    dataUpdateRequestedRef.current = false;
+    lastUpdateTimeRef.current = now;
     
     setRefreshingUserData(true);
     try {
-      console.log('Forcing refresh of user data...');
+      console.log('Refreshing user data...');
       await forceRefreshUserData();
       console.log('User data refreshed successfully.');
     } catch (err) {
       console.error('Error refreshing user data:', err);
     } finally {
       setRefreshingUserData(false);
+      
+      // 安全のためタイマーをクリア
+      if (updateTimerRef.current !== null) {
+        window.clearTimeout(updateTimerRef.current);
+        updateTimerRef.current = null;
+      }
     }
   }, [user, refreshingUserData, forceRefreshUserData]);
   
-  // URLパラメータに基づいて支払い完了ステップを設定
+  // URLパラメータによる処理 - success=true の場合
   useEffect(() => {
-    if (isSuccess) {
+    if (isSuccess && !paymentSuccess) {
       setActiveStep(2);
       setPaymentSuccess(true);
       
@@ -134,25 +156,26 @@ const SubscriptionPage = () => {
         window.history.replaceState({}, document.title, newUrl);
       }
       
-      // ユーザーデータを更新（初期化済みでなければ）
-      if (user && !isInitialized) {
-        const refreshUserDataOnce = async () => {
-          setRefreshingUserData(true);
-          
-          try {
-            console.log('Refreshing user data after successful payment...');
-            await forceRefreshUserData();
-            setIsInitialized(true); // 初期化完了をマーク
-          } catch (err) {
-            console.error('Error refreshing user data:', err);
-          } finally {
-            setRefreshingUserData(false);
-          }
-        };
+      // 支払い成功時のみデータ更新をリクエスト（遅延実行）
+      if (user) {
+        // リクエストフラグを設定
+        dataUpdateRequestedRef.current = true;
         
-        refreshUserDataOnce();
+        // 短い遅延後に更新を実行（ページレンダリング優先）
+        if (updateTimerRef.current !== null) {
+          window.clearTimeout(updateTimerRef.current);
+        }
+        
+        updateTimerRef.current = window.setTimeout(() => {
+          refreshUserData();
+        }, 1500);
       }
-    } else if (isCanceled) {
+    }
+  }, [isSuccess, user, refreshUserData, paymentSuccess]);
+  
+  // URLパラメータによる処理 - canceled=true の場合
+  useEffect(() => {
+    if (isCanceled) {
       setActiveStep(0);
       setError('お支払いがキャンセルされました。別のプランを選択するか、再度お試しください。');
       
@@ -162,36 +185,28 @@ const SubscriptionPage = () => {
         window.history.replaceState({}, document.title, newUrl);
       }
     }
-  }, [isSuccess, isCanceled, user, forceRefreshUserData, isInitialized]);
+  }, [isCanceled]);
   
-  // 初回レンダリング時にユーザーデータを更新 (一度だけ)
+  // 初期化済みフラグの設定（マウント時に一度だけ）
   useEffect(() => {
-    if (user && !isInitialized && !refreshingUserData) {
-      const initUserData = async () => {
-        setRefreshingUserData(true);
-        try {
-          console.log('Initializing user data...');
-          await updateUserData(true);
-          setIsInitialized(true);
-        } catch (err) {
-          console.error('Error initializing user data:', err);
-        } finally {
-          setRefreshingUserData(false);
-        }
-      };
-      
-      initUserData();
+    if (user && !isInitialized) {
+      setIsInitialized(true);
     }
-  }, [user, isInitialized, refreshingUserData, updateUserData]);
+  }, [user, isInitialized]);
   
-  // クリーンアップ: コンポーネントのアンマウント時に更新フラグをリセット
+  // クリーンアップ: コンポーネントのアンマウント時に更新フラグとタイマーをリセット
   useEffect(() => {
     return () => {
-      setRefreshingUserData(false);
+      dataUpdateRequestedRef.current = false;
+      
+      if (updateTimerRef.current !== null) {
+        window.clearTimeout(updateTimerRef.current);
+        updateTimerRef.current = null;
+      }
     };
   }, []);
   
-  // ステップが支払いか完了の場合に未認証ユーザーはログインページにリダイレクト
+  // 未認証ユーザーがステップ進行時にログイン要求
   useEffect(() => {
     if (activeStep > 0 && !user) {
       navigate('/login', { state: { returnUrl: '/subscription' } });
@@ -253,7 +268,8 @@ const SubscriptionPage = () => {
       setCancelDialogOpen(false);
       
       if (result.canceled) {
-        // ユーザーデータを更新（強制更新を実行）
+        // データ更新をリクエスト
+        dataUpdateRequestedRef.current = true;
         await refreshUserData();
         
         // 完了画面に進む
@@ -307,6 +323,12 @@ const SubscriptionPage = () => {
     }
   };
   
+  // ボタンクリックで強制的にデータ更新
+  const handleManualRefresh = () => {
+    dataUpdateRequestedRef.current = true;
+    refreshUserData();
+  };
+  
   return (
     <Container maxWidth="md">
       <Box sx={{ my: 4 }}>
@@ -353,7 +375,7 @@ const SubscriptionPage = () => {
                 size="small" 
                 color="primary" 
                 variant="outlined"
-                onClick={refreshUserData}
+                onClick={handleManualRefresh}
                 disabled={refreshingUserData}
                 startIcon={refreshingUserData ? <CircularProgress size={16} /> : <AutorenewIcon />}
               >
@@ -373,7 +395,7 @@ const SubscriptionPage = () => {
                 size="small" 
                 color="primary" 
                 variant="outlined"
-                onClick={refreshUserData}
+                onClick={handleManualRefresh}
                 disabled={refreshingUserData}
                 startIcon={refreshingUserData ? <CircularProgress size={16} /> : <AutorenewIcon />}
               >
@@ -571,7 +593,7 @@ const SubscriptionPage = () => {
                   variant="outlined"
                   color="primary"
                   size="small"
-                  onClick={refreshUserData}
+                  onClick={handleManualRefresh}
                   startIcon={<AutorenewIcon />}
                 >
                   会員情報を再取得
