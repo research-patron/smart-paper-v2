@@ -31,6 +31,7 @@ interface AuthState {
   userData: UserData | null;
   lastUserDataUpdate: number; // 最後のユーザーデータ更新タイムスタンプ
   isUpdatingUserData: boolean; // ユーザーデータ更新中フラグ
+  updateCount: number; // データ更新要求のカウンター（デバッグ用）
   
   // 認証アクション
   login: (email: string, password: string) => Promise<UserCredential>;
@@ -60,6 +61,9 @@ const convertToUserData = (data: DocumentData | null): UserData | null => {
   };
 };
 
+// 更新リクエストの間隔制限
+const THROTTLE_TIME_MS = 5000; // 5秒
+
 // 認証状態を管理するZustandストア
 export const useAuthStore = create<AuthState>()(
   devtools(
@@ -71,6 +75,7 @@ export const useAuthStore = create<AuthState>()(
         userData: null,
         lastUserDataUpdate: 0,
         isUpdatingUserData: false,
+        updateCount: 0,
         
         login: async (email, password) => {
           try {
@@ -194,27 +199,35 @@ export const useAuthStore = create<AuthState>()(
         },
         
         updateUserData: async (forceRefresh = false) => {
-          const { user, lastUserDataUpdate, isUpdatingUserData } = get();
-          if (!user) return;
+          const { user, lastUserDataUpdate, isUpdatingUserData, updateCount } = get();
+          
+          // デバッグ用カウンターをインクリメント
+          set({ updateCount: updateCount + 1 });
+          
+          if (!user) {
+            console.log('No user, skipping update');
+            return;
+          }
           
           // 既に更新中なら新しい更新をスキップ
           if (isUpdatingUserData) {
-            console.log('User data update already in progress, skipping');
+            console.log(`User data update already in progress (request #${updateCount}), skipping`);
             return;
           }
           
           const now = Date.now();
-          const TIME_THRESHOLD = 10000; // 10秒
           
-          // 最後の更新から10秒以内かつforceRefreshがfalseならスキップ
-          if (!forceRefresh && now - lastUserDataUpdate < TIME_THRESHOLD) {
-            console.log('Skipping user data update - recent update detected');
+          // 最後の更新からTHROTTLE_TIME_MS以内かつforceRefreshがfalseならスキップ
+          if (!forceRefresh && (now - lastUserDataUpdate) < THROTTLE_TIME_MS) {
+            console.log(`Skipping user data update - recent update detected (${Math.round((now - lastUserDataUpdate) / 1000)}s ago)`);
             return;
           }
           
           try {
             // 更新中フラグをセット
-            set({ isUpdatingUserData: true, loading: true });
+            set({ isUpdatingUserData: true });
+            
+            // 同期的な更新のためにloadingステートは変更しない
             
             // getUserData関数を呼び出す代わりに、直接Firestoreから最新データを取得
             const userRef = doc(db, 'users', user.uid);
@@ -224,33 +237,39 @@ export const useAuthStore = create<AuthState>()(
               const rawUserData = userSnap.data();
               const userData = convertToUserData(rawUserData);
               
-              console.log('Successfully updated user data:', userData);
+              console.log(`Successfully updated user data (request #${updateCount}):`, 
+                userData?.subscription_status);
               
+              // ステートを一度に更新
               set({ 
-                userData, 
-                loading: false,
+                userData,
+
                 lastUserDataUpdate: now,
                 isUpdatingUserData: false
               });
             } else {
-              console.warn('No user data found for:', user.uid);
+              console.warn(`No user data found for: ${user.uid} (request #${updateCount})`);
+              
+              // ステートを一度に更新
               set({ 
                 userData: null, 
-                loading: false,
                 lastUserDataUpdate: now,
-                isUpdatingUserData: false
+                isUpdatingUserData: false 
               });
             }
           } catch (error) {
-            console.error('Error fetching user data:', error);
-            set({ loading: false, isUpdatingUserData: false });
+            console.error(`Error fetching user data (request #${updateCount}):`, error);
+            
+            // エラー時はフラグのみリセット
+            set({ isUpdatingUserData: false });
           }
         },
         
         // 強制的にユーザーデータを更新するメソッド
         forceRefreshUserData: async () => {
-          console.log('Force refreshing user data...');
-          await get().updateUserData(true);
+          const { updateCount } = get();
+          console.log(`Force refreshing user data (request #${updateCount})...`);
+          return await get().updateUserData(true);
         }
       }),
       {
