@@ -36,9 +36,10 @@ import { selectObsidianVault, checkFolderExists, getVault, removeDateFolderFromP
 
 interface ObsidianSettingsProps {
   onSaved?: () => void;
+  onSettingsChanged?: (changed: boolean) => void;
 }
 
-const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
+const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved, onSettingsChanged }) => {
   const { user } = useAuthStore();
   
   // 初期設定値の保持用のref
@@ -101,7 +102,30 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
       autoExport !== initialSettings.current.auto_export;
     
     setSettingsChanged(isChanged);
-  }, [vaultDir, vaultName, folderPath, fileNameFormat, fileType, openAfterExport, includePdf, createEmbedFolder, autoExport]);
+    
+    // 親コンポーネントに変更状態を通知
+    if (onSettingsChanged) {
+      onSettingsChanged(isChanged);
+    }
+  }, [vaultDir, vaultName, folderPath, fileNameFormat, fileType, openAfterExport, includePdf, createEmbedFolder, autoExport, onSettingsChanged]);
+  
+  // ページ離脱警告の設定
+  useEffect(() => {
+    // 設定が変更されている場合のみページ離脱警告を設定
+    if (settingsChanged) {
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        const message = 'Obsidian連携の設定が保存されていません。このページを離れますか？';
+        e.returnValue = message; // Chrome では必要
+        return message; // 標準的なブラウザで必要
+      };
+      
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      
+      return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+      };
+    }
+  }, [settingsChanged]);
   
   // ユーザーの既存設定を読み込む
   useEffect(() => {
@@ -165,6 +189,11 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
           // 設定値の読み込み後は変更フラグをリセット
           setSettingsChanged(false);
           
+          // 親コンポーネントに変更状態を通知
+          if (onSettingsChanged) {
+            onSettingsChanged(false);
+          }
+          
           // ローカルストレージにも保存
           localStorage.setItem('obsidian_settings', JSON.stringify({
             ...initialSettings.current,
@@ -181,7 +210,7 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
     };
     
     loadSettings();
-  }, [user]);
+  }, [user, onSettingsChanged]);
   
   // フォルダ選択ハンドラー
   const handleSelectVault = async () => {
@@ -281,6 +310,12 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
       
       // 保存が成功したら変更フラグを更新
       setSettingsChanged(false);
+      
+      // 親コンポーネントに変更状態を通知
+      if (onSettingsChanged) {
+        onSettingsChanged(false);
+      }
+      
       setIsSaved(true);
       
       // 保存成功メッセージは3秒後に非表示
@@ -290,6 +325,9 @@ const ObsidianSettings: React.FC<ObsidianSettingsProps> = ({ onSaved }) => {
       
       // 保存完了後のコールバックを呼び出す
       if (onSaved) onSaved();
+      
+      // 注意: 以前はここにObsidianを開く処理があったが、
+      // 設定保存時には自動的にObsidianに遷移しないよう削除
       
     } catch (err) {
       console.error('Error saving Obsidian settings:', err);

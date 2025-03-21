@@ -297,6 +297,17 @@ export const generateObsidianURI = (vaultName: string, filePath?: string): strin
 };
 
 /**
+ * ダウンロードしたMarkdownファイルをObsidianで開く
+ * この関数は直接Obsidianアプリを開きます - 使用時に注意
+ * @param vaultName Obsidianのvault名
+ * @param filePath ファイルパス
+ */
+export const openInObsidian = (vaultName: string, filePath: string): void => {
+  const uri = generateObsidianURI(vaultName, filePath);
+  window.location.href = uri;
+};
+
+/**
  * ファイル名フォーマットを適用してファイル名を生成する
  * @param format ファイル名フォーマット (例: "{authors}_{title}_{year}")
  * @param paper 論文データ
@@ -432,16 +443,6 @@ export const formatPdfFileName = (paper: Paper): string => {
   
   // 「著者名(刊行年)_論文タイトル.pdf」形式のファイル名を生成
   return `${authorName}(${year})_${title}.pdf`;
-};
-
-/**
- * ダウンロードしたMarkdownファイルをObsidianで開く
- * @param vaultName Obsidianのvault名
- * @param filePath ファイルパス
- */
-export const openInObsidian = (vaultName: string, filePath: string): void => {
-  const uri = generateObsidianURI(vaultName, filePath);
-  window.location.href = uri;
 };
 
 /**
@@ -648,12 +649,16 @@ export const exportToObsidian = async (
       localStorage.setItem('obsidian_export_status', JSON.stringify(exportStatus));
     }
     
-    // Obsidianで開く（設定されている場合）
+    // 修正: 自動開く機能を削除
+    // 以前は下記の設定があった場合に自動的にObsidianアプリを開いていたが、
+    // ユーザーエクスペリエンス向上のため機能を削除
+    /*
     if (settings.open_after_export && settings.vault_name) {
       setTimeout(() => {
         openInObsidian(settings.vault_name, result.export_path || '');
       }, 500);
     }
+    */
     
     return result;
   } catch (error) {

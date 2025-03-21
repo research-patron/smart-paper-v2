@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/components/subscription/Plans.tsx
-import { useState } from 'react';
+import { useState, useMemo, memo } from 'react';
 import {
   Box,
   Card,
@@ -62,14 +62,14 @@ const Plans: React.FC<PlansProps> = ({
   const [annually, setAnnually] = useState(true);
   
   // プラン機能の比較データ
-  const planFeatures: PlanFeature[] = [
+  const planFeatures: PlanFeature[] = useMemo(() => [
     { name: '翻訳数', none: '1個/日', free: '3個/月', paid: '無制限' },
     { name: '論文保存期間', none: '0日間', free: '3日間', paid: '1ヶ月間' },
     { name: '関連論文推薦', none: '利用可能', free: '3件/月', paid: '無制限' },
     { name: 'PDFファイルサイズ上限', none: '20MB', free: '20MB', paid: '20MB' },
     { name: 'Obsidian連携', none: true, free: true, paid: true },
     { name: 'Zotero連携', none: true, free: true, paid: true },
-  ];
+  ], []);
   
   // お得率の計算
   // 月額: 350円/月 × 12カ月 = 4,200円/年
@@ -78,7 +78,7 @@ const Plans: React.FC<PlansProps> = ({
   const savingsPercentage = 29;
   
   // プランオプション
-  const allPlanOptions: PlanOption[] = [
+  const allPlanOptions: PlanOption[] = useMemo(() => [
     {
       id: 'none',
       title: '非会員プラン',
@@ -104,17 +104,19 @@ const Plans: React.FC<PlansProps> = ({
       features: planFeatures,
       popular: true,
     }
-  ];
+  ], [annually, planFeatures]);
   
   // ログイン状態に応じてプランをフィルタリング
   // ログイン済みの場合は「非会員プラン」を表示しない
-  const planOptions = user 
-    ? allPlanOptions.filter(plan => plan.id !== 'none')
-    : allPlanOptions;
+  const planOptions = useMemo(() => 
+    user 
+      ? allPlanOptions.filter(plan => plan.id !== 'none')
+      : allPlanOptions,
+    [user, allPlanOptions]
+  );
   
-  // 表示するプランを選択
-  // 非会員、無料会員、有料会員を正しく判別する
-  const getCurrentPlan = () => {
+  // 現在のプラン状態を計算
+  const activePlan = useMemo(() => {
     if (!user) {
       return 'none'; // ログインしていない場合は非会員
     }
@@ -122,9 +124,7 @@ const Plans: React.FC<PlansProps> = ({
       return annually ? 'annual' : 'monthly'; // 有料会員は年払いか月払いのプラン
     }
     return 'free'; // 無料会員
-  };
-  
-  const activePlan = getCurrentPlan();
+  }, [user, userData, annually]);
   
   // 比較表のみ表示する場合
   if (showComparisonOnly) {
@@ -425,4 +425,5 @@ const Plans: React.FC<PlansProps> = ({
   );
 };
 
-export default Plans;
+// React.memo でコンポーネントをメモ化して不要な再レンダリングを防止
+export default memo(Plans);
