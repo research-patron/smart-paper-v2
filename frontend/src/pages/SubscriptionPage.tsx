@@ -77,7 +77,9 @@ const SubscriptionPage = () => {
   // 新しく追加: 支払い成功後のリトライ処理のための状態
   const [retryCount, setRetryCount] = useState(0);
   const [retryProgress, setRetryProgress] = useState(false);
-  const MAX_RETRIES = 0; // 最大リトライ回数
+  // 新しく追加: データ確定フラグ - 支払い成功後にユーザーデータが完全に更新されたかどうか
+  const [dataConfirmed, setDataConfirmed] = useState(false);
+  const MAX_RETRIES = 0; // リトライなし（即時表示）
   const RETRY_DELAY = 2000; // リトライ間隔（ms）
   
   // データ更新タイマーと更新要求フラグ
@@ -122,6 +124,21 @@ const SubscriptionPage = () => {
   }, [effectiveUserData.subscription_end_date]);
   
   const steps = ['プラン選択', '支払い情報', '完了'];
+  
+  // effectiveUserDataが変更されたときにデータを確認
+  useEffect(() => {
+    if (effectiveUserData) {
+      console.log("Current subscription plan:", effectiveUserData.subscription_plan);
+      console.log("Current subscription status:", effectiveUserData.subscription_status);
+      
+      // 支払い成功後かつステータスが更新されている場合、データ確定フラグをセット
+      if (paymentSuccess && selectedPlan) {
+        if (selectedPlan === 'free' || effectiveUserData.subscription_status === 'paid') {
+          setDataConfirmed(true);
+        }
+      }
+    }
+  }, [effectiveUserData, paymentSuccess, selectedPlan]);
   
   // メモ化した関数：ユーザーデータを強制更新
   const refreshUserData = useCallback(async () => {
@@ -175,6 +192,7 @@ const SubscriptionPage = () => {
         console.log('Success! Subscription status updated to paid.');
         isRetryingRef.current = false;
         setRetryProgress(false);
+        setDataConfirmed(true); // データ確定フラグをセット
         return true; // 成功
       }
       
@@ -185,6 +203,8 @@ const SubscriptionPage = () => {
         console.log(`Maximum retries (${MAX_RETRIES}) reached. Stopping retries.`);
         isRetryingRef.current = false;
         setRetryProgress(false);
+        // 最大リトライ回数に達しても更新されなかった場合でも、表示はする
+        setDataConfirmed(true);
         return false; // 失敗
       }
       
@@ -208,6 +228,8 @@ const SubscriptionPage = () => {
       } else {
         isRetryingRef.current = false;
         setRetryProgress(false);
+        // 最大リトライ回数に達しても更新されなかった場合でも、表示はする
+        setDataConfirmed(true);
       }
       
       return false;
@@ -216,7 +238,7 @@ const SubscriptionPage = () => {
   
   // URLパラメータによる処理 - success=true の場合（リトライロジック追加）
   useEffect(() => {
-    if (isSuccess && !paymentSuccess) {
+          if (isSuccess && !paymentSuccess) {
       setActiveStep(2);
       setPaymentSuccess(true);
       
@@ -226,14 +248,24 @@ const SubscriptionPage = () => {
         window.history.replaceState({}, document.title, newUrl);
       }
       
-      // 支払い成功時のみデータ更新をリクエスト
+      // 支払い成功時のユーザーデータ更新をリクエスト
       if (user) {
-        // Webhookの処理完了を待つために少し待機してからリトライ処理を開始
-        console.log('Payment success detected, starting status check in 3 seconds...');
-        setTimeout(() => {
-          setRetryCount(0); // リトライカウンターをリセット
-          retryRefreshUserData(); // リトライ処理開始
+        // Webhookの処理完了を待つために少し待機してからデータ更新
+        console.log('Payment success detected, updating user data in 3 seconds...');
+        setTimeout(async () => {
+          try {
+            await forceRefreshUserData();
+            // データ確定フラグを設定（リトライ無しの場合は即時表示）
+            setDataConfirmed(true);
+          } catch (err) {
+            console.error('Error updating user data:', err);
+            // エラーが発生しても表示は行う
+            setDataConfirmed(true);
+          }
         }, 3000);
+      } else {
+        // ユーザーがいない場合でも表示は行う
+        setDataConfirmed(true);
       }
     }
   }, [isSuccess, user, retryRefreshUserData, paymentSuccess]);
@@ -346,6 +378,7 @@ const SubscriptionPage = () => {
         // 完了画面に進む
         setActiveStep(2);
         setPaymentSuccess(true);
+        setDataConfirmed(true); // 解約は即時反映される
       }
     } catch (err) {
       console.error('Error canceling subscription:', err);
@@ -364,6 +397,8 @@ const SubscriptionPage = () => {
   const handlePaymentComplete = () => {
     setActiveStep(2);
     setPaymentSuccess(true);
+    // データ確定フラグをリセット - 支払い完了後に再度確認が必要
+    setDataConfirmed(false);
   };
   
   const handleBackToPlans = () => {
@@ -375,21 +410,14 @@ const SubscriptionPage = () => {
     navigate('/');
   };
   
-  // ボタンクリックで強制的にデータ更新
-  const handleManualRefresh = () => {
-    // リトライ処理の進行中ならキャンセルして再開
-    if (isRetryingRef.current) {
-      if (retryTimerRef.current) {
-        window.clearTimeout(retryTimerRef.current);
-        retryTimerRef.current = null;
-      }
-      isRetryingRef.current = false;
-    }
-    
-    // 新しいリトライ処理を開始
-    setRetryCount(0);
-    retryRefreshUserData();
-  };
+  // 手動更新機能を削除
+
+  // 支払い成功時のコンポーネント表示条件
+  const showSuccessComponent = activeStep === 2 && paymentSuccess;
+
+  // 支払い成功時のロード表示条件（データ未確定かつリトライ中またはデータ確認待ち）
+  const showSuccessLoading = showSuccessComponent && !dataConfirmed && 
+    (refreshingUserData || retryProgress || (selectedPlan !== 'free' && userData?.subscription_status !== 'paid'));
   
   return (
     <Container maxWidth="md">
@@ -577,74 +605,67 @@ const SubscriptionPage = () => {
         
         {activeStep === 2 && paymentSuccess && (
           <Paper sx={{ p: 4, textAlign: 'center' }}>
-            <Box sx={{ 
-              width: 80, 
-              height: 80, 
-              borderRadius: '50%', 
-              bgcolor: 'success.light', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center',
-              margin: '0 auto',
-              mb: 3
-            }}>
-              {selectedPlan === 'free' || effectiveUserData.subscription_cancel_at_period_end ? (
-                <FreeBreakfastIcon sx={{ fontSize: 40, color: 'white' }} />
-              ) : (
-                <StarIcon sx={{ fontSize: 40, color: 'white' }} />
-              )}
-            </Box>
-            
-            <Typography variant="h5" gutterBottom>
-              {effectiveUserData.subscription_cancel_at_period_end 
-                ? 'サブスクリプションの解約手続きが完了しました'
-                : selectedPlan === 'free' 
-                  ? (isPaid ? 'プランを変更しました' : '無料会員プランにアップグレードしました')
-                  : 'プレミアムプランへのアップグレードが完了しました！'}
-            </Typography>
-            
-            <Typography variant="body1" paragraph>
-              {effectiveUserData.subscription_cancel_at_period_end
-                ? `サブスクリプションは ${subscriptionEnd ? subscriptionEnd.toLocaleDateString('ja-JP', {year: 'numeric', month: 'long', day: 'numeric'}) : '現在の支払い期間終了時'} まで有効です。その後は自動的に無料プランに切り替わります。`
-                : selectedPlan === 'free'
-                  ? (isPaid 
-                    ? '無料プランに変更されました。サブスクリプションは現在の期間の終了時に終了します。' 
-                    : '無料会員プランへアップグレードされました。より多くの機能をご利用いただけます。')
-                  : 'おめでとうございます！すべての機能を無制限でご利用いただけるようになりました。'}
-            </Typography>
-            
-            {/* ステータスの特別表示 - 有料プラン選択時にステータスがまだ更新されていない場合 */}
-            {selectedPlan !== 'free' && !effectiveUserData.subscription_cancel_at_period_end && userData?.subscription_status !== 'paid' && (
-              <Alert severity="info" sx={{ mb: 3 }}>
-                <AlertTitle>プラン更新状況</AlertTitle>
-                <Typography variant="body2">
-                  現在の会員ステータス: <strong>{userData?.subscription_status === 'free' ? '無料会員' : '非会員'}</strong>
+            {/* データ未確定の場合はロード表示 */}
+            {showSuccessLoading ? (
+              <Box sx={{ textAlign: 'center', py: 4 }}>
+                <CircularProgress size={60} sx={{ mb: 3 }} />
+                <Typography variant="h6" gutterBottom>
+                  サブスクリプション情報を更新中...
                 </Typography>
-                <Typography variant="body2" sx={{ mt: 1 }}>
-                  決済処理は完了しましたが、システム上の反映に少し時間がかかることがあります。
-                  情報が更新されるまでしばらくお待ちください。最新の情報はプロフィールページでご確認いただけます。
+                <Typography variant="body2" color="text.secondary">
+                  決済処理は完了しました。会員情報の更新まで少々お待ちください。
                 </Typography>
-              </Alert>
-            )}
-            
-            {refreshingUserData || retryProgress ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, mb: 2 }}>
-                <CircularProgress size={24} />
-                <Typography variant="body2" sx={{ ml: 2 }}>
-                  会員情報を更新中...
-                </Typography>
+
               </Box>
-            ) : null}
-            
-            <Box sx={{ mt: 3 }}>
-              <Button
-                variant="contained"
-                color="primary"
-                onClick={handleClose}
-              >
-                ホームに戻る
-              </Button>
-            </Box>
+            ) : (
+              <>
+                <Box sx={{ 
+                  width: 80, 
+                  height: 80, 
+                  borderRadius: '50%', 
+                  bgcolor: 'success.light', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  margin: '0 auto',
+                  mb: 3
+                }}>
+                  {selectedPlan === 'free' || effectiveUserData.subscription_cancel_at_period_end ? (
+                    <FreeBreakfastIcon sx={{ fontSize: 40, color: 'white' }} />
+                  ) : (
+                    <StarIcon sx={{ fontSize: 40, color: 'white' }} />
+                  )}
+                </Box>
+                
+                <Typography variant="h5" gutterBottom>
+                  {effectiveUserData.subscription_cancel_at_period_end 
+                    ? 'サブスクリプションの解約手続きが完了しました'
+                    : selectedPlan === 'free' 
+                      ? (isPaid ? 'プランを変更しました' : '無料会員プランにアップグレードしました')
+                      : 'プレミアムプランへのアップグレードが完了しました！'}
+                </Typography>
+                
+                <Typography variant="body1" paragraph>
+                  {effectiveUserData.subscription_cancel_at_period_end
+                    ? `サブスクリプションは ${subscriptionEnd ? subscriptionEnd.toLocaleDateString('ja-JP', {year: 'numeric', month: 'long', day: 'numeric'}) : '現在の支払い期間終了時'} まで有効です。その後は自動的に無料プランに切り替わります。`
+                    : selectedPlan === 'free'
+                      ? (isPaid 
+                        ? '無料プランに変更されました。サブスクリプションは現在の期間の終了時に終了します。' 
+                        : '無料会員プランへアップグレードされました。より多くの機能をご利用いただけます。')
+                      : 'おめでとうございます！すべての機能を無制限でご利用いただけるようになりました。'}
+                </Typography>
+                
+                <Box sx={{ mt: 3 }}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleClose}
+                  >
+                    ホームに戻る
+                  </Button>
+                </Box>
+              </>
+            )}
           </Paper>
         )}
         
