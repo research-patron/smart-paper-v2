@@ -15,7 +15,7 @@ import { db } from '../api/firebase';
 
 // ユーザーデータの型定義
 interface UserData {
-  subscription_status: 'none' | 'free' | 'paid';
+  subscription_status: 'free' | 'paid' | 'none'; // 'none'は後方互換性のために残す
   subscription_end_date: Timestamp | null;
   subscription_cancel_at_period_end?: boolean;
   subscription_plan?: string;  // 明示的に追加
@@ -59,8 +59,11 @@ const convertToUserData = (data: DocumentData | null): UserData | null => {
     subscription_cancel_at_period_end: data.subscription_cancel_at_period_end
   });
   
+  // noneステータスの場合はfreeに変換
+  const status = data.subscription_status === 'none' ? 'free' : data.subscription_status;
+  
   return {
-    subscription_status: (data.subscription_status as 'none' | 'free' | 'paid') || 'none',
+    subscription_status: (status as 'free' | 'paid') || 'free', // ステータスがない場合はfreeをデフォルトに
     subscription_end_date: data.subscription_end_date || null,
     subscription_cancel_at_period_end: data.subscription_cancel_at_period_end || false,
     subscription_plan: data.subscription_plan || 'monthly', // デフォルト値を設定
