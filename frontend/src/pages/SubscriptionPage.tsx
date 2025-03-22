@@ -39,7 +39,7 @@ import React from 'react';
 import { useAuthStore } from '../store/authStore';
 import Plans from '../components/subscription/Plans';
 import Payment from '../components/subscription/Payment';
-import { cancelSubscription, redirectToCardUpdate } from '../api/stripe';
+import { cancelSubscription } from '../api/stripe';
 
 // スライドトランジション
 const Transition = React.forwardRef(function Transition(
@@ -51,6 +51,16 @@ const Transition = React.forwardRef(function Transition(
   return <Slide direction="up" ref={ref} {...props} />;
 });
 
+// ユーザーデータの型定義を明示
+interface UserData {
+  subscription_status: 'none' | 'free' | 'paid';
+  subscription_end_date: { seconds: number } | null;
+  subscription_cancel_at_period_end?: boolean;
+  subscription_plan?: string;
+  name: string;
+  email: string | null;
+}
+
 const SubscriptionPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -60,7 +70,7 @@ const SubscriptionPage = () => {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [cancelLoading, setCancelLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshingUserData, setRefreshingUserData] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false); // 初期化完了フラグを追加
@@ -83,26 +93,18 @@ const SubscriptionPage = () => {
   const isSuccess = urlParams.get('success') === 'true';
   const isCanceled = urlParams.get('canceled') === 'true';
   
-  // userDataがない場合は、無料プランとして扱う
-  // 必要な型定義の追加
-  interface UserData {
-    subscription_status: 'none' | 'free' | 'paid';
-    subscription_end_date: { seconds: number } | null;
-    subscription_cancel_at_period_end?: boolean;
-    subscription_plan?: string;
-    name: string;
-    email: string | null;
-  }
-
+  // userDataがない場合のデフォルト値
   const defaultUserData: UserData = useMemo(() => ({
     subscription_status: 'none',
     subscription_end_date: null,
+    subscription_plan: 'monthly', // デフォルト値を設定
     name: user?.displayName || user?.email?.split('@')[0] || 'ユーザー',
     email: user?.email || null
   }), [user]);
 
-  const effectiveUserData = useMemo(() => 
-    userData as UserData || defaultUserData, 
+  // TypeScriptエラーを解消するために型アサーションを追加
+  const effectiveUserData = useMemo<UserData>(() => 
+    (userData as UserData) || defaultUserData, 
     [userData, defaultUserData]
   );
   
@@ -324,10 +326,10 @@ const SubscriptionPage = () => {
   }, [user, userData, isPaid]);
   
   const handleConfirmCancel = async () => {
-    if (loading) return;
+    if (cancelLoading) return;
     
     try {
-      setLoading(true);
+      setCancelLoading(true);
       setError(null);
       
       // サブスクリプションを解約
@@ -349,7 +351,7 @@ const SubscriptionPage = () => {
       console.error('Error canceling subscription:', err);
       setError(err instanceof Error ? err.message : 'サブスクリプションの解約に失敗しました');
     } finally {
-      setLoading(false);
+      setCancelLoading(false);
     }
   };
   
@@ -371,25 +373,6 @@ const SubscriptionPage = () => {
   
   const handleClose = () => {
     navigate('/');
-  };
-  
-  const handleUpdatePaymentMethod = async () => {
-    if (loading) return;
-    
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // 支払い方法更新ページにリダイレクト
-      await redirectToCardUpdate();
-      
-      // ここにはリダイレクト後は到達しない
-      
-    } catch (err) {
-      console.error('Error updating payment method:', err);
-      setError(err instanceof Error ? err.message : '支払い方法の更新に失敗しました');
-      setLoading(false);
-    }
   };
   
   // ボタンクリックで強制的にデータ更新
@@ -535,18 +518,7 @@ const SubscriptionPage = () => {
               </List>
               
               <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
-                {/* 支払い方法変更ボタン - 解約済みの場合は表示しない */}
-                {!effectiveUserData.subscription_cancel_at_period_end && (
-                  <Button 
-                    variant="outlined" 
-                    color="primary" 
-                    size="small"
-                    onClick={handleUpdatePaymentMethod}
-                    disabled={loading}
-                  >
-                    {loading ? <CircularProgress size={20} /> : "支払い方法を変更"}
-                  </Button>
-                )}
+                {/* 「支払い方法を変更」ボタンは削除 - 現在の実装ではStripeの設定が足りないため */}
                 
                 {!effectiveUserData.subscription_cancel_at_period_end && (
                   <Button 
@@ -554,9 +526,9 @@ const SubscriptionPage = () => {
                     color="error" 
                     size="small"
                     onClick={() => setCancelDialogOpen(true)}
-                    disabled={loading}
+                    disabled={cancelLoading}
                   >
-                    {loading ? <CircularProgress size={20} /> : "サブスクリプションを解約"}
+                    {cancelLoading ? <CircularProgress size={20} /> : "サブスクリプションを解約"}
                   </Button>
                 )}
               </Box>
@@ -719,9 +691,9 @@ const SubscriptionPage = () => {
             <Button 
               onClick={handleConfirmCancel} 
               color="error"
-              disabled={loading}
+              disabled={cancelLoading}
             >
-              {loading ? <CircularProgress size={20} /> : "解約する"}
+              {cancelLoading ? <CircularProgress size={20} /> : "解約する"}
             </Button>
           </DialogActions>
         </Dialog>
