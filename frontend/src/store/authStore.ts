@@ -18,6 +18,7 @@ interface UserData {
   subscription_status: 'none' | 'free' | 'paid';
   subscription_end_date: Timestamp | null;
   subscription_cancel_at_period_end?: boolean;
+  subscription_plan?: string;  // 明示的に追加
   name?: string;
   email?: string;
   created_at?: Timestamp;
@@ -50,10 +51,19 @@ interface AuthState {
 const convertToUserData = (data: DocumentData | null): UserData | null => {
   if (!data) return null;
   
+  // Raw userData をログに出力（デバッグ用）
+  console.log("Raw user data from Firestore:", {
+    subscription_status: data.subscription_status,
+    subscription_plan: data.subscription_plan,
+    subscription_end_date: data.subscription_end_date,
+    subscription_cancel_at_period_end: data.subscription_cancel_at_period_end
+  });
+  
   return {
     subscription_status: (data.subscription_status as 'none' | 'free' | 'paid') || 'none',
     subscription_end_date: data.subscription_end_date || null,
     subscription_cancel_at_period_end: data.subscription_cancel_at_period_end || false,
+    subscription_plan: data.subscription_plan || 'monthly', // デフォルト値を設定
     name: data.name,
     email: data.email,
     created_at: data.created_at,
@@ -243,7 +253,6 @@ export const useAuthStore = create<AuthState>()(
               // ステートを一度に更新
               set({ 
                 userData,
-
                 lastUserDataUpdate: now,
                 isUpdatingUserData: false
               });
