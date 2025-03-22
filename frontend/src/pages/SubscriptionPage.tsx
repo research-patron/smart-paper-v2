@@ -89,6 +89,7 @@ const SubscriptionPage = () => {
     subscription_status: 'none' | 'free' | 'paid';
     subscription_end_date: { seconds: number } | null;
     subscription_cancel_at_period_end?: boolean;
+    subscription_plan?: string;
     name: string;
     email: string | null;
   }
@@ -410,9 +411,12 @@ const SubscriptionPage = () => {
   return (
     <Container maxWidth="md">
       <Box sx={{ my: 4 }}>
-        <Typography variant="h4" gutterBottom>
-          あなたにぴったりのプランをお選びください
-        </Typography>
+        {/* ヘッダータイトル - paymentSuccessが真またはプレミアム会員の場合は表示しない */}
+        {!paymentSuccess && !isPaid && (
+          <Typography variant="h4" gutterBottom>
+            あなたにぴったりのプランをお選びください
+          </Typography>
+        )}
         
         {refreshingUserData && (
           <Alert severity="info" sx={{ mb: 2 }}>
@@ -455,55 +459,7 @@ const SubscriptionPage = () => {
           </Alert>
         )}
         
-        {isPaid ? (
-          <Alert severity="info" sx={{ mb: 4 }}>
-            <AlertTitle>プレミアムプラン利用中</AlertTitle>
-            <Typography variant="body2">
-              現在、プレミアムプランをご利用中です。有効期限: {subscriptionEnd 
-                ? subscriptionEnd.toLocaleDateString('ja-JP', {year: 'numeric', month: 'long', day: 'numeric'}) 
-                : '無期限'}
-            </Typography>
-            
-            {effectiveUserData.subscription_cancel_at_period_end && (
-              <Typography variant="body2" sx={{ mt: 1, fontWeight: 'bold' }}>
-                このサブスクリプションは期間終了時に自動更新されず、無料プランに戻ります。
-              </Typography>
-            )}
-            
-            <Box sx={{ mt: 1 }}>
-              <Button 
-                size="small" 
-                color="primary" 
-                variant="outlined"
-                onClick={handleManualRefresh}
-                disabled={refreshingUserData || retryProgress}
-                startIcon={refreshingUserData || retryProgress ? <CircularProgress size={16} /> : <AutorenewIcon />}
-              >
-                会員情報を更新
-              </Button>
-            </Box>
-          </Alert>
-        ) : user ? (
-          <Alert severity="info" sx={{ mb: 4 }}>
-            <AlertTitle>無料プラン利用中</AlertTitle>
-            <Typography variant="body2">
-              現在、無料プランをご利用中です。機能をフル活用するにはプレミアムプランへのアップグレードをご検討ください。
-            </Typography>
-            
-            <Box sx={{ mt: 1 }}>
-              <Button 
-                size="small" 
-                color="primary" 
-                variant="outlined"
-                onClick={handleManualRefresh}
-                disabled={refreshingUserData || retryProgress}
-                startIcon={refreshingUserData || retryProgress ? <CircularProgress size={16} /> : <AutorenewIcon />}
-              >
-                会員情報を更新
-              </Button>
-            </Box>
-          </Alert>
-        ) : (
+        {!user && !paymentSuccess && (
           <Alert severity="info" sx={{ mb: 4 }}>
             <AlertTitle>非会員の方へ</AlertTitle>
             <Typography variant="body2">
@@ -512,8 +468,8 @@ const SubscriptionPage = () => {
           </Alert>
         )}
         
-        {/* 現在のプラン情報 - 有料会員の場合のみ表示 */}
-        {isPaid && isInitialized && (
+        {/* 現在のプラン情報 - 有料会員の場合のみ表示 && 支払い成功画面でなければ表示 */}
+        {isPaid && isInitialized && !paymentSuccess && (
           <Card variant="outlined" sx={{ mb: 4 }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -541,11 +497,9 @@ const SubscriptionPage = () => {
                   <ReceiptIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
                   <ListItemText 
                     primary="料金プラン" 
-                    secondary={subscriptionEnd && effectiveUserData.subscription_end_date 
-                      ? (new Date(effectiveUserData.subscription_end_date.seconds * 1000).getMonth() - new Date().getMonth() + 12) % 12 >= 11
-                        ? "年額 ¥3,000（税込）" 
-                        : "月額 ¥300（税込）"
-                      : "プレミアムプラン"} 
+                    secondary={effectiveUserData.subscription_plan === 'annual' 
+                      ? "年額 ¥3,000（税込）" 
+                      : "月額 ¥300（税込）"} 
                   />
                 </ListItem>
                 
@@ -581,15 +535,18 @@ const SubscriptionPage = () => {
               </List>
               
               <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
-                <Button 
-                  variant="outlined" 
-                  color="primary" 
-                  size="small"
-                  onClick={handleUpdatePaymentMethod}
-                  disabled={loading}
-                >
-                  {loading ? <CircularProgress size={20} /> : "支払い方法を変更"}
-                </Button>
+                {/* 支払い方法変更ボタン - 解約済みの場合は表示しない */}
+                {!effectiveUserData.subscription_cancel_at_period_end && (
+                  <Button 
+                    variant="outlined" 
+                    color="primary" 
+                    size="small"
+                    onClick={handleUpdatePaymentMethod}
+                    disabled={loading}
+                  >
+                    {loading ? <CircularProgress size={20} /> : "支払い方法を変更"}
+                  </Button>
+                )}
                 
                 {!effectiveUserData.subscription_cancel_at_period_end && (
                   <Button 
@@ -621,7 +578,7 @@ const SubscriptionPage = () => {
         )}
         
         {/* ステップコンテンツ */}
-        {activeStep === 0 && (
+        {activeStep === 0 && !paymentSuccess && (
           <>
             <Typography variant="h5" gutterBottom sx={{ mb: 3 }}>
               プラン選択
@@ -633,7 +590,7 @@ const SubscriptionPage = () => {
           </>
         )}
         
-        {activeStep === 1 && selectedPlan && (
+        {activeStep === 1 && selectedPlan && !paymentSuccess && (
           <>
             <Typography variant="h5" gutterBottom sx={{ mb: 3 }}>
               支払い情報
@@ -659,7 +616,7 @@ const SubscriptionPage = () => {
               margin: '0 auto',
               mb: 3
             }}>
-              {selectedPlan === 'free' ? (
+              {selectedPlan === 'free' || effectiveUserData.subscription_cancel_at_period_end ? (
                 <FreeBreakfastIcon sx={{ fontSize: 40, color: 'white' }} />
               ) : (
                 <StarIcon sx={{ fontSize: 40, color: 'white' }} />
@@ -667,21 +624,25 @@ const SubscriptionPage = () => {
             </Box>
             
             <Typography variant="h5" gutterBottom>
-              {selectedPlan === 'free' 
-                ? (isPaid ? 'プランを変更しました' : '無料会員プランにアップグレードしました')
-                : 'プレミアムプランへのアップグレードが完了しました！'}
+              {effectiveUserData.subscription_cancel_at_period_end 
+                ? 'サブスクリプションの解約手続きが完了しました'
+                : selectedPlan === 'free' 
+                  ? (isPaid ? 'プランを変更しました' : '無料会員プランにアップグレードしました')
+                  : 'プレミアムプランへのアップグレードが完了しました！'}
             </Typography>
             
             <Typography variant="body1" paragraph>
-              {selectedPlan === 'free'
-                ? (isPaid 
-                   ? '無料プランに変更されました。サブスクリプションは現在の期間の終了時に終了します。' 
-                   : '無料会員プランへアップグレードされました。より多くの機能をご利用いただけます。')
-                : 'おめでとうございます！すべての機能を無制限でご利用いただけるようになりました。'}
+              {effectiveUserData.subscription_cancel_at_period_end
+                ? `サブスクリプションは ${subscriptionEnd ? subscriptionEnd.toLocaleDateString('ja-JP', {year: 'numeric', month: 'long', day: 'numeric'}) : '現在の支払い期間終了時'} まで有効です。その後は自動的に無料プランに切り替わります。`
+                : selectedPlan === 'free'
+                  ? (isPaid 
+                    ? '無料プランに変更されました。サブスクリプションは現在の期間の終了時に終了します。' 
+                    : '無料会員プランへアップグレードされました。より多くの機能をご利用いただけます。')
+                  : 'おめでとうございます！すべての機能を無制限でご利用いただけるようになりました。'}
             </Typography>
             
             {/* ステータスの特別表示 - 有料プラン選択時にステータスがまだ更新されていない場合 */}
-            {selectedPlan !== 'free' && userData?.subscription_status !== 'paid' && (
+            {selectedPlan !== 'free' && !effectiveUserData.subscription_cancel_at_period_end && userData?.subscription_status !== 'paid' && (
               <Alert severity="info" sx={{ mb: 3 }}>
                 <AlertTitle>プラン更新状況</AlertTitle>
                 <Typography variant="body2">
@@ -689,7 +650,7 @@ const SubscriptionPage = () => {
                 </Typography>
                 <Typography variant="body2" sx={{ mt: 1 }}>
                   決済処理は完了しましたが、システム上の反映に少し時間がかかることがあります。
-                  もしプレミアム機能が利用できない場合は、下のボタンで会員情報を更新してください。
+                  情報が更新されるまでしばらくお待ちください。最新の情報はプロフィールページでご確認いただけます。
                 </Typography>
               </Alert>
             )}
@@ -701,19 +662,7 @@ const SubscriptionPage = () => {
                   会員情報を更新中...
                 </Typography>
               </Box>
-            ) : (
-              <Box sx={{ mt: 2, mb: 3 }}>
-                <Button
-                  variant="outlined"
-                  color="primary"
-                  size="small"
-                  onClick={handleManualRefresh}
-                  startIcon={<AutorenewIcon />}
-                >
-                  会員情報を再取得
-                </Button>
-              </Box>
-            )}
+            ) : null}
             
             <Box sx={{ mt: 3 }}>
               <Button
