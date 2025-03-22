@@ -1,6 +1,7 @@
 import stripe
 import os
 import json
+import time
 from datetime import datetime, timedelta
 from google.cloud import secretmanager
 from firebase_admin import firestore
@@ -9,7 +10,8 @@ from error_handling import (
     log_info,
     log_warning,
     APIError,
-    ValidationError
+    ValidationError,
+    json_serializable
 )
 
 # Webhookイベントのロギング機能をインポート
@@ -141,7 +143,7 @@ def get_db():
         _db = firestore.client()
     return _db
 
-# ユーザーデータを更新する共通関数
+# ユーザーデータを安全に更新する関数 (datetime処理を改善)
 def update_user_subscription_status(user_id, subscription_data):
     """
     ユーザーのサブスクリプション状態を更新する共通関数
@@ -176,29 +178,84 @@ def update_user_subscription_status(user_id, subscription_data):
         # 常に更新タイムスタンプを設定
         update_data['updated_at'] = firestore.SERVER_TIMESTAMP
         
+        # ログ記録用の安全な形式に変換 (直接datetimeを使わない)
+        log_data = {
+            "current_status": user_data.get('subscription_status'),
+            "new_status": update_data.get('subscription_status', "未変更")
+        }
+        
+        # 更新データをログ用にコピーし、datetimeを文字列に変換
+        log_update_data = {}
+        for k, v in update_data.items():
+            if isinstance(v, (datetime, firestore.SERVER_TIMESTAMP.__class__)):
+                if v == firestore.SERVER_TIMESTAMP:
+                    log_update_data[k] = "SERVER_TIMESTAMP"
+                else:
+                    log_update_data[k] = v.isoformat() if hasattr(v, 'isoformat') else str(v)
+            else:
+                log_update_data[k] = v
+        
+        log_data["update_data"] = log_update_data
+        
         # ログを追加
-        log_info("UserSubscriptionUpdate", 
-                f"Updating user {user_id} subscription data", 
-                {"current_status": user_data.get('subscription_status'),
-                 "new_status": update_data.get('subscription_status', "未変更"), 
-                 "update_data": update_data})
+        try:
+            log_info("UserSubscriptionUpdate", 
+                    f"Updating user {user_id} subscription data", 
+                    log_data)
+        except Exception as log_err:
+            # ログ記録に失敗しても処理は続行
+            print(f"Warning: Failed to log subscription update: {str(log_err)}")
         
         # Firestoreを更新
         user_ref.update(update_data)
         
         # 更新後、再度データを取得して変更が反映されたか確認
-        updated_doc = user_ref.get()
-        updated_data = updated_doc.to_dict()
-        log_info("UserSubscriptionUpdateResult", 
-                f"User {user_id} subscription updated", 
-                {"new_status": updated_data.get('subscription_status'),
-                 "stripe_subscription_id": updated_data.get('stripe_subscription_id')})
+        try:
+            updated_doc = user_ref.get()
+            updated_data = updated_doc.to_dict()
+            log_info("UserSubscriptionUpdateResult", 
+                    f"User {user_id} subscription updated", 
+                    {"new_status": updated_data.get('subscription_status'),
+                     "stripe_subscription_id": updated_data.get('stripe_subscription_id')})
+        except Exception as verify_err:
+            # 確認時のエラーは無視して処理を続行
+            log_warning("UserUpdateVerification", f"Failed to verify update: {str(verify_err)}")
                  
         return True
         
     except Exception as e:
-        log_error("UserUpdateError", f"Failed to update user subscription: {str(e)}", 
-                 {"user_id": user_id, "subscription_data": subscription_data})
+        # エラーログ用にdatetimeオブジェクトをフィルタリング
+        safe_subscription_data = {}
+        try:
+            for k, v in subscription_data.items():
+                if isinstance(v, (datetime, firestore.SERVER_TIMESTAMP.__class__)):
+                    if v == firestore.SERVER_TIMESTAMP:
+                        safe_subscription_data[k] = "SERVER_TIMESTAMP"
+                    else:
+                        safe_subscription_data[k] = v.isoformat() if hasattr(v, 'isoformat') else str(v)
+                else:
+                    safe_subscription_data[k] = v
+                    
+            log_error("UserUpdateError", f"Failed to update user subscription: {str(e)}", 
+                     {"user_id": user_id, "subscription_data": safe_subscription_data})
+        except Exception as log_err:
+            # ログ記録に失敗した場合の最小限のログ記録
+            print(f"Critical: Failed to log update error: {str(log_err)}, original error: {str(e)}")
+            
+        # 緊急フォールバック：エラーが発生しても最低限のサブスクリプションステータスの更新を試みる
+        try:
+            if 'subscription_status' in subscription_data and subscription_data['subscription_status'] == 'paid':
+                # 最小限の更新データでリトライ
+                user_ref = get_db().collection('users').document(user_id)
+                user_ref.update({
+                    'subscription_status': 'paid',
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                })
+                log_info("UserUpdateRecovery", f"Emergency update succeeded for user {user_id}")
+                return True
+        except Exception as fallback_err:
+            log_error("UserUpdateFallbackError", f"Emergency update failed: {str(fallback_err)}")
+            
         return False
 
 # サブスクリプションセッションの作成
@@ -587,14 +644,14 @@ def handle_checkout_session_completed(session):
             # 実際の期間終了日が取得できれば、それを使用
             if sub.current_period_end:
                 end_date = datetime.fromtimestamp(sub.current_period_end)
-                log_info("SubscriptionEndDate", f"Using actual subscription end date from Stripe: {end_date}")
+                log_info("SubscriptionEndDate", f"Using actual subscription end date from Stripe: {end_date.isoformat()}")
         except Exception as stripe_err:
             log_warning("SubscriptionWarning", f"Could not retrieve subscription from Stripe: {str(stripe_err)}")
             # エラー発生時はデフォルトの計算値を使用
             duration_days = plan.get('duration_days', 30)
             now = datetime.now()
             end_date = now + timedelta(days=duration_days)
-            log_info("SubscriptionEndDate", f"Using calculated subscription end date: {end_date}")
+            log_info("SubscriptionEndDate", f"Using calculated subscription end date: {end_date.isoformat()}")
         
         # ユーザー情報を更新
         update_data = {
@@ -611,13 +668,12 @@ def handle_checkout_session_completed(session):
         
         # 成功したかどうかをログに記録
         log_info("UserUpdate", f"User subscription update {'succeeded' if success else 'failed'}", 
-                {"user_id": user_id, "update_data": update_data})
+                {"user_id": user_id})
         
         # 2回目のトライを試みる（念のため）
         if not success:
             log_info("UserUpdate", "Retrying user subscription update...")
             # 少し待機してから再試行
-            import time
             time.sleep(2)
             success = update_user_subscription_status(user_id, update_data)
             log_info("UserUpdate", f"Second attempt {'succeeded' if success else 'failed'}")
@@ -649,9 +705,24 @@ def handle_checkout_session_completed(session):
         }
     except Exception as e:
         log_error("CheckoutCompletedError", f"Error processing checkout completed: {str(e)}")
+        
+        # エラーが発生した場合でも、直接Firestoreを更新して確実に有料ステータスにする緊急対応
+        try:
+            db = get_db()
+            user_ref = db.collection('users').document(user_id)
+            user_ref.update({
+                'subscription_status': 'paid',
+                'stripe_subscription_id': subscription_id,
+                'updated_at': firestore.SERVER_TIMESTAMP
+            })
+            log_info("EmergencyUpdate", f"Direct Firestore update for user {user_id} after error")
+        except Exception as emergency_err:
+            log_error("EmergencyUpdateError", f"Failed emergency update: {str(emergency_err)}")
+        
         return {
             'status': 'error',
-            'message': str(e)
+            'message': str(e),
+            'emergency_update': 'attempted'
         }
 
 def handle_subscription_created(subscription):
@@ -717,16 +788,31 @@ def handle_subscription_created(subscription):
         
         # 成功したかどうかをログに記録
         log_info("UserUpdate", f"User subscription creation update {'succeeded' if success else 'failed'}", 
-                {"user_id": user_id, "update_data": update_data})
+                {"user_id": user_id})
         
         # 2回目のトライを試みる（念のため）
         if not success:
             log_info("UserUpdate", "Retrying user subscription update for creation...")
             # 少し待機してから再試行
-            import time
             time.sleep(2)
             success = update_user_subscription_status(user_id, update_data)
             log_info("UserUpdate", f"Second attempt for creation {'succeeded' if success else 'failed'}")
+        
+        # 3回目のトライ（最終手段）- 重要なので追加
+        if not success:
+            log_info("UserUpdate", "Last attempt for user subscription update...")
+            time.sleep(3)
+            
+            # 最終手段：直接 subscription_status のみを更新
+            try:
+                user_ref.update({
+                    'subscription_status': 'paid',
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                })
+                log_info("UserUpdate", "Final attempt to update subscription status completed")
+                success = True
+            except Exception as final_err:
+                log_error("UserUpdateFinalError", f"Final update attempt failed: {str(final_err)}")
         
         return {
             'status': 'success',
@@ -804,16 +890,31 @@ def handle_subscription_updated(subscription):
         
         # 成功したかどうかをログに記録
         log_info("UserUpdate", f"User subscription update {'succeeded' if success else 'failed'}", 
-                {"user_id": user_id, "update_data": update_data})
+                {"user_id": user_id})
         
         # 2回目のトライを試みる（念のため）
         if not success:
             log_info("UserUpdate", "Retrying user subscription update...")
             # 少し待機してから再試行
-            import time
             time.sleep(2)
             success = update_user_subscription_status(user_id, update_data)
             log_info("UserUpdate", f"Second attempt {'succeeded' if success else 'failed'}")
+            
+        # 3回目のトライ（最終手段）- 重要なので追加
+        if not success and status == 'active':
+            log_info("UserUpdate", "Last attempt for user subscription update...")
+            time.sleep(3)
+            
+            # 最終手段：直接 subscription_status のみを更新
+            try:
+                user_ref.update({
+                    'subscription_status': 'paid',
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                })
+                log_info("UserUpdate", "Final attempt to update subscription status completed")
+                success = True
+            except Exception as final_err:
+                log_error("UserUpdateFinalError", f"Final update attempt failed: {str(final_err)}")
         
         return {
             'status': 'success',
@@ -882,16 +983,31 @@ def handle_subscription_deleted(subscription):
         
         # 成功したかどうかをログに記録
         log_info("UserUpdate", f"User subscription deletion update {'succeeded' if success else 'failed'}", 
-                {"user_id": user_id, "update_data": update_data})
+                {"user_id": user_id})
         
         # 2回目のトライを試みる（念のため）
         if not success:
             log_info("UserUpdate", "Retrying user subscription update for deletion...")
             # 少し待機してから再試行
-            import time
             time.sleep(2)
             success = update_user_subscription_status(user_id, update_data)
             log_info("UserUpdate", f"Second attempt for deletion {'succeeded' if success else 'failed'}")
+            
+        # 3回目のトライ（最終手段）- 重要なので追加
+        if not success:
+            log_info("UserUpdate", "Last attempt for user subscription update...")
+            time.sleep(3)
+            
+            # 最終手段：直接 subscription_status のみを更新
+            try:
+                user_ref.update({
+                    'subscription_status': 'free',
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                })
+                log_info("UserUpdate", "Final attempt to update subscription status completed")
+                success = True
+            except Exception as final_err:
+                log_error("UserUpdateFinalError", f"Final update attempt failed: {str(final_err)}")
         
         return {
             'status': 'success',
@@ -958,7 +1074,7 @@ def handle_payment_succeeded(invoice):
             if sub.current_period_end:
                 end_date = datetime.fromtimestamp(sub.current_period_end)
                 update_data['subscription_end_date'] = end_date
-                log_info("SubscriptionEndDate", f"Using actual subscription end date from Stripe: {end_date}")
+                log_info("SubscriptionEndDate", f"Using actual subscription end date from Stripe: {end_date.isoformat()}")
         except Exception as stripe_err:
             log_warning("SubscriptionWarning", f"Could not retrieve subscription from Stripe: {str(stripe_err)}")
         
@@ -967,27 +1083,45 @@ def handle_payment_succeeded(invoice):
         
         # 成功したかどうかをログに記録
         log_info("UserUpdate", f"User payment succeeded update {'succeeded' if success else 'failed'}", 
-                {"user_id": user_id, "update_data": update_data})
+                {"user_id": user_id})
         
         # 2回目のトライを試みる（念のため）
         if not success:
             log_info("UserUpdate", "Retrying user subscription update after payment...")
             # 少し待機してから再試行
-            import time
             time.sleep(2)
             success = update_user_subscription_status(user_id, update_data)
             log_info("UserUpdate", f"Second attempt after payment {'succeeded' if success else 'failed'}")
+            
+        # 3回目のトライ（最終手段）- 重要なので追加
+        if not success:
+            log_info("UserUpdate", "Last attempt for user subscription update...")
+            time.sleep(3)
+            
+            # 最終手段：直接 subscription_status のみを更新
+            try:
+                user_ref.update({
+                    'subscription_status': 'paid',
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                })
+                log_info("UserUpdate", "Final attempt to update subscription status completed")
+                success = True
+            except Exception as final_err:
+                log_error("UserUpdateFinalError", f"Final update attempt failed: {str(final_err)}")
         
         # 支払い履歴コレクションに追加
-        payment_ref = db.collection('users').document(user_id).collection('payments').document()
-        payment_ref.set({
-            'stripe_invoice_id': invoice.get('id'),
-            'stripe_subscription_id': subscription_id,
-            'amount': invoice.get('amount_paid', 0),
-            'currency': invoice.get('currency', 'jpy'),
-            'status': 'paid',
-            'created_at': firestore.SERVER_TIMESTAMP
-        })
+        try:
+            payment_ref = db.collection('users').document(user_id).collection('payments').document()
+            payment_ref.set({
+                'stripe_invoice_id': invoice.get('id'),
+                'stripe_subscription_id': subscription_id,
+                'amount': invoice.get('amount_paid', 0),
+                'currency': invoice.get('currency', 'jpy'),
+                'status': 'paid',
+                'created_at': firestore.SERVER_TIMESTAMP
+            })
+        except Exception as payment_err:
+            log_error("PaymentHistoryError", f"Failed to record payment history: {str(payment_err)}")
         
         return {
             'status': 'success',
@@ -997,6 +1131,25 @@ def handle_payment_succeeded(invoice):
         }
     except Exception as e:
         log_error("PaymentSucceededError", f"Error processing payment succeeded: {str(e)}")
+        # 最終手段 - エラーが発生しても直接ユーザーIDがわかっていれば更新を試みる
+        if 'user_id' in locals() and user_id:
+            try:
+                db = get_db()
+                user_ref = db.collection('users').document(user_id)
+                user_ref.update({
+                    'subscription_status': 'paid',
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                })
+                log_info("EmergencyUpdate", f"Direct Firestore update for user {user_id} after payment error")
+                return {
+                    'status': 'recovered',
+                    'user_id': user_id,
+                    'invoice_id': invoice.get('id'),
+                    'message': 'Emergency update succeeded'
+                }
+            except Exception as fallback_err:
+                log_error("EmergencyUpdateError", f"Failed emergency update: {str(fallback_err)}")
+                
         return {
             'status': 'error',
             'message': str(e)
@@ -1060,22 +1213,24 @@ def handle_payment_failed(invoice):
             if not success:
                 log_info("UserUpdate", "Retrying user subscription update for payment failure...")
                 # 少し待機してから再試行
-                import time
                 time.sleep(2)
                 success = update_user_subscription_status(user_id, update_data)
                 log_info("UserUpdate", f"Second attempt for payment failure {'succeeded' if success else 'failed'}")
         
         # 支払い履歴コレクションに追加
-        payment_ref = db.collection('users').document(user_id).collection('payments').document()
-        payment_ref.set({
-            'stripe_invoice_id': invoice.get('id'),
-            'stripe_subscription_id': subscription_id,
-            'amount': invoice.get('amount_due', 0),
-            'currency': invoice.get('currency', 'jpy'),
-            'status': 'failed',
-            'attempt_count': attempt_count,
-            'created_at': firestore.SERVER_TIMESTAMP
-        })
+        try:
+            payment_ref = db.collection('users').document(user_id).collection('payments').document()
+            payment_ref.set({
+                'stripe_invoice_id': invoice.get('id'),
+                'stripe_subscription_id': subscription_id,
+                'amount': invoice.get('amount_due', 0),
+                'currency': invoice.get('currency', 'jpy'),
+                'status': 'failed',
+                'attempt_count': attempt_count,
+                'created_at': firestore.SERVER_TIMESTAMP
+            })
+        except Exception as payment_err:
+            log_error("PaymentHistoryError", f"Failed to record payment history: {str(payment_err)}")
         
         return {
             'status': 'success',

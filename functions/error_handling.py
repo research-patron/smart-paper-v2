@@ -4,6 +4,13 @@ import traceback
 import logging
 import datetime
 
+# datetimeオブジェクトをJSON互換の文字列に変換するヘルパー関数
+def json_serializable(obj):
+    """JSON serialization helper for objects like datetime"""
+    if isinstance(obj, (datetime.datetime, datetime.date)):
+        return obj.isoformat()
+    raise TypeError(f"Type {type(obj)} not serializable")
+
 def log_error(error_type: str, message: str, details: dict = None):
     """
     エラー情報を構造化ログとして標準エラー出力に出力
@@ -14,14 +21,19 @@ def log_error(error_type: str, message: str, details: dict = None):
         details: エラーの詳細情報（オプション）
     """
     # Cloud Logging で認識される形式でログを出力
-    logging.error(json.dumps({
-        "severity": "ERROR",  # Cloud Logging でエラーとして認識される
-        "error_type": error_type,
-        "message": message,
-        "timestamp": datetime.datetime.now().isoformat(),
-        "stack_trace": traceback.format_exc(),
-        "details": details,
-    }))
+    try:
+        log_data = {
+            "severity": "ERROR",  # Cloud Logging でエラーとして認識される
+            "error_type": error_type,
+            "message": message,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "stack_trace": traceback.format_exc(),
+            "details": details,
+        }
+        logging.error(json.dumps(log_data, default=json_serializable))
+    except Exception as e:
+        # フォールバック: プレーンテキストでログ出力
+        logging.error(f"{error_type}: {message} - JSON serialization failed: {str(e)}")
 
 def log_warning(warning_type: str, message: str, details: dict = None):
     """
@@ -33,13 +45,18 @@ def log_warning(warning_type: str, message: str, details: dict = None):
         details: 警告の詳細情報（オプション）
     """
     # Cloud Logging で認識される形式でログを出力
-    logging.warning(json.dumps({
-        "severity": "WARNING",  # Cloud Logging で警告として認識される
-        "warning_type": warning_type,
-        "message": message,
-        "timestamp": datetime.datetime.now().isoformat(),
-        "details": details,
-    }))
+    try:
+        log_data = {
+            "severity": "WARNING",  # Cloud Logging で警告として認識される
+            "warning_type": warning_type,
+            "message": message,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "details": details,
+        }
+        logging.warning(json.dumps(log_data, default=json_serializable))
+    except Exception as e:
+        # フォールバック: プレーンテキストでログ出力
+        logging.warning(f"{warning_type}: {message} - JSON serialization failed: {str(e)}")
 
 def log_info(info_type: str, message: str, details: dict = None):
     """
@@ -51,13 +68,18 @@ def log_info(info_type: str, message: str, details: dict = None):
         details: 情報の詳細（オプション）
     """
     # Cloud Logging で認識される形式でログを出力
-    logging.info(json.dumps({
-        "severity": "INFO",  # Cloud Logging で情報として認識される
-        "info_type": info_type,
-        "message": message,
-        "timestamp": datetime.datetime.now().isoformat(),
-        "details": details,
-    }))
+    try:
+        log_data = {
+            "severity": "INFO",  # Cloud Logging で情報として認識される
+            "info_type": info_type,
+            "message": message,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "details": details,
+        }
+        logging.info(json.dumps(log_data, default=json_serializable))
+    except Exception as e:
+        # フォールバック: プレーンテキストでログ出力
+        logging.info(f"{info_type}: {message} - JSON serialization failed: {str(e)}")
 
 def format_exception(e: Exception) -> dict:
     """
