@@ -53,7 +53,7 @@ const Transition = React.forwardRef(function Transition(
 
 // ユーザーデータの型定義を明示
 interface UserData {
-  subscription_status: 'none' | 'free' | 'paid';
+  subscription_status: 'free' | 'paid' | 'none'; // 'none'は後方互換性のために残す
   subscription_end_date: { seconds: number } | null;
   subscription_cancel_at_period_end?: boolean;
   subscription_plan?: string;
@@ -69,7 +69,6 @@ const SubscriptionPage = () => {
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
-  const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshingUserData, setRefreshingUserData] = useState(false);
@@ -95,9 +94,16 @@ const SubscriptionPage = () => {
   const isSuccess = urlParams.get('success') === 'true';
   const isCanceled = urlParams.get('canceled') === 'true';
   
+  // ユーザー未認証の場合はログインページへリダイレクト
+  useEffect(() => {
+    if (!user) {
+      navigate('/login', { state: { returnUrl: '/subscription' } });
+    }
+  }, [user, navigate]);
+  
   // userDataがない場合のデフォルト値
   const defaultUserData: UserData = useMemo(() => ({
-    subscription_status: 'none',
+    subscription_status: 'free', // デフォルトは無料会員に
     subscription_end_date: null,
     subscription_plan: 'monthly', // デフォルト値を設定
     name: user?.displayName || user?.email?.split('@')[0] || 'ユーザー',
@@ -238,7 +244,7 @@ const SubscriptionPage = () => {
   
   // URLパラメータによる処理 - success=true の場合（リトライロジック追加）
   useEffect(() => {
-          if (isSuccess && !paymentSuccess) {
+    if (isSuccess && !paymentSuccess) {
       setActiveStep(2);
       setPaymentSuccess(true);
       
@@ -268,7 +274,7 @@ const SubscriptionPage = () => {
         setDataConfirmed(true);
       }
     }
-  }, [isSuccess, user, retryRefreshUserData, paymentSuccess]);
+  }, [isSuccess, user, forceRefreshUserData, paymentSuccess]);
   
   // URLパラメータによる処理 - canceled=true の場合
   useEffect(() => {
@@ -309,27 +315,8 @@ const SubscriptionPage = () => {
     };
   }, []);
   
-  // 未認証ユーザーがステップ進行時にログイン要求
-  useEffect(() => {
-    if (activeStep > 0 && !user) {
-      navigate('/login', { state: { returnUrl: '/subscription' } });
-    }
-  }, [user, navigate, activeStep]);
-  
   const handleSelectPlan = useCallback((planId: string, requiresPayment: boolean) => {
     setSelectedPlan(planId);
-    
-    // 未ログインユーザーが無料会員を選択した場合、ログインを促す
-    if (!user && planId === 'free') {
-      setRegisterDialogOpen(true);
-      return;
-    }
-    
-    // 未ログインユーザーがプレミアムプランを選択した場合、ログインを促す
-    if (!user && requiresPayment) {
-      setRegisterDialogOpen(true);
-      return;
-    }
     
     // 有料会員が無料プランを選択した場合、解約確認ダイアログを表示
     if (planId === 'free' && isPaid) {
@@ -343,19 +330,13 @@ const SubscriptionPage = () => {
       return;
     }
     
-    // 非会員または無料会員がプランを選択した場合
+    // 無料会員プランを選択した場合
     if (planId === 'free') {
-      if (!userData || userData.subscription_status === 'none') {
-        // 非会員→無料会員の場合、すでにログイン済みなら直接完了画面へ
-        setActiveStep(2);
-        setPaymentSuccess(true);
-      } else {
-        // すでに無料会員ならメッセージだけ表示（または何もしない）
-        // すでにボタンがdisabledになっているはずなので、ここには来ないはず
-      }
+      // すでに無料会員ならメッセージだけ表示（または何もしない）
+      // すでにボタンがdisabledになっているはずなので、ここには来ないはず
       return;
     }
-  }, [user, userData, isPaid]);
+  }, [isPaid]);
   
   const handleConfirmCancel = async () => {
     if (cancelLoading) return;
@@ -388,12 +369,6 @@ const SubscriptionPage = () => {
     }
   };
   
-  const handleRegisterConfirm = () => {
-    setRegisterDialogOpen(false);
-    // ログインページにリダイレクト
-    navigate('/login', { state: { returnUrl: '/subscription' } });
-  };
-  
   const handlePaymentComplete = () => {
     setActiveStep(2);
     setPaymentSuccess(true);
@@ -409,8 +384,6 @@ const SubscriptionPage = () => {
   const handleClose = () => {
     navigate('/');
   };
-  
-  // 手動更新機能を削除
 
   // 支払い成功時のコンポーネント表示条件
   const showSuccessComponent = activeStep === 2 && paymentSuccess;
@@ -418,6 +391,11 @@ const SubscriptionPage = () => {
   // 支払い成功時のロード表示条件（データ未確定かつリトライ中またはデータ確認待ち）
   const showSuccessLoading = showSuccessComponent && !dataConfirmed && 
     (refreshingUserData || retryProgress || (selectedPlan !== 'free' && userData?.subscription_status !== 'paid'));
+  
+  // ユーザーが存在しない場合、ログインページにリダイレクト
+  if (!user) {
+    return null; // useEffectでリダイレクト処理をしているので、ここでは何も表示しない
+  }
   
   return (
     <Container maxWidth="md">
@@ -467,15 +445,6 @@ const SubscriptionPage = () => {
           <Alert severity="error" sx={{ mb: 4 }}>
             <AlertTitle>エラー</AlertTitle>
             {error}
-          </Alert>
-        )}
-        
-        {!user && !paymentSuccess && (
-          <Alert severity="info" sx={{ mb: 4 }}>
-            <AlertTitle>非会員の方へ</AlertTitle>
-            <Typography variant="body2">
-              非会員としてご利用中です。無料会員になるには会員登録が必要です。プレミアム機能を利用するには有料プランへのアップグレードをご検討ください。
-            </Typography>
           </Alert>
         )}
         
@@ -546,8 +515,6 @@ const SubscriptionPage = () => {
               </List>
               
               <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
-                {/* 「支払い方法を変更」ボタンは削除 - 現在の実装ではStripeの設定が足りないため */}
-                
                 {!effectiveUserData.subscription_cancel_at_period_end && (
                   <Button 
                     variant="outlined" 
@@ -715,29 +682,6 @@ const SubscriptionPage = () => {
               disabled={cancelLoading}
             >
               {cancelLoading ? <CircularProgress size={20} /> : "解約する"}
-            </Button>
-          </DialogActions>
-        </Dialog>
-        
-        {/* 会員登録促進ダイアログ */}
-        <Dialog
-          open={registerDialogOpen}
-          TransitionComponent={Transition}
-          keepMounted
-          onClose={() => setRegisterDialogOpen(false)}
-        >
-          <DialogTitle>会員登録が必要です</DialogTitle>
-          <DialogContent>
-            <DialogContentText>
-              このプランを利用するには会員登録が必要です。登録またはログインして続行しますか？
-            </DialogContentText>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setRegisterDialogOpen(false)}>
-              キャンセル
-            </Button>
-            <Button onClick={handleRegisterConfirm} color="primary">
-              登録/ログインへ進む
             </Button>
           </DialogActions>
         </Dialog>

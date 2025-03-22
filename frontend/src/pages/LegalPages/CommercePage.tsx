@@ -1,183 +1,237 @@
 // ~/Desktop/smart-paper-v2/frontend/src/pages/LegalPages/CommercePage.tsx
-import { Container, Typography, Box, Paper, Divider, Button, Table, TableBody, TableCell, TableContainer, TableRow } from '@mui/material';
+import React from 'react';
+import { 
+  Container, 
+  Box, 
+  Typography, 
+  Paper, 
+  Divider, 
+  Button,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableRow,
+  Link
+} from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useNavigate } from 'react-router-dom';
 
-const CommercePage = () => {
+const CommercePage: React.FC = () => {
   const navigate = useNavigate();
-  
+
   return (
     <Container maxWidth="md">
       <Box sx={{ my: 4 }}>
         <Button 
           startIcon={<ArrowBackIcon />} 
-          onClick={() => navigate(-1)}
+          onClick={() => navigate('/')}
           sx={{ mb: 2 }}
         >
-          戻る
+          ホームに戻る
         </Button>
         
         <Paper sx={{ p: 4 }}>
-          <Typography variant="h4" component="h1" gutterBottom>
+          <Typography variant="h4" component="h1" gutterBottom align="center">
             特定商取引法に基づく表記
-          </Typography>
-          
-          <Typography variant="subtitle1" gutterBottom color="text.secondary">
-            最終更新日: 2023年12月1日
           </Typography>
           
           <Divider sx={{ my: 3 }} />
           
-          <Typography paragraph>
-            「特定商取引に関する法律」第11条に基づき、以下のとおり表示いたします。
+          <Typography variant="body1" paragraph>
+            このページは、特定商取引法（特定商取引に関する法律）に基づき、Smart Paper サービスの提供者に関する情報を開示するものです。
           </Typography>
           
-          <TableContainer component={Paper} variant="outlined" sx={{ mt: 3 }}>
+          <TableContainer component={Paper} variant="outlined" sx={{ my: 4 }}>
             <Table>
               <TableBody>
                 <TableRow>
-                  <TableCell component="th" scope="row" sx={{ width: '30%', bgcolor: 'grey.100' }}>
+                  <TableCell component="th" sx={{ width: '30%', bgcolor: 'grey.100' }}>
                     <Typography variant="subtitle2">事業者の名称</Typography>
                   </TableCell>
                   <TableCell>
-                    Smart Paper v2運営事務局
+                    <Typography>
+                      Smart Paper サービス運営事務局
+                    </Typography>
                   </TableCell>
                 </TableRow>
                 
                 <TableRow>
-                  <TableCell component="th" scope="row" sx={{ bgcolor: 'grey.100' }}>
-                    <Typography variant="subtitle2">代表者名</Typography>
+                  <TableCell component="th" sx={{ bgcolor: 'grey.100' }}>
+                    <Typography variant="subtitle2">運営責任者</Typography>
                   </TableCell>
                   <TableCell>
-                    山田 太郎
+                    <Typography>
+                      プライバシー保護のため、お問い合わせ時に開示いたします。
+                    </Typography>
                   </TableCell>
                 </TableRow>
                 
                 <TableRow>
-                  <TableCell component="th" scope="row" sx={{ bgcolor: 'grey.100' }}>
+                  <TableCell component="th" sx={{ bgcolor: 'grey.100' }}>
                     <Typography variant="subtitle2">所在地</Typography>
                   </TableCell>
                   <TableCell>
-                    〒XXX-XXXX<br />
-                    東京都○○区△△X-X-X
+                    <Typography>
+                      プライバシー保護のため、お問い合わせ時に開示いたします。
+                    </Typography>
                   </TableCell>
                 </TableRow>
                 
                 <TableRow>
-                  <TableCell component="th" scope="row" sx={{ bgcolor: 'grey.100' }}>
-                    <Typography variant="subtitle2">電話番号</Typography>
+                  <TableCell component="th" sx={{ bgcolor: 'grey.100' }}>
+                    <Typography variant="subtitle2">お問い合わせ先</Typography>
                   </TableCell>
                   <TableCell>
-                    03-XXXX-XXXX<br />
-                    （受付時間: 平日10:00〜18:00）
+                    <Typography>
+                      メールアドレス: support@smart-paper.example.com<br />
+                      サービス利用時の不具合報告フォーム: <Link href="https://github.com/your-repository/issues/new" target="_blank" rel="noopener noreferrer">GitHub Issues</Link>
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                      ※お問い合わせには平日3営業日以内に対応いたします。
+                    </Typography>
                   </TableCell>
                 </TableRow>
                 
                 <TableRow>
-                  <TableCell component="th" scope="row" sx={{ bgcolor: 'grey.100' }}>
-                    <Typography variant="subtitle2">メールアドレス</Typography>
+                  <TableCell component="th" sx={{ bgcolor: 'grey.100' }}>
+                    <Typography variant="subtitle2">販売価格</Typography>
                   </TableCell>
                   <TableCell>
-                    support@smartpaper-v2.example.com
-                  </TableCell>
-                </TableRow>
-                
-                <TableRow>
-                  <TableCell component="th" scope="row" sx={{ bgcolor: 'grey.100' }}>
-                    <Typography variant="subtitle2">URL</Typography>
-                  </TableCell>
-                  <TableCell>
-                    https://smartpaper-v2.example.com/
-                  </TableCell>
-                </TableRow>
-                
-                <TableRow>
-                  <TableCell component="th" scope="row" sx={{ bgcolor: 'grey.100' }}>
-                    <Typography variant="subtitle2">サービス名</Typography>
-                  </TableCell>
-                  <TableCell>
-                    Smart Paper v2
-                  </TableCell>
-                </TableRow>
-                
-                <TableRow>
-                  <TableCell component="th" scope="row" sx={{ bgcolor: 'grey.100' }}>
-                    <Typography variant="subtitle2">料金</Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
+                    <Typography>
+                      無料プラン: 0円<br />
                       月額プラン: 300円（税込）/月<br />
                       年額プラン: 3,000円（税込）/年
                     </Typography>
-                  </TableCell>
-                </TableRow>
-                
-                <TableRow>
-                  <TableCell component="th" scope="row" sx={{ bgcolor: 'grey.100' }}>
-                    <Typography variant="subtitle2">商品代金以外の必要料金</Typography>
-                  </TableCell>
-                  <TableCell>
-                    なし
-                  </TableCell>
-                </TableRow>
-                
-                <TableRow>
-                  <TableCell component="th" scope="row" sx={{ bgcolor: 'grey.100' }}>
-                    <Typography variant="subtitle2">支払方法</Typography>
-                  </TableCell>
-                  <TableCell>
-                    クレジットカード決済（VISA、Mastercard、JCB、American Express、Diners Club）
-                  </TableCell>
-                </TableRow>
-                
-                <TableRow>
-                  <TableCell component="th" scope="row" sx={{ bgcolor: 'grey.100' }}>
-                    <Typography variant="subtitle2">支払時期</Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      月額プラン: 申込時および契約更新時に課金<br />
-                      年額プラン: 申込時および契約更新時に課金
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                      ※表示価格はすべて消費税込みです。
                     </Typography>
                   </TableCell>
                 </TableRow>
                 
                 <TableRow>
-                  <TableCell component="th" scope="row" sx={{ bgcolor: 'grey.100' }}>
+                  <TableCell component="th" sx={{ bgcolor: 'grey.100' }}>
+                    <Typography variant="subtitle2">サービス内容</Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Typography>
+                      研究歴の浅い大学生や大学院生（特に工学、自然科学系）が、英語論文を読む際の障壁を下げ、論文整理の時間を短縮し、研究活動を効率化することを支援するサービス
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+                
+                <TableRow>
+                  <TableCell component="th" sx={{ bgcolor: 'grey.100' }}>
+                    <Typography variant="subtitle2">お支払い方法</Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Typography>
+                      クレジットカード決済（Stripe決済）
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                      ※対応カードブランド: Visa, MasterCard, American Express, JCB, Diners Club, Discover
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+                
+                <TableRow>
+                  <TableCell component="th" sx={{ bgcolor: 'grey.100' }}>
+                    <Typography variant="subtitle2">お支払い時期</Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Typography>
+                      月額プラン: 申込時に初月分をお支払いいただき、その後は毎月の契約更新日に自動決済されます。<br />
+                      年額プラン: 申込時に1年分をお支払いいただき、その後は毎年の契約更新日に自動決済されます。
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+                
+                <TableRow>
+                  <TableCell component="th" sx={{ bgcolor: 'grey.100' }}>
                     <Typography variant="subtitle2">サービス提供時期</Typography>
                   </TableCell>
                   <TableCell>
-                    お支払い完了後、ただちにご利用いただけます。
-                  </TableCell>
-                </TableRow>
-                
-                <TableRow>
-                  <TableCell component="th" scope="row" sx={{ bgcolor: 'grey.100' }}>
-                    <Typography variant="subtitle2">返品・キャンセルについて</Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      本サービスは、デジタルコンテンツの性質上、申込み完了後の返品・キャンセルはできません。<br />
-                      なお、サブスクリプションは各マイページから更新の停止（解約）が可能です。解約後も期間満了までサービスをご利用いただけます。
+                    <Typography>
+                      お支払い完了後、即時にサービスをご利用いただけます。
                     </Typography>
                   </TableCell>
                 </TableRow>
                 
                 <TableRow>
-                  <TableCell component="th" scope="row" sx={{ bgcolor: 'grey.100' }}>
+                  <TableCell component="th" sx={{ bgcolor: 'grey.100' }}>
+                    <Typography variant="subtitle2">キャンセル・解約</Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Typography paragraph>
+                      アカウントページから、いつでもサブスクリプションを解約できます。解約後は現在の請求期間の終了まで引き続きサービスをご利用いただけます。
+                    </Typography>
+                    <Typography paragraph>
+                      解約後、自動的に無料プランに切り替わります。解約手続き完了後の返金はいたしかねますのでご了承ください。
+                    </Typography>
+                    <Typography>
+                      サービス初回利用から7日以内であれば、全額返金いたします。返金をご希望の場合は、上記メールアドレスまでご連絡ください。
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+                
+                <TableRow>
+                  <TableCell component="th" sx={{ bgcolor: 'grey.100' }}>
                     <Typography variant="subtitle2">動作環境</Typography>
                   </TableCell>
                   <TableCell>
-                    <Typography variant="body2">
-                      ・対応ブラウザ: Google Chrome、Firefox、Safari、Microsoft Edge（最新版）<br />
-                      ・対応OS: Windows 10以上、macOS 10.13以上、iOS 13以上、Android 9以上<br />
-                      ・インターネット接続環境が必要です
+                    <Typography>
+                      Google Chrome, Mozilla Firefox, Safari, Microsoft Edge（最新版およびメジャーバージョン1つ前まで）
                     </Typography>
+                  </TableCell>
+                </TableRow>
+                
+                <TableRow>
+                  <TableCell component="th" sx={{ bgcolor: 'grey.100' }}>
+                    <Typography variant="subtitle2">プライバシーポリシー</Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Link href="/privacy" onClick={(e) => {
+                      e.preventDefault();
+                      navigate('/privacy');
+                    }}>
+                      プライバシーポリシーはこちら
+                    </Link>
+                  </TableCell>
+                </TableRow>
+                
+                <TableRow>
+                  <TableCell component="th" sx={{ bgcolor: 'grey.100' }}>
+                    <Typography variant="subtitle2">利用規約</Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Link href="/terms" onClick={(e) => {
+                      e.preventDefault();
+                      navigate('/terms');
+                    }}>
+                      利用規約はこちら
+                    </Link>
                   </TableCell>
                 </TableRow>
               </TableBody>
             </Table>
           </TableContainer>
+          
+          <Box sx={{ mt: 4 }}>
+            <Typography variant="body2" color="text.secondary">
+              本ページの内容は、特定商取引法に基づき、オンライン上での取引における重要事項を表示しています。
+              当サービスをご利用いただくことで、上記の内容に同意いただいたものとみなします。
+            </Typography>
+          </Box>
+          
+          <Box sx={{ mt: 4, textAlign: 'center' }}>
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={() => navigate('/')}
+            >
+              ホームに戻る
+            </Button>
+          </Box>
         </Paper>
       </Box>
     </Container>

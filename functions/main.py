@@ -134,6 +134,28 @@ def verify_firebase_token(request: Request):
     
     return user_id
 
+# 認証が必要なメソッドを強制する関数を追加
+def require_authentication(request: Request):
+    """
+    リクエストから認証情報を取得し、未認証の場合は例外をスロー
+    
+    Args:
+        request: Flaskのリクエストオブジェクト
+        
+    Returns:
+        str: 認証済みユーザーID
+        
+    Raises:
+        AuthenticationError: 認証情報がない、または無効な場合
+    """
+    user_id = verify_firebase_token(request)
+    
+    if not user_id:
+        log_error("AuthError", "Authentication required", {"path": request.path})
+        raise AuthenticationError("このAPIを使用するには認証が必要です")
+        
+    return user_id
+
 @functions_framework.http
 def process_pdf(request: Request):
     """
@@ -177,16 +199,8 @@ def process_pdf(request: Request):
             
         add_step(session_id, temp_paper_id, "file_validation_complete", {"file_size": content_length, "filename": pdf_file.filename})
 
-        # Firebase AuthenticationのIDトークン検証
-        user_id = verify_firebase_token(request)
-        
-        # 認証情報がない場合はエラー
-        if not user_id:
-            log_warning("Auth", "No user ID provided in request, operation might be limited")
-            # 認証情報がない場合は特別なユーザーIDを割り当て（テスト/開発環境用）
-            # 本番環境では認証を必須にするべきだが、開発中は許可
-            user_id = "anonymous_user"
-            
+        # 認証を必須に変更 - 認証なしでは処理を続行しない
+        user_id = require_authentication(request)
         add_step(session_id, temp_paper_id, "auth_complete", {"user_id": user_id})
 
         # Cloud StorageにPDFを保存
@@ -291,12 +305,10 @@ def process_pdf_background(request: Request):
             
         add_step(session_id, paper_id, "request_validation_complete", {"paper_id": paper_id})
 
-        # 認証確認（オプション）- バックグラウンド処理は認証が必須ではないケースも
-        user_id = verify_firebase_token(request)
-        if user_id:
-            log_info("Auth", f"Background process initiated by authenticated user: {user_id}")
-        else:
-            log_info("Auth", "Background process initiated without user authentication")
+        # 認証を必須に変更 - 認証なしでは処理を続行しない
+        user_id = require_authentication(request)
+        log_info("Auth", f"Background process initiated by authenticated user: {user_id}")
+        add_step(session_id, paper_id, "auth_complete", {"user_id": user_id})
 
         # 論文ドキュメントを取得
         doc_ref = db.collection("papers").document(paper_id)
@@ -304,6 +316,13 @@ def process_pdf_background(request: Request):
 
         if not paper_data:
             raise NotFoundError(f"Paper with ID {paper_id} not found")
+            
+        # 権限チェック：paper.user_id とリクエストユーザーIDが一致することを確認
+        paper_owner_id = paper_data.get("user_id")
+        if paper_owner_id != user_id:
+            log_error("AuthError", "User is not authorized to access this paper", 
+                     {"user_id": user_id, "paper_id": paper_id, "paper_owner_id": paper_owner_id})
+            raise AuthenticationError("この論文へのアクセス権限がありません")
 
         pdf_gs_path = paper_data.get("file_path")
         if not pdf_gs_path:
@@ -487,12 +506,10 @@ def get_signed_url(request: Request):
         bucket_name = parts[0]
         object_name = parts[1]
 
-        # 認証情報の確認
-        user_id = verify_firebase_token(request)
-        if user_id:
-            log_info("Auth", f"Signed URL requested by authenticated user: {user_id}")
-        else:
-            log_info("Auth", "Signed URL requested without user authentication")
+        # 認証を必須に変更 - 認証なしでは処理を続行しない
+        user_id = require_authentication(request)
+        log_info("Auth", f"Signed URL requested by authenticated user: {user_id}")
+        add_step(session_id, temp_paper_id, "auth_complete", {"user_id": user_id})
 
         # 署名付きURL用の認証情報を取得
         try:

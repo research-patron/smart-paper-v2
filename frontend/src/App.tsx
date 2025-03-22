@@ -30,7 +30,6 @@ import { useAuthStore } from './store/authStore';
 import { usePaperStore } from './store/paperStore'; // 追加: PaperStoreをインポート
 
 // 認証が必要なルートのラッパーコンポーネント
-// 認証なしでもアクセス可能に変更（開発中のため）
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuthStore();
   
@@ -43,14 +42,11 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
     );
   }
   
-  // 開発中は認証をバイパス
+  // 本番用コード: 未認証の場合はログインページにリダイレクト
+  if (!user) {
+    return <Navigate to="/login" />;
+  }
   return <>{children}</>;
-  
-  // 本番用コード（未認証の場合はログインページにリダイレクト）
-  // if (!user) {
-  //   return <Navigate to="/login" />;
-  // }
-  // return <>{children}</>;
 };
 
 // ナビゲーション監視コンポーネント
@@ -88,7 +84,7 @@ const convertToUserData = (data: any) => {
   if (!data) return null;
   
   return {
-    subscription_status: (data.subscription_status as 'none' | 'free' | 'paid') || 'none',
+    subscription_status: (data.subscription_status as 'free' | 'paid') || 'free',
     subscription_end_date: data.subscription_end_date || null,
     subscription_cancel_at_period_end: data.subscription_cancel_at_period_end || false,
     name: data.name,
@@ -244,7 +240,7 @@ function App() {
           <Header />
           <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 3 } }}>
             <Routes>
-              <Route path="/" element={<HomePage />} />
+              <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />

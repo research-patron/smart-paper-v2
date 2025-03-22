@@ -32,7 +32,6 @@ import { useAuthStore } from '../../store/authStore';
 // プラン情報の型定義
 interface PlanFeature {
   name: string;
-  none: string | boolean; // 非会員
   free: string | boolean; // 無料会員
   paid: string | boolean; // 有料会員
 }
@@ -63,12 +62,12 @@ const Plans: React.FC<PlansProps> = ({
   
   // プラン機能の比較データ
   const planFeatures: PlanFeature[] = useMemo(() => [
-    { name: '翻訳数', none: '1個/日', free: '3個/月', paid: '無制限' },
-    { name: '論文保存期間', none: '0日間', free: '3日間', paid: '1ヶ月間' },
-    { name: '関連論文推薦', none: '利用可能', free: '3件/月', paid: '無制限' },
-    { name: 'PDFファイルサイズ上限', none: '20MB', free: '20MB', paid: '20MB' },
-    { name: 'Obsidian連携', none: true, free: true, paid: true },
-    { name: 'Zotero連携', none: true, free: true, paid: true },
+    { name: '翻訳数', free: '3個/月', paid: '無制限' },
+    { name: '論文保存期間', free: '3日間', paid: '1ヶ月間' },
+    { name: '関連論文推薦', free: '3件/月', paid: '無制限' },
+    { name: 'PDFファイルサイズ上限', free: '20MB', paid: '20MB' },
+    { name: 'Obsidian連携', free: true, paid: true },
+    { name: 'Zotero連携', free: true, paid: true },
   ], []);
   
   // お得率の計算
@@ -77,16 +76,8 @@ const Plans: React.FC<PlansProps> = ({
   // お得率: (4,200 - 3,000) / 4,200 ≈ 0.2857... = 約29%
   const savingsPercentage = 29;
   
-  // プランオプション
-  const allPlanOptions: PlanOption[] = useMemo(() => [
-    {
-      id: 'none',
-      title: '非会員プラン',
-      price: '¥0',
-      period: '登録不要',
-      description: '会員登録なしで基本機能を試せるプラン',
-      features: planFeatures,
-    },
+  // プランオプション - 非会員プランを削除
+  const planOptions: PlanOption[] = useMemo(() => [
     {
       id: 'free',
       title: '無料会員プラン',
@@ -106,25 +97,13 @@ const Plans: React.FC<PlansProps> = ({
     }
   ], [annually, planFeatures]);
   
-  // ログイン状態に応じてプランをフィルタリング
-  // ログイン済みの場合は「非会員プラン」を表示しない
-  const planOptions = useMemo(() => 
-    user 
-      ? allPlanOptions.filter(plan => plan.id !== 'none')
-      : allPlanOptions,
-    [user, allPlanOptions]
-  );
-  
   // 現在のプラン状態を計算
   const activePlan = useMemo(() => {
-    if (!user) {
-      return 'none'; // ログインしていない場合は非会員
-    }
     if (userData?.subscription_status === 'paid') {
       return annually ? 'annual' : 'monthly'; // 有料会員は年払いか月払いのプラン
     }
     return 'free'; // 無料会員
-  }, [user, userData, annually]);
+  }, [userData, annually]);
   
   // 比較表のみ表示する場合
   if (showComparisonOnly) {
@@ -149,9 +128,6 @@ const Plans: React.FC<PlansProps> = ({
             <TableHead>
               <TableRow>
                 <TableCell>機能</TableCell>
-                {!user && (
-                  <TableCell align="center">非会員プラン</TableCell>
-                )}
                 <TableCell align="center">無料会員プラン</TableCell>
                 <TableCell align="center">プレミアムプラン {annually ? "(年額 ¥3,000)" : "(月額 ¥350)"}</TableCell>
               </TableRow>
@@ -162,24 +138,6 @@ const Plans: React.FC<PlansProps> = ({
                   <TableCell component="th" scope="row">
                     {feature.name}
                   </TableCell>
-                  {!user && (
-                    <TableCell align="center">
-                      {typeof feature.none === 'boolean' ? (
-                        feature.none ? 
-                          <CheckIcon color="success" /> : 
-                          <CloseIcon color="error" />
-                      ) : (
-                        // 論文保存期間が0日間の場合は灰色表示
-                        feature.name === '論文保存期間' && feature.none === '0日間' ? (
-                          <Typography color="text.disabled">
-                            {feature.none}
-                          </Typography>
-                        ) : (
-                          feature.none
-                        )
-                      )}
-                    </TableCell>
-                  )}
                   <TableCell align="center">
                     {typeof feature.free === 'boolean' ? (
                       feature.free ? 
@@ -213,11 +171,6 @@ const Plans: React.FC<PlansProps> = ({
                 <TableCell component="th" scope="row">
                   料金
                 </TableCell>
-                {!user && (
-                  <TableCell align="center">
-                    ¥0
-                  </TableCell>
-                )}
                 <TableCell align="center">
                   ¥0
                 </TableCell>
@@ -351,9 +304,7 @@ const Plans: React.FC<PlansProps> = ({
                 {planFeatures.map((feature, index) => {
                   // プランIDに基づいて適切な機能値を選択
                   let value;
-                  if (plan.id === 'none') {
-                    value = feature.none;
-                  } else if (plan.id === 'free') {
+                  if (plan.id === 'free') {
                     value = feature.free;
                   } else {
                     value = feature.paid;
@@ -374,11 +325,7 @@ const Plans: React.FC<PlansProps> = ({
                         primary={
                           <Typography
                             variant="body2"
-                            color={isEnabled ? 
-                              // 論文保存期間が0日間の場合は灰色表示
-                              (feature.name === '論文保存期間' && value === '0日間' ? 
-                                "text.disabled" : "text.primary") 
-                              : "text.disabled"}
+                            color={isEnabled ? "text.primary" : "text.disabled"}
                           >
                             {feature.name}: {typeof value === 'boolean' ? 
                               (value ? '利用可能' : '利用不可') : 
@@ -407,7 +354,7 @@ const Plans: React.FC<PlansProps> = ({
               >
                 {plan.id === activePlan ? 
                   '現在のプラン' : 
-                  (plan.id === 'none' || plan.id === 'free') ? '選択する' : 'アップグレード'}
+                  plan.id === 'free' ? '選択する' : 'アップグレード'}
               </Button>
             </CardActions>
             
