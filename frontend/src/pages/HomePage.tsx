@@ -719,29 +719,6 @@ const HomePage = () => {
           </>
         )}
         
-        {/* サブスクリプション情報 */}
-        {user && userData && (
-          <Box sx={{ mt: 4 }}>
-            <Divider sx={{ mb: 2 }} />
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Typography variant="body2" color="text.secondary">
-                現在のプラン: {userData.subscription_status === 'paid' ? 'プレミアムプラン' : '無料プラン'}
-              </Typography>
-              
-              {userData.subscription_status !== 'paid' && (
-                <Button
-                  variant="outlined"
-                  size="small"
-                  color="primary"
-                  onClick={() => navigate('/subscription')}
-                >
-                  プレミアムにアップグレード
-                </Button>
-              )}
-            </Box>
-          </Box>
-        )}
-        
         {/* 削除確認ダイアログ */}
         <Dialog
           open={deleteDialogOpen}
