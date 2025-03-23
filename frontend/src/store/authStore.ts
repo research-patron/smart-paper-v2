@@ -23,6 +23,10 @@ interface UserData {
   email?: string;
   created_at?: Timestamp;
   updated_at?: Timestamp;
+  // 翻訳回数の管理用フィールドを追加
+  translation_count?: number;
+  translation_period_start?: Timestamp | null;
+  translation_period_end?: Timestamp | null;
 }
 
 interface AuthState {
@@ -56,7 +60,10 @@ const convertToUserData = (data: DocumentData | null): UserData | null => {
     subscription_status: data.subscription_status,
     subscription_plan: data.subscription_plan,
     subscription_end_date: data.subscription_end_date,
-    subscription_cancel_at_period_end: data.subscription_cancel_at_period_end
+    subscription_cancel_at_period_end: data.subscription_cancel_at_period_end,
+    translation_count: data.translation_count, // 追加: 翻訳回数
+    translation_period_start: data.translation_period_start, // 追加: 翻訳期間開始日
+    translation_period_end: data.translation_period_end // 追加: 翻訳期間終了日
   });
   
   // noneステータスの場合はfreeに変換
@@ -70,7 +77,11 @@ const convertToUserData = (data: DocumentData | null): UserData | null => {
     name: data.name,
     email: data.email,
     created_at: data.created_at,
-    updated_at: data.updated_at
+    updated_at: data.updated_at,
+    // 翻訳回数関連フィールドを追加
+    translation_count: data.translation_count || 0,
+    translation_period_start: data.translation_period_start || null,
+    translation_period_end: data.translation_period_end || null
   };
 };
 

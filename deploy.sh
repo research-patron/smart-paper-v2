@@ -253,19 +253,6 @@ gcloud functions deploy stripe_webhook \
   --allow-unauthenticated \
   --set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},STRIPE_WEBHOOK_SECRET=${WEBHOOK_SECRET},STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
 
-# テスト用Webhook関数
-echo -e "\n${BLUE}stripe_webhook_test 関数をデプロイしています...${NC}"
-gcloud functions deploy stripe_webhook_test \
-  --region=${REGION} \
-  --runtime=python310 \
-  --trigger-http \
-  --source=./functions \
-  --entry-point=stripe_webhook_test \
-  --memory=256MB \
-  --timeout=60s \
-  --allow-unauthenticated \
-  --set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},STRIPE_WEBHOOK_SECRET=${WEBHOOK_SECRET},STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
-
 echo -e "\n${GREEN}デプロイが完了しました！${NC}"
 echo -e "以下のURLでCloud Functionsにアクセスできます:"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf${NC}"

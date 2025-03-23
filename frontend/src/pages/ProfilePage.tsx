@@ -20,7 +20,8 @@ import {
   DialogContentText,
   DialogTitle,
   Tabs,
-  Tab
+  Tab,
+  LinearProgress
 } from '@mui/material';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import EditIcon from '@mui/icons-material/Edit';
@@ -32,6 +33,8 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import BookIcon from '@mui/icons-material/Book';
 import StarIcon from '@mui/icons-material/Star';
 import PaymentIcon from '@mui/icons-material/Payment';
+import ArticleIcon from '@mui/icons-material/Article';
+import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import { useAuthStore } from '../store/authStore';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../api/firebase';
@@ -199,6 +202,25 @@ const ProfilePage = () => {
     }
   }, [userData]);
   
+  // 翻訳の利用状況情報
+  const translationCount = userData?.translation_count || 0;
+  const translationPeriodStart = userData?.translation_period_start
+    ? typeof userData.translation_period_start.toDate === 'function'
+      ? userData.translation_period_start.toDate()
+      : new Date(userData.translation_period_start as any)
+    : null;
+  const translationPeriodEnd = userData?.translation_period_end
+    ? typeof userData.translation_period_end.toDate === 'function'
+      ? userData.translation_period_end.toDate()
+      : new Date(userData.translation_period_end as any)
+    : null;
+  
+  // 翻訳数の制限（無料会員: 3件/月, 有料会員: 無制限）
+  const translationLimit = userData?.subscription_status === 'paid' ? '無制限' : '3';
+  
+  // 使用率を計算（無料会員の場合のみ）
+  const usagePercentage = userData?.subscription_status !== 'paid' ? Math.min((translationCount / 3) * 100, 100) : 0;
+  
   // 初回マウント時にのみユーザーデータを更新
   useEffect(() => {
     if (user && !dataInitialized && !isUpdatingRef.current) {
@@ -263,7 +285,26 @@ const ProfilePage = () => {
     subscription_end_date: null,
     name: user.displayName || user.email?.split('@')[0] || 'ユーザー',
     email: user.email,
-    updated_at: null
+    updated_at: null,
+    translation_count: 0,
+    translation_period_start: null,
+    translation_period_end: null
+  };
+  
+  // 翻訳期間をフォーマット
+  const formatDate = (date: Date | null) => {
+    if (!date) return '不明';
+    
+    try {
+      return date.toLocaleDateString('ja-JP', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    } catch (error) {
+      console.error('Date formatting error:', error);
+      return '日付形式エラー';
+    }
   };
   
   return (
@@ -420,6 +461,64 @@ const ProfilePage = () => {
                 )}
               </Paper>
 
+              {/* 翻訳使用状況 */}
+              <Typography variant="h6" gutterBottom>
+                翻訳使用状況
+              </Typography>
+              
+              <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <ArticleIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="subtitle2">
+                      月間翻訳
+                    </Typography>
+                    <Typography variant="h5">
+                      {translationCount} / {translationLimit}件
+                    </Typography>
+                  </Box>
+                </Box>
+                
+                {/* 使用率プログレスバー (無料会員のみ表示) */}
+                {effectiveUserData.subscription_status !== 'paid' && (
+                  <Box sx={{ mt: 1, mb: 1 }}>
+                    <LinearProgress 
+                      variant="determinate" 
+                      value={usagePercentage} 
+                      color={usagePercentage >= 100 ? "error" : usagePercentage >= 75 ? "warning" : "primary"}
+                      sx={{ height: 6, borderRadius: 3 }}
+                    />
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                      {usagePercentage >= 100 ? "上限に達しました" : 
+                       usagePercentage >= 75 ? "残りわずかです" : 
+                       "まだ余裕があります"}
+                    </Typography>
+                  </Box>
+                )}
+                
+                {/* 翻訳期間情報 */}
+                <Box sx={{ display: 'flex', alignItems: 'center', mt: 2 }}>
+                  <CalendarTodayIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
+                  <Box>
+                    <Typography variant="subtitle2">
+                      翻訳使用期間
+                    </Typography>
+                    <Typography variant="body2">
+                      {translationPeriodStart && translationPeriodEnd ? 
+                        `${formatDate(translationPeriodStart)} 〜 ${formatDate(translationPeriodEnd)}` : 
+                        '期間情報がありません'}
+                    </Typography>
+                  </Box>
+                </Box>
+                
+                {/* 翻訳数の上限に達している場合は警告 */}
+                {effectiveUserData.subscription_status !== 'paid' && translationCount >= 3 && (
+                  <Alert severity="warning" sx={{ mt: 2 }}>
+                    月間翻訳数の上限に達しています。プレミアムプランにアップグレードすると無制限で翻訳できます。
+                  </Alert>
+                )}
+              </Paper>
+
               {/* セキュリティ機能を基本情報タブに統合 */}
               <Typography variant="h6" gutterBottom>
                 セキュリティ設定
@@ -511,7 +610,7 @@ const ProfilePage = () => {
               <ul>
                 <li>
                   <Typography variant="body2">
-                    <strong>翻訳数無制限：</strong> 1日あたりの翻訳制限がなくなります
+                    <strong>翻訳数無制限：</strong> 1月あたりの翻訳制限がなくなります
                   </Typography>
                 </li>
                 <li>

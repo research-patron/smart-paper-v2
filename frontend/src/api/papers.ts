@@ -174,6 +174,39 @@ export const uploadPDF = async (file: File, userId: string): Promise<string> => 
       throw new Error('ファイルサイズは20MB以下にしてください');
     }
     
+    // 追加: 翻訳制限のチェック
+    // ユーザーのデータをFirestoreから取得
+    const userDoc = await getDoc(doc(db, 'users', userId));
+    if (!userDoc.exists()) {
+      throw new Error('ユーザー情報の取得に失敗しました');
+    }
+    
+    const userData = userDoc.data();
+    
+    // 翻訳期間のチェック
+    const now = new Date();
+    let needsNewPeriod = false;
+    
+    if (!userData.translation_period_start || !userData.translation_period_end) {
+      // 翻訳期間が設定されていない場合は新しい期間を設定
+      needsNewPeriod = true;
+    } else {
+      // 翻訳期間が終了しているかチェック
+      const periodEnd = userData.translation_period_end.toDate();
+      if (now > periodEnd) {
+        // 期間が終了している場合は新しい期間を設定
+        needsNewPeriod = true;
+      }
+    }
+    
+    // 無料会員の場合は翻訳数をチェック
+    if (userData.subscription_status === 'free' && !needsNewPeriod) {
+      const translationCount = userData.translation_count || 0;
+      if (translationCount >= 3) {
+        throw new Error('月間翻訳数の上限（3件）に達しました。プレミアムプランにアップグレードすると無制限に翻訳できます。');
+      }
+    }
+    
     // 2. PDFファイルをCloud Functionsにアップロード
     const formData = new FormData();
     formData.append('file', file);

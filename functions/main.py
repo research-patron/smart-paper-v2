@@ -12,6 +12,7 @@ import time
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 from firebase_admin import credentials
+from dateutil.relativedelta import relativedelta
 
 # 自作モジュールのインポート
 from process_pdf import (
@@ -156,6 +157,92 @@ def require_authentication(request: Request):
         
     return user_id
 
+# 翻訳数制限のチェックと更新を行う関数
+def check_and_update_translation_limit(user_id: str, check_only: bool = False):
+    """
+    ユーザーの翻訳数制限をチェックし、必要に応じて更新する
+    
+    Args:
+        user_id: ユーザーID
+        check_only: True の場合はチェックのみを行い、カウントの更新は行わない
+        
+    Returns:
+        bool: 翻訳が許可される場合は True、それ以外は False
+        
+    Raises:
+        ValidationError: 翻訳数制限に達している場合
+    """
+    user_ref = db.collection("users").document(user_id)
+    user_doc = user_ref.get()
+    user_data = user_doc.to_dict()
+    
+    if not user_data:
+        log_warning("TranslationLimit", f"User data not found for user: {user_id}")
+        # ユーザーデータがない場合は制限なしとする
+        return True
+    
+    # 現在の日時
+    now = datetime.datetime.now()
+    
+    # 翻訳期間のチェック
+    translation_period_start = user_data.get("translation_period_start")
+    translation_period_end = user_data.get("translation_period_end")
+    
+    # 期間が設定されていないか、期間が終了している場合は新しい期間を設定
+    if not translation_period_start or not translation_period_end or translation_period_end.replace(tzinfo=None) < now:
+        # 新しい期間を設定 (1ヶ月間)
+        new_period_start = now
+        new_period_end = now + relativedelta(months=1)  # 1ヶ月後
+        
+        if not check_only:
+            # Firestoreを更新
+            user_ref.update({
+                "translation_period_start": new_period_start,
+                "translation_period_end": new_period_end,
+                "translation_count": 0  # カウントをリセット
+            })
+            log_info("TranslationLimit", f"Reset translation period for user: {user_id}")
+        
+        # 期間をリセットしたので、翻訳を許可
+        return True
+    
+    # 無料会員の場合は翻訳数をチェック
+    if user_data.get("subscription_status") != "paid":
+        translation_count = user_data.get("translation_count", 0)
+        
+        # 月3件の上限に達している場合はエラー
+        if translation_count >= 3:
+            log_warning("TranslationLimit", f"User {user_id} has reached the translation limit (3/month)")
+            raise ValidationError("月間翻訳数の上限（3件）に達しました。プレミアムプランにアップグレードすると無制限に翻訳できます。")
+        
+        # カウントの更新が必要な場合
+        if not check_only:
+            # トランザクションを使用して確実に更新
+            transaction = db.transaction()
+            
+            @firestore.transactional
+            def update_in_transaction(transaction, user_ref):
+                # 最新のデータを取得
+                user_snapshot = user_ref.get(transaction=transaction)
+                user_data = user_snapshot.to_dict()
+                
+                # 最新の翻訳数
+                current_count = user_data.get("translation_count", 0)
+                
+                # カウントを更新
+                transaction.update(user_ref, {
+                    "translation_count": current_count + 1,
+                    "updated_at": datetime.datetime.now()
+                })
+                
+                log_info("TranslationLimit", f"Updated translation count for user {user_id}: {current_count + 1}")
+                return True
+            
+            # トランザクションで更新を実行
+            update_in_transaction(transaction, user_ref)
+    
+    return True
+
 @functions_framework.http
 def process_pdf(request: Request):
     """
@@ -164,6 +251,7 @@ def process_pdf(request: Request):
     # 処理時間測定開始
     session_id, temp_paper_id = start_timer("process_pdf")
     paper_id = None
+    user_id = None
     
     try:
         # CORSヘッダーの設定
@@ -203,6 +291,10 @@ def process_pdf(request: Request):
         user_id = require_authentication(request)
         add_step(session_id, temp_paper_id, "auth_complete", {"user_id": user_id})
 
+        # 翻訳数制限のチェック（更新はまだしない - check_only=True）
+        check_and_update_translation_limit(user_id, check_only=True)
+        add_step(session_id, temp_paper_id, "translation_limit_check_complete", {"user_id": user_id})
+
         # Cloud StorageにPDFを保存
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
         file_name = f"{timestamp}_{pdf_file.filename}"
@@ -240,6 +332,11 @@ def process_pdf(request: Request):
         add_step(session_id, paper_id, "firestore_document_created", {"paper_id": paper_id})
 
         log_info("Firestore", f"Created paper document with ID: {paper_id}")
+
+        # 翻訳数制限カウントを更新（check_only=False）
+        # カウント更新に成功した場合のみ処理を続行する
+        check_and_update_translation_limit(user_id, check_only=False)
+        add_step(session_id, paper_id, "translation_limit_updated", {"user_id": user_id})
 
         # バックグラウンド処理を起動
         try:
