@@ -1,30 +1,88 @@
-// Firebase Console > Firestore Database > Rules タブに設定する
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // users コレクション: 認証されたユーザーのみが自分のドキュメントを読み書きできる
+    // ユーザードキュメントに対するルール
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      // 自分自身のドキュメントのみ読み書き可能
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if false; // 削除は禁止
+    }
+    
+    // 論文ドキュメントに対するルール
+    match /papers/{paperId} {
+      // 所有者と管理者のみ読み取り可能
+      allow read: if request.auth != null && (
+        request.auth.uid == resource.data.user_id || 
+        request.auth.token.email == 's.kosei0626@gmail.com'
+      );
       
-      // obsidian_settings サブコレクション: 認証されたユーザーのみが自分の設定を読み書きできる
-      match /obsidian_settings/{settingId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+      // 自分の論文のみ作成可能
+      allow create: if request.auth != null && 
+                    request.resource.data.user_id == request.auth.uid;
+      
+      // 自分の論文のみ更新可能、かつ所有者変更は不可
+      allow update: if request.auth != null && 
+                    request.auth.uid == resource.data.user_id && 
+                    request.resource.data.user_id == resource.data.user_id;
+      
+      // 自分の論文のみ削除可能
+      allow delete: if request.auth != null && 
+                    request.auth.uid == resource.data.user_id;
+      
+      // 管理者共有のための特別な更新ルール
+      allow update: if request.auth != null && 
+        request.auth.uid == resource.data.user_id && 
+        request.resource.data.user_id == resource.data.user_id && // 所有者変更は禁止
+        (
+          request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['sharedWithAdmin', 'sharedForReport', 'sharedAt', 'adminEmail'])
+        );
+        
+      // 翻訳済み章のサブコレクションに対するルール
+      match /translated_chapters/{chapterId} {
+        allow read: if request.auth != null && 
+                    get(/databases/$(database)/documents/papers/$(paperId)).data.user_id == request.auth.uid;
+        allow write: if false; // 直接の書き込みは禁止（Cloud Functionsからのみ更新可能）
       }
     }
-
-    // papers コレクション: 認証されたユーザーのみが自分の論文を読み書きできる
-    match /papers/{paperId} {
-      allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
-      allow write: if request.auth != null && 
-                    (request.resource.data.user_id == request.auth.uid || 
-                     resource.data.user_id == request.auth.uid);
-      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
-
-      // translated_chapters サブコレクション: 認証されたユーザーのみが、自分の論文の章を読み書きできる
-      match /translated_chapters/{chapterId} {
-        allow read, write: if request.auth != null && 
-                           get(/databases/$(database)/documents/papers/$(paperId)).data.user_id == request.auth.uid;
-      }
+    
+    // 問い合わせコレクションに対するルール
+    match /inquiries/{inquiryId} {
+      allow read: if request.auth != null && (
+        request.auth.uid == resource.data.userId ||        // 自分の問い合わせのみ閲覧可能
+        request.auth.token.email == 's.kosei0626@gmail.com' // 管理者は全て閲覧可能
+      );
+      allow create: if request.auth != null && 
+        request.resource.data.userId == request.auth.uid;  // 自分のユーザーIDでのみ作成可能
+      allow update: if false;  // 直接の更新は禁止
+      allow delete: if false;  // 直接の削除は禁止
+    }
+    
+    // 問題報告コレクションに対するルール
+    match /issue_reports/{reportId} {
+      allow read: if request.auth != null && (
+        request.auth.uid == resource.data.userId ||        // 自分の報告のみ閲覧可能
+        request.auth.token.email == 's.kosei0626@gmail.com' // 管理者は全て閲覧可能
+      );
+      allow create: if request.auth != null && 
+        request.resource.data.userId == request.auth.uid;  // 自分のユーザーIDでのみ作成可能
+      allow update: if false;  // 直接の更新は禁止
+      allow delete: if false;  // 直接の削除は禁止
+    }
+    
+    // パフォーマンス測定用コレクション
+    match /process_time/{docId} {
+      allow read: if false;  // ユーザーからの直接の閲覧は禁止
+      allow write: if false; // ユーザーからの直接の書き込みは禁止
+    }
+    
+    // 決済関連コレクション
+    match /payments/{paymentId} {
+      allow read: if request.auth != null && 
+                  resource.data.userId == request.auth.uid;
+      allow write: if false; // 直接の書き込みは禁止（Cloud Functionsからのみ更新可能）
     }
   }
 }

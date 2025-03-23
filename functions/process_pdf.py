@@ -31,9 +31,9 @@ from error_handling import (
 )
 
 # 使用するプロンプトファイルのパス
-TRANSLATION_PROMPT_FILE = "./prompts/translation_prompt_v1.json"
+TRANSLATION_PROMPT_FILE = ""
 SUMMARY_PROMPT_FILE = "./prompts/summary_prompt_v1.json"
-METADATA_AND_CHAPTER_PROMPT_FILE = "./prompts/metadata_and_chapter_prompt_v1.json"
+METADATA_AND_CHAPTER_PROMPT_FILE = ""
 
 # デフォルトのプロンプト (プロンプトファイルが読み込めない場合に使用)
 DEFAULT_TRANSLATION_PROMPT = """
@@ -582,7 +582,11 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
                 raise ValidationError("Chapter info is required for translation operation")
                 
             # 翻訳プロンプトのテンプレートを読み込む
-            prompt_template = load_prompt(TRANSLATION_PROMPT_FILE)
+            if not TRANSLATION_PROMPT_FILE or TRANSLATION_PROMPT_FILE == "":
+                prompt_template = DEFAULT_TRANSLATION_PROMPT
+                add_step(session_id, paper_id, "using_default_translation_prompt")
+            else:
+                prompt_template = load_prompt(TRANSLATION_PROMPT_FILE)
             
             # 安全なフォーマット処理 - 文字列置換によるフォーマット
             # format()メソッドではなく手動で置換する
@@ -592,15 +596,23 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
             prompt = prompt.replace("{chapter_title}", str(chapter_info.get('title', 'Untitled')))
             
             add_step(session_id, paper_id, "translation_prompt_prepared", 
-                   {"chapter_number": chapter_info['chapter_number']})
+                {"chapter_number": chapter_info['chapter_number']})
             
         elif operation == "summarize":
             # 論文全体の要約のためのプロンプト
-            prompt = load_prompt(SUMMARY_PROMPT_FILE)
+            if not SUMMARY_PROMPT_FILE or SUMMARY_PROMPT_FILE == "":
+                prompt = DEFAULT_SUMMARY_PROMPT
+                add_step(session_id, paper_id, "using_default_summary_prompt")
+            else:
+                prompt = load_prompt(SUMMARY_PROMPT_FILE)
             add_step(session_id, paper_id, "summary_prompt_prepared")
             
         elif operation == "extract_metadata_and_chapters":
-            prompt = load_prompt(METADATA_AND_CHAPTER_PROMPT_FILE)
+            if not METADATA_AND_CHAPTER_PROMPT_FILE or METADATA_AND_CHAPTER_PROMPT_FILE == "":
+                prompt = DEFAULT_METADATA_PROMPT
+                add_step(session_id, paper_id, "using_default_metadata_prompt")
+            else:
+                prompt = load_prompt(METADATA_AND_CHAPTER_PROMPT_FILE)
             add_step(session_id, paper_id, "metadata_prompt_prepared")
             
         else:
@@ -915,6 +927,62 @@ def extract_json_from_response(response_text: str, operation: str) -> dict:
             title_match = title_pattern.search(cleaned_text)
             if title_match:
                 metadata["metadata"]["title"] = title_match.group(1).strip()
+            
+            # 著者を抽出
+            authors_pattern = re.compile(r'"authors"\s*:\s*\[(.*?)\]', re.DOTALL)
+            authors_match = authors_pattern.search(cleaned_text)
+            if authors_match:
+                authors_text = authors_match.group(1)
+                # 個々の著者情報を抽出
+                author_items = re.findall(r'{(.*?)}', authors_text, re.DOTALL)
+                for author_item in author_items:
+                    author = {}
+                    
+                    # 著者名
+                    name_match = re.search(r'"name"\s*:\s*"([^"]+)"', author_item)
+                    if name_match:
+                        author["name"] = name_match.group(1).strip()
+                    
+                    # 所属
+                    affiliation_match = re.search(r'"affiliation"\s*:\s*"([^"]+)"', author_item)
+                    if affiliation_match:
+                        author["affiliation"] = affiliation_match.group(1).strip()
+                    
+                    if author:
+                        metadata["metadata"]["authors"].append(author)
+            
+            # 年を抽出
+            year_pattern = re.compile(r'"year"\s*:\s*(\d+)')
+            year_match = year_pattern.search(cleaned_text)
+            if year_match:
+                metadata["metadata"]["year"] = int(year_match.group(1))
+            
+            # ジャーナルを抽出
+            journal_pattern = re.compile(r'"journal"\s*:\s*"([^"]+)"')
+            journal_match = journal_pattern.search(cleaned_text)
+            if journal_match:
+                metadata["metadata"]["journal"] = journal_match.group(1).strip()
+            
+            # DOIを抽出
+            doi_pattern = re.compile(r'"doi"\s*:\s*"([^"]+)"')
+            doi_match = doi_pattern.search(cleaned_text)
+            if doi_match:
+                metadata["metadata"]["doi"] = doi_match.group(1).strip()
+            
+            # キーワードを抽出
+            keywords_pattern = re.compile(r'"keywords"\s*:\s*\[(.*?)\]', re.DOTALL)
+            keywords_match = keywords_pattern.search(cleaned_text)
+            if keywords_match:
+                keywords_text = keywords_match.group(1)
+                # キーワードを抽出（カンマで区切られた文字列リスト）
+                keyword_items = re.findall(r'"([^"]+)"', keywords_text)
+                metadata["metadata"]["keywords"] = [keyword.strip() for keyword in keyword_items]
+            
+            # アブストラクトを抽出
+            abstract_pattern = re.compile(r'"abstract"\s*:\s*"(.*?)"', re.DOTALL)
+            abstract_match = abstract_pattern.search(cleaned_text)
+            if abstract_match:
+                metadata["metadata"]["abstract"] = abstract_match.group(1).strip()
             
             # 章構造を抽出
             chapters_pattern = re.compile(r'"chapters"\s*:\s*\[(.*?)\]', re.DOTALL)
