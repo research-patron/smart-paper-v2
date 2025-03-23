@@ -1,744 +1,618 @@
-import { useState, useRef, useEffect } from 'react';
+// ~/Desktop/smart-paper-v2/frontend/src/pages/HomePage.tsx
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Container,
-  Box,
-  Typography,
-  Paper,
-  Button,
-  Alert,
-  CircularProgress,
-  Grid,
+import { 
+  Container, 
+  Typography, 
+  Button, 
+  Box, 
+  Paper, 
+  Grid, 
+  Alert, 
+  LinearProgress,
   Card,
   CardContent,
-  CardActions,
-  Divider,
-  IconButton,
+  CardActionArea,
+  Chip,
   TextField,
   InputAdornment,
-  Tooltip,
-  Chip,
-  Avatar,
-  Link,
+  IconButton,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogContentText,
-  DialogActions,
-  LinearProgress,
-  Menu,
-  MenuItem,
-  ListItemIcon,
-  ListItemText,
-  Checkbox,
-  FormGroup,
-  FormControlLabel,
-  RadioGroup,
-  Radio
+  DialogActions
 } from '@mui/material';
-import UploadFileIcon from '@mui/icons-material/UploadFile';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import SearchIcon from '@mui/icons-material/Search';
-import FilterListIcon from '@mui/icons-material/FilterList';
-import SortIcon from '@mui/icons-material/Sort';
+import DescriptionIcon from '@mui/icons-material/Description';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import DeleteIcon from '@mui/icons-material/Delete';
-import CloudDoneIcon from '@mui/icons-material/CloudDone';
-import CloudSyncIcon from '@mui/icons-material/CloudSync';
-import ErrorIcon from '@mui/icons-material/Error';
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
-import SortByAlphaIcon from '@mui/icons-material/SortByAlpha';
-import DateRangeIcon from '@mui/icons-material/DateRange';
-import { format } from 'date-fns';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
+import StarIcon from '@mui/icons-material/Star';
 import { useAuthStore } from '../store/authStore';
 import { usePaperStore } from '../store/paperStore';
 import { uploadPDF } from '../api/papers';
+import SubscriptionInfoCard from '../components/subscription/SubscriptionInfoCard';
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const { user, userData } = useAuthStore();
-  const { 
-    papers, 
-    loading, 
-    error, 
-    clearError, 
-    fetchUserPapers,
-    deletePaper 
-  } = usePaperStore();
-  
-  const [file, setFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [paperToDelete, setPaperToDelete] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [limitAlertOpen, setLimitAlertOpen] = useState(false);
   
-  // ドラッグ&ドロップ状態管理
-  const [isDragging, setIsDragging] = useState(false);
-  const dragCounterRef = useRef(0);
-  
-  // フィルターと並び替えの状態
-  const [filterAnchorEl, setFilterAnchorEl] = useState<null | HTMLElement>(null);
-  const [sortAnchorEl, setSortAnchorEl] = useState<null | HTMLElement>(null);
-  const [filters, setFilters] = useState({
-    completed: true,
-    processing: true,
-    error: true
-  });
-  const [sortBy, setSortBy] = useState<'title_asc' | 'title_desc' | 'date_newest' | 'date_oldest'>('date_newest');
-  
-  // ユーザーがログインしている場合、論文一覧を取得
+  const { user, userData, forceRefreshUserData } = useAuthStore();
+  const { papers, loading, error, fetchUserPapers, deletePaper } = usePaperStore();
+
+  // ユーザーデータを初期ロード時に強制リフレッシュ
+  useEffect(() => {
+    if (user) {
+      // ユーザーデータを強制的に更新
+      forceRefreshUserData();
+    }
+  }, [user, forceRefreshUserData]);
+
+  // ファイル入力参照
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 論文のステータスに応じたテキストを返す
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return '処理待ち';
+      case 'metadata_extracted':
+        return 'メタデータ抽出完了';
+      case 'processing':
+        return '翻訳中';
+      case 'completed':
+        return '完了';
+      case 'error':
+        return 'エラー';
+      default:
+        return '不明';
+    }
+  };
+
+  // 論文をフィルタリングするための関数
+  const filteredPapers = searchTerm
+    ? papers.filter(paper => 
+        (paper.metadata?.title && paper.metadata.title.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (paper.metadata?.authors && paper.metadata.authors.some(author => 
+          author.name.toLowerCase().includes(searchTerm.toLowerCase())
+        ))
+      )
+    : papers;
+
+  // 検索条件をクリアする
+  const clearSearch = () => {
+    setSearchTerm('');
+  };
+
+  // PDFのアップロードを処理する関数
+  const handleFileUpload = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0 || !user) return;
+
+    // 翻訳利用制限のチェック
+    const isPremium = userData?.subscription_status === 'paid';
+    const translationCount = userData?.translation_count || 0;
+    
+    // 無料会員は月3件まで
+    if (!isPremium && translationCount >= 3) {
+      setLimitAlertOpen(true);
+      return;
+    }
+    
+    try {
+      setIsUploading(true);
+      setUploadError(null);
+      setUploadProgress(10); // 初期進捗を10%に
+
+      // プログレスバーのアニメーションのための擬似進捗更新
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          if (prev >= 90) {
+            clearInterval(progressInterval);
+            return 90;
+          }
+          return prev + 5;
+        });
+      }, 500);
+
+      const file = files[0];
+      const paperId = await uploadPDF(file, user.uid);
+
+      clearInterval(progressInterval);
+      setUploadProgress(100);
+
+      setTimeout(() => {
+        setIsUploading(false);
+        setUploadProgress(0);
+        // ユーザーデータを更新して翻訳カウントを最新状態に
+        forceRefreshUserData();
+        navigate(`/papers/${paperId}`);
+      }, 500);
+    } catch (error) {
+      console.error('Failed to upload PDF:', error);
+      setUploadError(error instanceof Error ? error.message : '論文のアップロードに失敗しました');
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
+  }, [user, userData, navigate, forceRefreshUserData]);
+
+  // ファイル選択ダイアログを開く
+  const handleOpenFileDialog = () => {
+    fileInputRef.current?.click();
+  };
+
+  // ドラッグ&ドロップのハンドラー
+  const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    handleFileUpload(event.dataTransfer.files);
+  }, [handleFileUpload]);
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+  };
+
+  // 論文削除のハンドラー
+  const handleConfirmDelete = async () => {
+    if (!paperToDelete) return;
+    
+    try {
+      await deletePaper(paperToDelete);
+      setDeleteDialogOpen(false);
+      setPaperToDelete(null);
+    } catch (error) {
+      console.error('Failed to delete paper:', error);
+      setUploadError(error instanceof Error ? error.message : '論文の削除に失敗しました');
+    }
+  };
+
+  // ユーザーの論文一覧を取得
   useEffect(() => {
     if (user) {
       fetchUserPapers(user.uid);
     }
   }, [user, fetchUserPapers]);
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files && event.target.files.length > 0) {
-      const selectedFile = event.target.files[0];
-      if (selectedFile.type === 'application/pdf') {
-        setFile(selectedFile);
-        handleUpload(selectedFile);
-      } else {
-        setUploadError('PDFファイルのみアップロード可能です');
-      }
-    }
-  };
-  
-  const handleUpload = async (selectedFile: File) => {
-    if (!user) {
-      setUploadError('ファイルをアップロードするにはログインが必要です');
-      return;
-    }
+  // ユーザーデータ情報
+  const isPremium = userData?.subscription_status === 'paid';
+  const translationCount = userData?.translation_count || 0;
+  const translationLimit = isPremium ? '無制限' : 3;
+  const usagePercentage = !isPremium ? Math.min((translationCount / 3) * 100, 100) : 0;
+
+  // 翻訳期間の日付を取得してフォーマット
+  const formatDate = (date: any) => {
+    if (!date) return null;
     
     try {
-      setUploading(true);
-      setUploadProgress(0);
-      setUploadError(null);
-      
-      // アップロード処理を開始
-      // 進捗表示のためのインターバル（実際にはアップロード進捗を監視する処理が入る）
-      const interval = setInterval(() => {
-        setUploadProgress(prev => {
-          if (prev >= 95) {
-            clearInterval(interval);
-            return 95;
-          }
-          return prev + 5;
+      // Firestoreのタイムスタンプ変換
+      if (typeof date.toDate === 'function') {
+        return date.toDate().toLocaleDateString('ja-JP', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
         });
-      }, 300);
+      }
       
-      // PDFのアップロード
-      const paperId = await uploadPDF(selectedFile, user.uid);
-      
-      clearInterval(interval);
-      setUploadProgress(100);
-      
-      // アップロード完了後、1秒待ってから論文ページに遷移
-      setTimeout(() => {
-        setUploading(false);
-        navigate(`/papers/${paperId}`);
-      }, 1000);
-      
+      // Date型または他の形式の場合
+      return new Date(date).toLocaleDateString('ja-JP', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
     } catch (error) {
-      console.error('Upload error:', error);
-      setUploadError(error instanceof Error ? error.message : '論文のアップロードに失敗しました');
-      setUploading(false);
+      console.error('Error formatting date:', error);
+      return null;
     }
   };
   
-  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    dragCounterRef.current++;
-    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-      setIsDragging(true);
-    }
-  };
-  
-  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    dragCounterRef.current--;
-    if (dragCounterRef.current === 0) {
-      setIsDragging(false);
-    }
-  };
-  
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-  
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    setIsDragging(false);
-    dragCounterRef.current = 0;
-    
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const droppedFile = e.dataTransfer.files[0];
-      if (droppedFile.type === 'application/pdf') {
-        setFile(droppedFile);
-        handleUpload(droppedFile);
-      } else {
-        setUploadError('PDFファイルのみアップロード可能です');
-      }
-    }
-  };
-  
-  const handleDeleteClick = (paperId: string) => {
-    setPaperToDelete(paperId);
-    setDeleteDialogOpen(true);
-  };
-  
-  const handleConfirmDelete = async () => {
-    if (paperToDelete) {
-      try {
-        await deletePaper(paperToDelete);
-        setPaperToDelete(null);
-        setDeleteDialogOpen(false);
-      } catch (error) {
-        console.error('Delete error:', error);
-        // エラー処理
-      }
-    }
-  };
-  
-  const handleCancelDelete = () => {
-    setPaperToDelete(null);
-    setDeleteDialogOpen(false);
-  };
-  
-  // フィルターメニュー操作
-  const handleFilterClick = (event: React.MouseEvent<HTMLElement>) => {
-    setFilterAnchorEl(event.currentTarget);
-  };
-  
-  const handleFilterClose = () => {
-    setFilterAnchorEl(null);
-  };
-  
-  const handleFilterChange = (filterName: keyof typeof filters) => {
-    setFilters(prev => ({
-      ...prev,
-      [filterName]: !prev[filterName]
-    }));
-  };
-  
-  // 並び替えメニュー操作
-  const handleSortClick = (event: React.MouseEvent<HTMLElement>) => {
-    setSortAnchorEl(event.currentTarget);
-  };
-  
-  const handleSortClose = () => {
-    setSortAnchorEl(null);
-  };
-  
-  const handleSortChange = (value: typeof sortBy) => {
-    setSortBy(value);
-    setSortAnchorEl(null);
-  };
-  
-  // 検索条件とフィルターに基づいて論文をフィルタリング
-  const filteredPapers = papers.filter(paper => {
-    // 検索クエリでフィルタリング
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      const matchesSearch = 
-        (paper.metadata?.title?.toLowerCase().includes(query)) ||
-        (paper.metadata?.authors?.some(author => author.name.toLowerCase().includes(query))) ||
-        (paper.metadata?.journal?.toLowerCase().includes(query)) ||
-        // キーワードでの検索を追加
-        (paper.metadata?.keywords?.some(keyword => keyword.toLowerCase().includes(query)));
-      
-      if (!matchesSearch) return false;
-    }
-    
-    // ステータスでフィルタリング
-    if (paper.status === 'completed' && !filters.completed) return false;
-    if (['pending', 'metadata_extracted', 'processing'].includes(paper.status) && !filters.processing) return false;
-    if (paper.status === 'error' && !filters.error) return false;
-    
-    return true;
-  });
-
-  // フィルタリングされた論文を並び替え
-  const sortedPapers = [...filteredPapers].sort((a, b) => {
-    switch (sortBy) {
-      case 'title_asc':
-        return (a.metadata?.title || '').localeCompare(b.metadata?.title || '');
-      case 'title_desc':
-        return (b.metadata?.title || '').localeCompare(a.metadata?.title || '');
-      case 'date_newest':
-        // Timestampオブジェクトの場合とDate型の場合を処理
-        const dateA = typeof a.uploaded_at?.toDate === 'function' ? a.uploaded_at.toDate() : a.uploaded_at;
-        const dateB = typeof b.uploaded_at?.toDate === 'function' ? b.uploaded_at.toDate() : b.uploaded_at;
-        return dateB instanceof Date && dateA instanceof Date ? dateB.getTime() - dateA.getTime() : 0;
-      case 'date_oldest':
-        // Timestampオブジェクトの場合とDate型の場合を処理
-        const dateC = typeof a.uploaded_at?.toDate === 'function' ? a.uploaded_at.toDate() : a.uploaded_at;
-        const dateD = typeof b.uploaded_at?.toDate === 'function' ? b.uploaded_at.toDate() : b.uploaded_at;
-        return dateC instanceof Date && dateD instanceof Date ? dateC.getTime() - dateD.getTime() : 0;
-      default:
-        return 0;
-    }
-  });
+  // 翻訳期間の表示テキストを作成
+  const periodStartText = formatDate(userData?.translation_period_start);
+  const periodEndText = formatDate(userData?.translation_period_end);
+  const periodText = periodStartText && periodEndText
+    ? `${periodStartText} 〜 ${periodEndText}`
+    : '翻訳期間: 未設定';
 
   return (
-    <div
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-      style={{ minHeight: '100vh' }}
-    >
-      <Container maxWidth="lg" sx={{ pt: 4, pb: 8 }}>
-        {/* ドラッグオーバーレイ */}
-        {isDragging && (
-          <Box
-            sx={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              zIndex: 9999,
-              backgroundColor: 'rgba(0, 0, 0, 0.6)',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              alignItems: 'center',
-              color: 'white',
-            }}
-          >
-            <CloudUploadIcon sx={{ fontSize: 72, mb: 2 }} />
-            <Typography variant="h4" gutterBottom>
-              PDFファイルをドロップしてアップロード
-            </Typography>
-            <Typography variant="body1">
-              PDFファイルをここにドロップして論文の翻訳を開始します
-            </Typography>
+    <Container maxWidth="lg">
+      <Box sx={{ my: 4 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography variant="h4" component="h1" gutterBottom>
+            論文を翻訳する
+          </Typography>
+          
+          <Box>
+            <Button
+              variant="outlined"
+              startIcon={<AccountCircleIcon />}
+              onClick={() => navigate('/profile')}
+              sx={{ mr: 1 }}
+            >
+              プロフィール
+            </Button>
           </Box>
-        )}
-        
-        <Box sx={{ mb: 6, textAlign: 'center' }}>
-          <Typography variant="h3" component="h1" gutterBottom>
-            Smart Paper v2
-          </Typography>
-          <Typography variant="h6" component="h2" color="text.secondary" gutterBottom>
-            研究論文を素早く読み、整理し、理解するためのAIツール
-          </Typography>
         </Box>
-        
-        {/* エラー表示 */}
-        {error && (
-          <Alert 
-            severity="error" 
-            onClose={clearError}
-            sx={{ mb: 3 }}
-          >
-            {error}
-          </Alert>
-        )}
-        
-        {/* アップロードエラー表示 */}
-        {uploadError && (
-          <Alert 
-            severity="error" 
-            onClose={() => setUploadError(null)}
-            sx={{ mb: 3 }}
-          >
-            {uploadError}
-          </Alert>
-        )}
-        
-        {/* 論文アップロードセクション */}
-        <Paper
-          variant="outlined"
-          sx={{
-            p: 4,
-            textAlign: 'center',
-            mb: 4,
-            borderStyle: 'dashed',
-            borderWidth: 2,
-            borderColor: 'primary.light',
-            backgroundColor: 'background.default',
-            cursor: 'pointer',
-          }}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          {uploading ? (
-            <Box sx={{ width: '100%', textAlign: 'center' }}>
-              <Typography variant="h6" gutterBottom>
-                アップロード中...
-              </Typography>
-              <Box sx={{ width: '100%', mb: 2 }}>
-                <LinearProgress variant="determinate" value={uploadProgress} />
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                {`${Math.round(uploadProgress)}%`}
-              </Typography>
-            </Box>
-          ) : (
-            <>
+
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={8}>
+            {/* PDF アップロードエリア */}
+            <Paper
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              sx={{
+                p: 4,
+                textAlign: 'center',
+                mb: 5,
+                borderStyle: 'dashed',
+                cursor: 'pointer',
+                background: theme => 
+                  `linear-gradient(45deg, ${theme.palette.background.paper} 25%, ${theme.palette.grey[100]} 25%, ${theme.palette.grey[100]} 50%, ${theme.palette.background.paper} 50%, ${theme.palette.background.paper} 75%, ${theme.palette.grey[100]} 75%, ${theme.palette.grey[100]} 100%)`,
+                backgroundSize: '20px 20px',
+                '&:hover': {
+                  backgroundColor: 'rgba(0, 0, 0, 0.02)',
+                }
+              }}
+              onClick={handleOpenFileDialog}
+            >
               <input
                 type="file"
-                accept=".pdf"
-                hidden
                 ref={fileInputRef}
-                onChange={handleFileChange}
+                style={{ display: 'none' }}
+                accept=".pdf"
+                onChange={(e) => handleFileUpload(e.target.files)}
               />
               
-              <CloudUploadIcon color="primary" sx={{ fontSize: 60, mb: 2 }} />
+              <CloudUploadIcon sx={{ fontSize: 60, mb: 2, color: 'primary.main' }} />
               
               <Typography variant="h5" gutterBottom>
-                PDFファイルをドラッグ＆ドロップ
+                PDFをドラッグ＆ドロップまたはクリックしてアップロード
               </Typography>
               
-              <Typography variant="body1" color="text.secondary" paragraph>
-                または
+              <Typography variant="body2" color="text.secondary">
+                サポートしているファイル形式: PDFのみ（最大20MB）
               </Typography>
-              
-              <Button
-                variant="contained"
-                startIcon={<UploadFileIcon />}
-                size="large"
-              >
-                PDFを選択
-              </Button>
-              
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-                最大ファイルサイズ: 20MB
-              </Typography>
-            </>
-          )}
-        </Paper>
-        
-        {/* ログインプロモーション（非ログイン時） */}
-        {!user && (
-          <Alert 
-            severity="info" 
-            sx={{ mb: 4 }}
-            action={
-              <Button color="inherit" size="small" onClick={() => navigate('/login')}>
-                ログイン
-              </Button>
-            }
-          >
-            翻訳済み論文を保存したり、高度な機能を利用するにはログインが必要です。
-          </Alert>
-        )}
-        
-        {/* マイ論文セクション（ログイン時） */}
-        {user && (
-          <>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h5" component="h2">
-                マイ論文
-              </Typography>
-              
-              <Box sx={{ display: 'flex', gap: 1 }}>
+
+              {isUploading && (
+                <Box sx={{ width: '100%', mt: 2 }}>
+                  <LinearProgress variant="determinate" value={uploadProgress} />
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    アップロード中... {uploadProgress}%
+                  </Typography>
+                </Box>
+              )}
+            </Paper>
+
+            {uploadError && (
+              <Alert severity="error" sx={{ mb: 3 }}>
+                {uploadError}
+              </Alert>
+            )}
+
+            {/* 論文一覧 */}
+            <Box sx={{ mb: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h5" component="h2">
+                  あなたの論文
+                </Typography>
+                
                 <TextField
-                  placeholder="論文を検索..."
+                  variant="outlined"
                   size="small"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="論文またはユーザー名で検索"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
-                        <SearchIcon fontSize="small" />
+                        <SearchIcon />
                       </InputAdornment>
                     ),
+                    endAdornment: searchTerm && (
+                      <InputAdornment position="end">
+                        <IconButton size="small" onClick={clearSearch}>
+                          <FilterListIcon />
+                        </IconButton>
+                      </InputAdornment>
+                    )
                   }}
-                  sx={{ width: 250 }}
+                  sx={{ width: { xs: '100%', sm: '300px' } }}
                 />
-                
-                <Tooltip title="フィルター">
-                  <IconButton onClick={handleFilterClick}>
-                    <FilterListIcon />
-                  </IconButton>
-                </Tooltip>
-                
-                <Tooltip title="並び替え">
-                  <IconButton onClick={handleSortClick}>
-                    <SortIcon />
-                  </IconButton>
-                </Tooltip>
               </Box>
-            </Box>
-            
-            {/* フィルターメニュー */}
-            <Menu
-              anchorEl={filterAnchorEl}
-              open={Boolean(filterAnchorEl)}
-              onClose={handleFilterClose}
-            >
-              <MenuItem dense>
-                <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
-                  ステータスでフィルター
-                </Typography>
-              </MenuItem>
-              <MenuItem>
-                <FormControlLabel
-                  control={
-                    <Checkbox 
-                      checked={filters.completed}
-                      onChange={() => handleFilterChange('completed')}
-                      size="small"
-                    />
-                  }
-                  label={
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <CloudDoneIcon fontSize="small" color="success" sx={{ mr: 1 }} />
-                      <Typography variant="body2">翻訳済み</Typography>
-                    </Box>
-                  }
-                />
-              </MenuItem>
-              <MenuItem>
-                <FormControlLabel
-                  control={
-                    <Checkbox 
-                      checked={filters.processing}
-                      onChange={() => handleFilterChange('processing')}
-                      size="small"
-                    />
-                  }
-                  label={
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <CloudSyncIcon fontSize="small" color="primary" sx={{ mr: 1 }} />
-                      <Typography variant="body2">処理中</Typography>
-                    </Box>
-                  }
-                />
-              </MenuItem>
-              <MenuItem>
-                <FormControlLabel
-                  control={
-                    <Checkbox 
-                      checked={filters.error}
-                      onChange={() => handleFilterChange('error')}
-                      size="small"
-                    />
-                  }
-                  label={
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <ErrorIcon fontSize="small" color="error" sx={{ mr: 1 }} />
-                      <Typography variant="body2">エラー</Typography>
-                    </Box>
-                  }
-                />
-              </MenuItem>
-            </Menu>
-            
-            {/* 並び替えメニュー */}
-            <Menu
-              anchorEl={sortAnchorEl}
-              open={Boolean(sortAnchorEl)}
-              onClose={handleSortClose}
-            >
-              <MenuItem dense>
-                <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
-                  並び替え
-                </Typography>
-              </MenuItem>
-              <MenuItem 
-                onClick={() => handleSortChange('title_asc')}
-                selected={sortBy === 'title_asc'}
-              >
-                <ListItemIcon>
-                  <SortByAlphaIcon fontSize="small" />
-                </ListItemIcon>
-                <ListItemText primary="タイトル (A-Z)" />
-              </MenuItem>
-              <MenuItem 
-                onClick={() => handleSortChange('title_desc')}
-                selected={sortBy === 'title_desc'}
-              >
-                <ListItemIcon>
-                  <SortByAlphaIcon fontSize="small" sx={{ transform: 'scaleY(-1)' }} />
-                </ListItemIcon>
-                <ListItemText primary="タイトル (Z-A)" />
-              </MenuItem>
-              <MenuItem 
-                onClick={() => handleSortChange('date_newest')}
-                selected={sortBy === 'date_newest'}
-              >
-                <ListItemIcon>
-                  <DateRangeIcon fontSize="small" />
-                </ListItemIcon>
-                <ListItemText primary="最新のアップロード順" />
-              </MenuItem>
-              <MenuItem 
-                onClick={() => handleSortChange('date_oldest')}
-                selected={sortBy === 'date_oldest'}
-              >
-                <ListItemIcon>
-                  <DateRangeIcon fontSize="small" />
-                </ListItemIcon>
-                <ListItemText primary="古いアップロード順" />
-              </MenuItem>
-            </Menu>
-            
-            {loading ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
-                <CircularProgress />
-              </Box>
-            ) : sortedPapers.length === 0 ? (
-              <Paper 
-                variant="outlined" 
-                sx={{ 
-                  p: 4, 
-                  display: 'flex', 
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  textAlign: 'center'
-                }}
-              >
-                <Typography variant="h6" gutterBottom>
-                  まだ論文がありません
-                </Typography>
-                <Typography variant="body1" color="text.secondary" paragraph>
-                  PDFをアップロードして、論文の翻訳と分析を始めましょう。
-                </Typography>
-                <Button 
-                  variant="contained" 
-                  startIcon={<UploadFileIcon />}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  PDFをアップロード
-                </Button>
-              </Paper>
-            ) : (
-              <Grid container spacing={3}>
-                {sortedPapers.map((paper) => (
-                  <Grid item xs={12} md={6} key={paper.id}>
-                    <Card variant="outlined">
-                      <CardContent>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                          <Typography variant="h6" component="h3" sx={{ mb: 1 }}>
-                            {paper.metadata?.title || '無題の論文'}
-                          </Typography>
-                          
-                          <Box>
-                            {paper.status === 'completed' && (
+
+              {loading ? (
+                <LinearProgress />
+              ) : error ? (
+                <Alert severity="error">{error}</Alert>
+              ) : filteredPapers.length === 0 ? (
+                <Paper sx={{ p: 3, textAlign: 'center' }}>
+                  {searchTerm ? (
+                    <>
+                      <Typography variant="h6">検索結果なし</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        「{searchTerm}」に一致する論文は見つかりませんでした
+                      </Typography>
+                      <Button 
+                        variant="text" 
+                        onClick={clearSearch}
+                        sx={{ mt: 1 }}
+                      >
+                        検索をクリア
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <MenuBookIcon sx={{ fontSize: 60, color: 'text.secondary', opacity: 0.3 }} />
+                      <Typography variant="h6">論文がありません</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        PDFをアップロードして論文を翻訳してみましょう
+                      </Typography>
+                    </>
+                  )}
+                </Paper>
+              ) : (
+                <Grid container spacing={2}>
+                  {filteredPapers.map((paper) => (
+                    <Grid item xs={12} sm={6} md={4} key={paper.id}>
+                      <Card variant="outlined">
+                        <CardActionArea onClick={() => navigate(`/papers/${paper.id}`)}>
+                          <CardContent sx={{ minHeight: 180 }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                               <Chip
-                                icon={<CloudDoneIcon />}
-                                label="翻訳済み"
+                                label={getStatusText(paper.status)}
                                 size="small"
-                                color="success"
-                                variant="outlined"
+                                color={
+                                  paper.status === 'completed' ? 'success' :
+                                  paper.status === 'error' ? 'error' :
+                                  'primary'
+                                }
+                                variant={paper.status === 'completed' ? 'filled' : 'outlined'}
                               />
-                            )}
-                            {['pending', 'metadata_extracted', 'processing'].includes(paper.status) && (
-                              <Chip
-                                icon={<CloudSyncIcon />}
-                                label="処理中"
-                                size="small"
-                                color="primary"
-                                variant="outlined"
-                              />
-                            )}
-                            {paper.status === 'error' && (
-                              <Chip
-                                icon={<ErrorIcon />}
-                                label="エラー"
-                                size="small"
-                                color="error"
-                                variant="outlined"
-                              />
-                            )}
-                          </Box>
-                        </Box>
-                        
-                        {/* 著者名と出版ジャーナル情報を削除 */}
-                        
-                        {['pending', 'metadata_extracted', 'processing'].includes(paper.status) && (
-                          <Box sx={{ width: '100%', mt: 2 }}>
-                            <LinearProgress variant="determinate" value={paper.progress || 0} />
-                            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                              {paper.status === 'pending' ? '準備中...' : 
-                               paper.status === 'metadata_extracted' ? 'メタデータ抽出完了...' : 
-                               `処理中... ${paper.progress || 0}%`}
+                              {paper.status === 'processing' && paper.progress && (
+                                <Typography variant="caption" color="text.secondary">
+                                  {paper.progress}%
+                                </Typography>
+                              )}
+                            </Box>
+                            
+                            <Typography variant="h6" noWrap title={paper.metadata?.title}>
+                              {paper.metadata?.title || '無題の論文'}
                             </Typography>
-                          </Box>
-                        )}
-                        
-                        {paper.uploaded_at && (
-                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                            アップロード日: {
-                              // Timestampオブジェクトの場合
-                              typeof paper.uploaded_at.toDate === 'function' ? 
-                                format(paper.uploaded_at.toDate(), 'yyyy/MM/dd HH:mm') : 
-                                // Date型だった場合
-                                paper.uploaded_at instanceof Date ? 
-                                  format(paper.uploaded_at, 'yyyy/MM/dd HH:mm') : 
-                                  // 文字列などその他の場合
-                                  String(paper.uploaded_at)
-                            }
-                          </Typography>
-                        )}
-                      </CardContent>
-                      
-                      <Divider />
-                      
-                      <CardActions>
-                        <Button
-                          variant="contained"
-                          color="primary"
-                          size="small"
-                          onClick={() => navigate(`/papers/${paper.id}`)}
-                          sx={{ '&:hover': { boxShadow: 2 } }}
-                          startIcon={<SearchIcon />}
-                        >
-                          詳細を見る
-                        </Button>
-                        
-                        <Box sx={{ ml: 'auto' }}>
-                          <IconButton
+                            
+                            <Typography variant="body2" color="text.secondary" noWrap>
+                              {paper.metadata?.authors?.map(a => a.name).join(', ') || '著者不明'}
+                            </Typography>
+                            
+                            {paper.metadata?.year && (
+                              <Typography variant="caption" display="block" color="text.secondary">
+                                {paper.metadata.year}年
+                              </Typography>
+                            )}
+                            
+                            {paper.metadata?.journal && (
+                              <Typography 
+                                variant="caption" 
+                                display="block" 
+                                color="text.secondary"
+                                sx={{ mt: 1 }}
+                                noWrap
+                              >
+                                {paper.metadata.journal}
+                              </Typography>
+                            )}
+                            
+                            {paper.status === 'processing' && paper.progress && (
+                              <LinearProgress 
+                                variant="determinate" 
+                                value={paper.progress} 
+                                sx={{ mt: 2 }}
+                              />
+                            )}
+                          </CardContent>
+                        </CardActionArea>
+                        <Box sx={{ 
+                          display: 'flex', 
+                          justifyContent: 'flex-end', 
+                          p: 1, 
+                          borderTop: '1px solid',
+                          borderColor: 'divider'
+                        }}>
+                          <IconButton 
                             size="small"
                             color="error"
-                            onClick={() => handleDeleteClick(paper.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPaperToDelete(paper.id);
+                              setDeleteDialogOpen(true);
+                            }}
                           >
-                            <DeleteIcon />
+                            <DeleteIcon fontSize="small" />
                           </IconButton>
                         </Box>
-                      </CardActions>
-                    </Card>
-                  </Grid>
-                ))}
-              </Grid>
+                      </Card>
+                    </Grid>
+                  ))}
+                </Grid>
+              )}
+            </Box>
+          </Grid>
+
+          <Grid item xs={12} md={4}>
+            {/* プロフィールと翻訳状況表示 */}
+            {userData && <SubscriptionInfoCard userData={userData} />}
+            
+            {/* 機能紹介 */}
+            <Paper sx={{ p: 3, mb: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Smart Paper v2の機能
+              </Typography>
+              
+              <List dense>
+                <ListItem>
+                  <ListItemIcon sx={{ minWidth: 36 }}>
+                    <PictureAsPdfIcon fontSize="small" color="primary" />
+                  </ListItemIcon>
+                  <ListItemText 
+                    primary="論文の翻訳" 
+                    secondary="英語論文を日本語に自動翻訳" 
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemIcon sx={{ minWidth: 36 }}>
+                    <DescriptionIcon fontSize="small" color="primary" />
+                  </ListItemIcon>
+                  <ListItemText 
+                    primary="要約生成" 
+                    secondary="論文の要点をAIが簡潔にまとめる" 
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemIcon sx={{ minWidth: 36 }}>
+                    <ArrowForwardIcon fontSize="small" color="primary" />
+                  </ListItemIcon>
+                  <ListItemText 
+                    primary="Zoteroに登録" 
+                    secondary="ボタンクリックで自動でZoteroに論文を登録" 
+                  />
+                </ListItem>
+              </List>
+              
+              <Button 
+                variant="outlined" 
+                fullWidth 
+                onClick={handleOpenFileDialog}
+                startIcon={<CloudUploadIcon />}
+                sx={{ mt: 2 }}
+              >
+                論文を翻訳する
+              </Button>
+            </Paper>
+            
+            {/* プレミアムプラン宣伝 */}
+            {!isPremium && (
+              <Paper sx={{ p: 3, borderLeft: '4px solid', borderColor: 'primary.main' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <StarIcon color="primary" sx={{ mr: 1 }} />
+                  <Typography variant="h6">
+                    プレミアム特典
+                  </Typography>
+                </Box>
+                
+                <List dense>
+                  <ListItem>
+                    <ListItemIcon sx={{ minWidth: 36 }}>
+                      <StarIcon fontSize="small" color="primary" />
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary="翻訳回数無制限" 
+                      secondary="月3件の制限なくいつでも翻訳可能" 
+                    />
+                  </ListItem>
+                  <ListItem>
+                    <ListItemIcon sx={{ minWidth: 36 }}>
+                      <StarIcon fontSize="small" color="primary" />
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary="保存期間延長" 
+                      secondary="論文を1ヶ月間保存" 
+                    />
+                  </ListItem>
+                </List>
+                
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  fullWidth 
+                  onClick={() => navigate('/subscription')}
+                  startIcon={<StarIcon />}
+                  sx={{ mt: 2 }}
+                >
+                  プレミアムにアップグレード
+                </Button>
+                <Typography variant="caption" color="text.secondary" align="center" sx={{ display: 'block', mt: 1 }}>
+                  月額¥350 または 年額¥3,000 (月あたり¥250)
+                </Typography>
+              </Paper>
             )}
-          </>
-        )}
-        
-        {/* 削除確認ダイアログ */}
-        <Dialog
-          open={deleteDialogOpen}
-          onClose={handleCancelDelete}
-        >
-          <DialogTitle>論文を削除しますか？</DialogTitle>
-          <DialogContent>
-            <DialogContentText>
-              この操作は元に戻せません。論文と関連するすべてのデータが削除されます。
-            </DialogContentText>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={handleCancelDelete}>キャンセル</Button>
-            <Button onClick={handleConfirmDelete} color="error" autoFocus>
-              削除
-            </Button>
-          </DialogActions>
-        </Dialog>
-      </Container>
-    </div>
+          </Grid>
+        </Grid>
+      </Box>
+      
+      {/* 論文削除確認ダイアログ */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => {
+          setDeleteDialogOpen(false);
+          setPaperToDelete(null);
+        }}
+      >
+        <DialogTitle>論文の削除</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            この論文を削除しますか？この操作は元に戻せません。
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => {
+              setDeleteDialogOpen(false);
+              setPaperToDelete(null);
+            }}
+          >
+            キャンセル
+          </Button>
+          <Button 
+            onClick={handleConfirmDelete} 
+            color="error"
+            autoFocus
+          >
+            削除する
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* 翻訳制限ダイアログ */}
+      <Dialog
+        open={limitAlertOpen}
+        onClose={() => setLimitAlertOpen(false)}
+      >
+        <DialogTitle>翻訳制限に達しました</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            無料プランでは月に3件までしか翻訳できません。今月の翻訳回数上限に達しました。
+            プレミアムプランにアップグレードすると、翻訳回数が無制限になります。
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setLimitAlertOpen(false)}>
+            閉じる
+          </Button>
+          <Button 
+            onClick={() => {
+              setLimitAlertOpen(false);
+              navigate('/subscription');
+            }} 
+            color="primary"
+            variant="contained"
+            startIcon={<StarIcon />}
+            autoFocus
+          >
+            プレミアムにアップグレード
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Container>
   );
 };
 
