@@ -42,14 +42,12 @@ DEFAULT_TRANSLATION_PROMPT = """
 専門用語は適切な日本語訳または原語のままにしてください。
 数式、図表の参照、引用は原文のまま残してください。
 
-以下の情報を使用して、指定された章（チャプター）だけを翻訳してください：
+以下の章番号に対応する章全体を翻訳してください：
 Chapter Number: {chapter_number}
-Start Page: {start_page}
-End Page: {end_page}
 Chapter Title: {chapter_title}
 
-PDF内の指定されたページ範囲から、その章だけを翻訳してください。以前の翻訳結果には言及せずに、
-新しく翻訳を行ってください。
+PDF全体を考慮して、章番号{chapter_number}に該当する部分を見つけ、その章全体を翻訳してください。
+ページ番号は参考情報として使用することがありますが、章全体を翻訳することを優先してください。
 
 重要な指示：
 1. 章の見出しは必ず「数字. タイトル」の形式にしてください。例えば「Chapter 3: Results and Discussion」は「3. 結果と考察」としてください。
@@ -228,7 +226,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
         # 各章を順番に処理
         results = []
         # 章番号でソートして処理
-        sorted_chapters = sorted(chapters, key=lambda x: x["chapter_number"])
+        sorted_chapters = sorted(chapters, key=lambda x: x.get("chapter_number", 0))
         total_chapters = len(sorted_chapters)
         
         # 全章の翻訳テキストを結合するための変数
