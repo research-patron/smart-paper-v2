@@ -1,4 +1,3 @@
-// ~/Desktop/smart-paper-v2/frontend/src/pages/HomePage.tsx
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -14,27 +13,23 @@ import {
   CardContent,
   CardActionArea,
   Chip,
-  TextField,
-  InputAdornment,
-  IconButton,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogContentText,
-  DialogActions
+  DialogActions,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  List,
+  IconButton,
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
-import SearchIcon from '@mui/icons-material/Search';
 import DescriptionIcon from '@mui/icons-material/Description';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import FilterListIcon from '@mui/icons-material/FilterList';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
 import StarIcon from '@mui/icons-material/Star';
 import { useAuthStore } from '../store/authStore';
@@ -44,7 +39,6 @@ import SubscriptionInfoCard from '../components/subscription/SubscriptionInfoCar
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const [searchTerm, setSearchTerm] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -58,7 +52,6 @@ const HomePage = () => {
   // ユーザーデータを初期ロード時に強制リフレッシュ
   useEffect(() => {
     if (user) {
-      // ユーザーデータを強制的に更新
       forceRefreshUserData();
     }
   }, [user, forceRefreshUserData]);
@@ -84,30 +77,13 @@ const HomePage = () => {
     }
   };
 
-  // 論文をフィルタリングするための関数
-  const filteredPapers = searchTerm
-    ? papers.filter(paper => 
-        (paper.metadata?.title && paper.metadata.title.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (paper.metadata?.authors && paper.metadata.authors.some(author => 
-          author.name.toLowerCase().includes(searchTerm.toLowerCase())
-        ))
-      )
-    : papers;
-
-  // 検索条件をクリアする
-  const clearSearch = () => {
-    setSearchTerm('');
-  };
-
   // PDFのアップロードを処理する関数
   const handleFileUpload = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0 || !user) return;
 
-    // 翻訳利用制限のチェック
     const isPremium = userData?.subscription_status === 'paid';
     const translationCount = userData?.translation_count || 0;
     
-    // 無料会員は月3件まで
     if (!isPremium && translationCount >= 3) {
       setLimitAlertOpen(true);
       return;
@@ -116,9 +92,8 @@ const HomePage = () => {
     try {
       setIsUploading(true);
       setUploadError(null);
-      setUploadProgress(10); // 初期進捗を10%に
+      setUploadProgress(10);
 
-      // プログレスバーのアニメーションのための擬似進捗更新
       const progressInterval = setInterval(() => {
         setUploadProgress(prev => {
           if (prev >= 90) {
@@ -138,7 +113,6 @@ const HomePage = () => {
       setTimeout(() => {
         setIsUploading(false);
         setUploadProgress(0);
-        // ユーザーデータを更新して翻訳カウントを最新状態に
         forceRefreshUserData();
         navigate(`/papers/${paperId}`);
       }, 500);
@@ -188,42 +162,6 @@ const HomePage = () => {
 
   // ユーザーデータ情報
   const isPremium = userData?.subscription_status === 'paid';
-  const translationCount = userData?.translation_count || 0;
-  const translationLimit = isPremium ? '無制限' : 3;
-  const usagePercentage = !isPremium ? Math.min((translationCount / 3) * 100, 100) : 0;
-
-  // 翻訳期間の日付を取得してフォーマット
-  const formatDate = (date: any) => {
-    if (!date) return null;
-    
-    try {
-      // Firestoreのタイムスタンプ変換
-      if (typeof date.toDate === 'function') {
-        return date.toDate().toLocaleDateString('ja-JP', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric'
-        });
-      }
-      
-      // Date型または他の形式の場合
-      return new Date(date).toLocaleDateString('ja-JP', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      return null;
-    }
-  };
-  
-  // 翻訳期間の表示テキストを作成
-  const periodStartText = formatDate(userData?.translation_period_start);
-  const periodEndText = formatDate(userData?.translation_period_end);
-  const periodText = periodStartText && periodEndText
-    ? `${periodStartText} 〜 ${periodEndText}`
-    : '翻訳期間: 未設定';
 
   return (
     <Container maxWidth="lg">
@@ -302,69 +240,43 @@ const HomePage = () => {
 
             {/* 論文一覧 */}
             <Box sx={{ mb: 3 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Box sx={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 2,
+                mb: 2 
+              }}>
                 <Typography variant="h5" component="h2">
-                  あなたの論文
+                  最近の翻訳履歴
                 </Typography>
                 
-                <TextField
+                <Button
                   variant="outlined"
-                  size="small"
-                  placeholder="論文またはユーザー名で検索"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <SearchIcon />
-                      </InputAdornment>
-                    ),
-                    endAdornment: searchTerm && (
-                      <InputAdornment position="end">
-                        <IconButton size="small" onClick={clearSearch}>
-                          <FilterListIcon />
-                        </IconButton>
-                      </InputAdornment>
-                    )
-                  }}
-                  sx={{ width: { xs: '100%', sm: '300px' } }}
-                />
+                  startIcon={<MenuBookIcon />}
+                  onClick={() => navigate('/my-papers')}
+                >
+                  すべての論文を見る
+                </Button>
               </Box>
 
               {loading ? (
                 <LinearProgress />
               ) : error ? (
                 <Alert severity="error">{error}</Alert>
-              ) : filteredPapers.length === 0 ? (
+              ) : papers.length === 0 ? (
                 <Paper sx={{ p: 3, textAlign: 'center' }}>
-                  {searchTerm ? (
-                    <>
-                      <Typography variant="h6">検索結果なし</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        「{searchTerm}」に一致する論文は見つかりませんでした
-                      </Typography>
-                      <Button 
-                        variant="text" 
-                        onClick={clearSearch}
-                        sx={{ mt: 1 }}
-                      >
-                        検索をクリア
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <MenuBookIcon sx={{ fontSize: 60, color: 'text.secondary', opacity: 0.3 }} />
-                      <Typography variant="h6">論文がありません</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        PDFをアップロードして論文を翻訳してみましょう
-                      </Typography>
-                    </>
-                  )}
+                  <MenuBookIcon sx={{ fontSize: 60, color: 'text.secondary', opacity: 0.3 }} />
+                  <Typography variant="h6">論文がありません</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    PDFをアップロードして論文を翻訳してみましょう
+                  </Typography>
                 </Paper>
               ) : (
                 <Grid container spacing={2}>
-                  {filteredPapers.map((paper) => (
-                    <Grid item xs={12} sm={6} md={4} key={paper.id}>
+                  {papers.slice(0, 6).map((paper) => (
+                    <Grid item xs={12} sm={6} key={paper.id}>
                       <Card variant="outlined">
                         <CardActionArea onClick={() => navigate(`/papers/${paper.id}`)}>
                           <CardContent sx={{ minHeight: 180 }}>
@@ -431,7 +343,7 @@ const HomePage = () => {
                           <IconButton 
                             size="small"
                             color="error"
-                            onClick={(e) => {
+                            onClick={(e: React.MouseEvent) => {
                               e.stopPropagation();
                               setPaperToDelete(paper.id);
                               setDeleteDialogOpen(true);

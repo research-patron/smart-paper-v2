@@ -75,7 +75,7 @@ const Header = () => {
         </ListItem>
         
         {user && (
-          <ListItem button component={RouterLink} to="/papers">
+          <ListItem button component={RouterLink} to="/my-papers">
             <ListItemIcon>
               <ArticleIcon />
             </ListItemIcon>
@@ -155,7 +155,7 @@ const Header = () => {
               {user && (
                 <Button
                   component={RouterLink}
-                  to="/papers"
+                  to="/my-papers"
                   sx={{ my: 2, color: 'white', display: 'block' }}
                 >
                   マイ論文
