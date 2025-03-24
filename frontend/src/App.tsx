@@ -15,6 +15,7 @@ import Footer from './components/common/Footer';
 // ページ
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
+import MyPapersPage from './pages/MyPapersPage';
 import RegisterPage from './pages/RegisterPage';
 import PaperViewPage from './pages/PaperViewPage';
 import ProfilePage from './pages/ProfilePage';
@@ -252,6 +253,11 @@ function App() {
               <Route path="/profile" element={
                 <ProtectedRoute>
                   <ProfilePage />
+                </ProtectedRoute>
+              } />
+              <Route path="/my-papers" element={
+                <ProtectedRoute>
+                  <MyPapersPage />
                 </ProtectedRoute>
               } />
               <Route path="/subscription" element={
