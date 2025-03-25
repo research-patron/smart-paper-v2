@@ -23,15 +23,18 @@ import {
   ListItemText,
   List,
   IconButton,
+  Link,
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import DescriptionIcon from '@mui/icons-material/Description';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import DeleteIcon from '@mui/icons-material/Delete';
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
 import StarIcon from '@mui/icons-material/Star';
+import EmailIcon from '@mui/icons-material/Email';
+import { Link as RouterLink } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { usePaperStore } from '../store/paperStore';
 import { uploadPDF } from '../api/papers';
@@ -396,6 +399,19 @@ const HomePage = () => {
                   <ListItemText 
                     primary="Zoteroに登録" 
                     secondary="ボタンクリックで自動でZoteroに論文を登録" 
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemIcon sx={{ minWidth: 36 }}>
+                    <EmailIcon fontSize="small" color="primary" />
+                  </ListItemIcon>
+                  <ListItemText 
+                    primary={
+                      <Link component={RouterLink} to="/contact" color="inherit">
+                        お問い合わせ・問題報告
+                      </Link>
+                    } 
+                    secondary="サービスに関する質問や問題を報告" 
                   />
                 </ListItem>
               </List>

@@ -24,6 +24,7 @@ import TermsPage from './pages/LegalPages/TermsPage';
 import PrivacyPage from './pages/LegalPages/PrivacyPage';
 import CommercePage from './pages/LegalPages/CommercePage';
 import SubscriptionPage from './pages/SubscriptionPage';
+import ContactPage from './pages/ContactPage';
 
 // Firebase
 import { auth, db } from './api/firebase';
@@ -268,6 +269,7 @@ function App() {
               <Route path="/terms" element={<TermsPage />} />
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/commerce" element={<CommercePage />} />
+              <Route path="/contact" element={<ContactPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Box>
