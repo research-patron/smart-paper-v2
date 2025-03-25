@@ -1,47 +1,57 @@
 // ~/Desktop/smart-paper-v2/frontend/src/components/common/Header.tsx
 import { useState } from 'react';
-import { 
-  AppBar, 
-  Box, 
-  Toolbar, 
-  Typography, 
-  Button, 
-  IconButton, 
-  Menu, 
-  MenuItem, 
+import { Link as RouterLink, useNavigate, useLocation } from 'react-router-dom';
+import {
+  AppBar,
+  Box,
+  Toolbar,
+  IconButton,
+  Typography,
+  Menu,
   Container,
+  Avatar,
+  Button,
+  Tooltip,
+  MenuItem,
+  Link,
+  useTheme,
+  useMediaQuery,
   Drawer,
   List,
   ListItem,
   ListItemIcon,
   ListItemText,
   Divider,
-  Badge
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
-import AccountCircle from '@mui/icons-material/AccountCircle';
 import HomeIcon from '@mui/icons-material/Home';
 import ArticleIcon from '@mui/icons-material/Article';
-import SettingsIcon from '@mui/icons-material/Settings';
-import HelpIcon from '@mui/icons-material/Help';
+import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import LoginIcon from '@mui/icons-material/Login';
 import LogoutIcon from '@mui/icons-material/Logout';
-import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
-import { useNavigate, Link as RouterLink } from 'react-router-dom';
+import StarIcon from '@mui/icons-material/Star';
+import EmailIcon from '@mui/icons-material/Email';
 import { useAuthStore } from '../../store/authStore';
 
 const Header = () => {
-  const { user, logout, userData } = useAuthStore();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { user, userData, logout } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
   
+  // モバイルのドロワーステート
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   
-  const handleMenu = (event: React.MouseEvent<HTMLElement>) => {
-    setAnchorEl(event.currentTarget);
+  // ユーザーメニューステート
+  const [anchorElUser, setAnchorElUser] = useState<null | HTMLElement>(null);
+  
+  const handleOpenUserMenu = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorElUser(event.currentTarget);
   };
   
-  const handleClose = () => {
-    setAnchorEl(null);
+  const handleCloseUserMenu = () => {
+    setAnchorElUser(null);
   };
   
   const handleDrawerToggle = () => {
@@ -49,196 +59,279 @@ const Header = () => {
   };
   
   const handleLogout = async () => {
-    handleClose();
     try {
       await logout();
+      handleCloseUserMenu();
       navigate('/login');
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error('Logout failed:', error);
     }
   };
   
-  const drawer = (
-    <Box sx={{ width: 250 }} onClick={handleDrawerToggle}>
-      <Box sx={{ p: 2 }}>
-        <Typography variant="h6" component="div">
-          Smart Paper v2
-        </Typography>
-      </Box>
-      <Divider />
+  // 現在のページに基づいてnavItemをハイライト
+  const isActivePage = (path: string) => {
+    return location.pathname === path;
+  };
+  
+  // ナビゲーション項目
+  const navItems = [
+    { name: 'ホーム', path: '/', icon: <HomeIcon /> },
+    { name: '論文一覧', path: '/my-papers', icon: <ArticleIcon /> },
+    { name: 'お問い合わせ', path: '/contact', icon: <EmailIcon /> },
+  ];
+  
+  // ログイン後に表示する項目
+  const userNavItems = [
+    { name: 'プロフィール', path: '/profile', icon: <AccountCircleIcon /> },
+    ...(userData?.subscription_status !== 'paid' ? [{ name: 'プレミアム', path: '/subscription', icon: <StarIcon /> }] : []),
+  ];
+  
+  // モバイルのドロワーコンテンツ
+  const drawerContent = (
+    <Box sx={{ width: 250 }} role="presentation" onClick={handleDrawerToggle}>
       <List>
-        <ListItem button component={RouterLink} to="/">
-          <ListItemIcon>
-            <HomeIcon />
-          </ListItemIcon>
-          <ListItemText primary="ホーム" />
+        <ListItem sx={{ py: 2 }}>
+          <Typography variant="h6">Smart Paper v2</Typography>
         </ListItem>
+        <Divider />
         
-        {user && (
-          <ListItem button component={RouterLink} to="/my-papers">
-            <ListItemIcon>
-              <ArticleIcon />
-            </ListItemIcon>
-            <ListItemText primary="マイ論文" />
-          </ListItem>
+        {user ? (
+          <>
+            {navItems.map((item) => (
+              <ListItem 
+                button 
+                key={item.name} 
+                component={RouterLink} 
+                to={item.path}
+                selected={isActivePage(item.path)}
+                sx={{
+                  backgroundColor: isActivePage(item.path) ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
+                  '&:hover': {
+                    backgroundColor: 'rgba(0, 0, 0, 0.08)',
+                  }
+                }}
+              >
+                <ListItemIcon>
+                  {item.icon}
+                </ListItemIcon>
+                <ListItemText primary={item.name} />
+              </ListItem>
+            ))}
+            
+            <Divider />
+            
+            {userNavItems.map((item) => (
+              <ListItem 
+                button 
+                key={item.name} 
+                component={RouterLink} 
+                to={item.path}
+                selected={isActivePage(item.path)}
+                sx={{
+                  backgroundColor: isActivePage(item.path) ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
+                  '&:hover': {
+                    backgroundColor: 'rgba(0, 0, 0, 0.08)',
+                  }
+                }}
+              >
+                <ListItemIcon>
+                  {item.icon}
+                </ListItemIcon>
+                <ListItemText primary={item.name} />
+              </ListItem>
+            ))}
+            
+            <Divider />
+            
+            <ListItem button onClick={handleLogout}>
+              <ListItemIcon>
+                <LogoutIcon />
+              </ListItemIcon>
+              <ListItemText primary="ログアウト" />
+            </ListItem>
+          </>
+        ) : (
+          <>
+            <ListItem 
+              button 
+              component={RouterLink} 
+              to="/login"
+              selected={isActivePage('/login')}
+            >
+              <ListItemIcon>
+                <LoginIcon />
+              </ListItemIcon>
+              <ListItemText primary="ログイン" />
+            </ListItem>
+            
+            <ListItem 
+              button 
+              component={RouterLink} 
+              to="/register"
+              selected={isActivePage('/register')}
+            >
+              <ListItemIcon>
+                <AccountCircleIcon />
+              </ListItemIcon>
+              <ListItemText primary="新規登録" />
+            </ListItem>
+          </>
         )}
-        
-        {user && (
-          <ListItem button component={RouterLink} to="/profile">
-            <ListItemIcon>
-              <SettingsIcon />
-            </ListItemIcon>
-            <ListItemText primary="プロフィール設定" />
-          </ListItem>
-        )}
-        
-        <ListItem button component={RouterLink} to="/subscription">
-          <ListItemIcon>
-            <MonetizationOnIcon />
-          </ListItemIcon>
-          <ListItemText primary="料金プラン" />
-        </ListItem>
-        
-        <ListItem button component="a" href="https://github.com/your-repository/issues/new" target="_blank">
-          <ListItemIcon>
-            <HelpIcon />
-          </ListItemIcon>
-          <ListItemText primary="問題を報告" />
-        </ListItem>
       </List>
-      <Divider />
-      {user && (
-        <List>
-          <ListItem button onClick={handleLogout}>
-            <ListItemIcon>
-              <LogoutIcon />
-            </ListItemIcon>
-            <ListItemText primary="ログアウト" />
-          </ListItem>
-        </List>
-      )}
     </Box>
   );
   
   return (
-    <>
-      <AppBar position="static">
-        <Container maxWidth="xl">
-          <Toolbar disableGutters>
-            <IconButton
-              color="inherit"
-              aria-label="open drawer"
-              edge="start"
-              onClick={handleDrawerToggle}
-              sx={{ mr: 2, display: { md: 'none' } }}
-            >
-              <MenuIcon />
-            </IconButton>
-            
-            <Typography
-              variant="h6"
-              noWrap
-              component={RouterLink}
-              to="/"
-              sx={{
-                mr: 2,
-                display: { xs: 'none', md: 'flex' },
-                fontWeight: 700,
-                color: 'inherit',
-                textDecoration: 'none',
-              }}
-            >
-              Smart Paper v2
-            </Typography>
-            
-            <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' } }}>
-              {user && (
-                <Button
-                  component={RouterLink}
-                  to="/my-papers"
-                  sx={{ my: 2, color: 'white', display: 'block' }}
-                >
-                  マイ論文
-                </Button>
-              )}
+    <AppBar position="sticky" color="default" elevation={1}>
+      <Container maxWidth="xl">
+        <Toolbar disableGutters>
+          {/* モバイルビュー */}
+          {isMobile && (
+            <>
+              <IconButton
+                size="large"
+                edge="start"
+                color="inherit"
+                aria-label="menu"
+                onClick={handleDrawerToggle}
+                sx={{ mr: 1 }}
+              >
+                <MenuIcon />
+              </IconButton>
               
+              <Drawer
+                anchor="left"
+                open={drawerOpen}
+                onClose={handleDrawerToggle}
+              >
+                {drawerContent}
+              </Drawer>
+            </>
+          )}
+          
+          {/* ロゴ */}
+          <Typography
+            variant="h6"
+            noWrap
+            component={RouterLink}
+            to="/"
+            sx={{
+              mr: 2,
+              fontWeight: 700,
+              color: 'inherit',
+              textDecoration: 'none',
+              display: 'flex',
+              flexGrow: isMobile ? 1 : 0,
+            }}
+          >
+            Smart Paper v2
+          </Typography>
+          
+          {/* デスクトップナビゲーション */}
+          {!isMobile && user && (
+            <Box sx={{ flexGrow: 1, display: 'flex' }}>
+              {navItems.map((item) => (
+                <Button
+                  key={item.name}
+                  component={RouterLink}
+                  to={item.path}
+                  sx={{ 
+                    my: 2, 
+                    color: 'inherit',
+                    display: 'block',
+                    backgroundColor: isActivePage(item.path) ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
+                  }}
+                  startIcon={item.icon}
+                >
+                  {item.name}
+                </Button>
+              ))}
+            </Box>
+          )}
+          
+          {/* ユーザーメニュー（ログイン時） */}
+          {user ? (
+            <Box sx={{ flexGrow: 0 }}>
+              <Tooltip title="ユーザーメニューを開く">
+                <IconButton onClick={handleOpenUserMenu} sx={{ p: 0 }}>
+                  <Avatar alt={user.displayName || undefined} src={user.photoURL || undefined} />
+                </IconButton>
+              </Tooltip>
+              <Menu
+                sx={{ mt: '45px' }}
+                id="menu-appbar"
+                anchorEl={anchorElUser}
+                anchorOrigin={{
+                  vertical: 'top',
+                  horizontal: 'right',
+                }}
+                keepMounted
+                transformOrigin={{
+                  vertical: 'top',
+                  horizontal: 'right',
+                }}
+                open={Boolean(anchorElUser)}
+                onClose={handleCloseUserMenu}
+              >
+                {/* ユーザー情報 */}
+                <MenuItem disabled>
+                  <Typography textAlign="center">
+                    {user.email}
+                  </Typography>
+                </MenuItem>
+                <Divider />
+                
+                {/* ユーザーメニュー項目 */}
+                {userNavItems.map((item) => (
+                  <MenuItem 
+                    key={item.name} 
+                    component={RouterLink} 
+                    to={item.path}
+                    onClick={handleCloseUserMenu}
+                  >
+                    <ListItemIcon>
+                      {item.icon}
+                    </ListItemIcon>
+                    <Typography textAlign="center">{item.name}</Typography>
+                  </MenuItem>
+                ))}
+                
+                <Divider />
+                
+                {/* ログアウト */}
+                <MenuItem onClick={handleLogout}>
+                  <ListItemIcon>
+                    <LogoutIcon fontSize="small" />
+                  </ListItemIcon>
+                  <Typography textAlign="center">ログアウト</Typography>
+                </MenuItem>
+              </Menu>
+            </Box>
+          ) : (
+            // 未ログイン時のボタン
+            <Box sx={{ flexGrow: 0, display: 'flex' }}>
               <Button
                 component={RouterLink}
-                to="/subscription"
-                sx={{ my: 2, color: 'white', display: 'block' }}
+                to="/login"
+                sx={{ color: 'inherit' }}
+                startIcon={<LoginIcon />}
               >
-                料金プラン
+                ログイン
+              </Button>
+              <Button
+                component={RouterLink}
+                to="/register"
+                variant="contained"
+                color="primary"
+                sx={{ ml: 1 }}
+              >
+                新規登録
               </Button>
             </Box>
-            
-            <Box sx={{ flexGrow: 0 }}>
-              {user ? (
-                <>
-                  <IconButton
-                    size="large"
-                    aria-label="account of current user"
-                    aria-controls="menu-appbar"
-                    aria-haspopup="true"
-                    onClick={handleMenu}
-                    color="inherit"
-                  >
-                    <Badge
-                      color={userData?.subscription_status === 'paid' ? 'secondary' : 'default'}
-                      variant="dot"
-                    >
-                      <AccountCircle />
-                    </Badge>
-                  </IconButton>
-                  <Menu
-                    id="menu-appbar"
-                    anchorEl={anchorEl}
-                    anchorOrigin={{
-                      vertical: 'bottom',
-                      horizontal: 'right',
-                    }}
-                    keepMounted
-                    transformOrigin={{
-                      vertical: 'top',
-                      horizontal: 'right',
-                    }}
-                    open={Boolean(anchorEl)}
-                    onClose={handleClose}
-                  >
-                    <MenuItem component={RouterLink} to="/profile" onClick={handleClose}>
-                      プロフィール
-                    </MenuItem>
-                    <MenuItem onClick={handleLogout}>ログアウト</MenuItem>
-                  </Menu>
-                </>
-              ) : (
-                <Button
-                  component={RouterLink}
-                  to="/login"
-                  color="inherit"
-                >
-                  ログイン
-                </Button>
-              )}
-            </Box>
-          </Toolbar>
-        </Container>
-      </AppBar>
-      
-      <Drawer
-        variant="temporary"
-        open={drawerOpen}
-        onClose={handleDrawerToggle}
-        ModalProps={{
-          keepMounted: true, // モバイルでのパフォーマンス向上のため
-        }}
-        sx={{
-          display: { xs: 'block', md: 'none' },
-          '& .MuiDrawer-paper': { boxSizing: 'border-box', width: 250 },
-        }}
-      >
-        {drawer}
-      </Drawer>
-    </>
+          )}
+        </Toolbar>
+      </Container>
+    </AppBar>
   );
 };
 

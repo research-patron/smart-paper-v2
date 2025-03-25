@@ -17,6 +17,14 @@
         { "fieldPath": "function_name", "order": "ASCENDING" },
         { "fieldPath": "processing_time_ms", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "inquiries", 
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
     }
   ]
 }

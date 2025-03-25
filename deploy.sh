@@ -98,6 +98,13 @@ if [ ! -f "functions/stripe_functions.py" ]; then
   exit 1
 fi
 
+# admin_functions.pyが存在することを確認
+echo -e "\n${BLUE}管理者機能モジュールの確認...${NC}"
+if [ ! -f "functions/admin_functions.py" ]; then
+  echo -e "${RED}Error: functions/admin_functions.py が見つかりません${NC}"
+  exit 1
+fi
+
 # ==========================================
 # Secret Managerのシークレット取得と設定
 # ==========================================
@@ -253,6 +260,19 @@ gcloud functions deploy stripe_webhook \
   --allow-unauthenticated \
   --set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},STRIPE_WEBHOOK_SECRET=${WEBHOOK_SECRET},STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
 
+# 管理者機能関連の関数
+echo -e "\n${BLUE}share_paper_with_admin 関数をデプロイしています...${NC}"
+gcloud functions deploy share_paper_with_admin \
+  --region=${REGION} \
+  --runtime=python310 \
+  --trigger-http \
+  --source=./functions \
+  --entry-point=share_paper_with_admin_router \
+  --memory=512MB \
+  --timeout=60s \
+  --allow-unauthenticated \
+  --set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
+
 echo -e "\n${GREEN}デプロイが完了しました！${NC}"
 echo -e "以下のURLでCloud Functionsにアクセスできます:"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf${NC}"
@@ -262,7 +282,7 @@ echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/create_stri
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/cancel_stripe_subscription${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/update_payment_method${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/stripe_webhook${NC}"
-echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/stripe_webhook_test${NC}"
+echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/share_paper_with_admin${NC}"
 
 # Firestoreコレクションの存在確認とインデックス作成
 echo -e "\n${BLUE}Firestoreインデックスの設定...${NC}"
@@ -286,6 +306,14 @@ echo "{
         { \"fieldPath\": \"function_name\", \"order\": \"ASCENDING\" },
         { \"fieldPath\": \"processing_time_ms\", \"order\": \"ASCENDING\" }
       ]
+    },
+    {
+      \"collectionGroup\": \"inquiries\", 
+      \"queryScope\": \"COLLECTION\",
+      \"fields\": [
+        { \"fieldPath\": \"type\", \"order\": \"ASCENDING\" },
+        { \"fieldPath\": \"created_at\", \"order\": \"DESCENDING\" }
+      ]
     }
   ]
 }" > firestore.indexes.json
@@ -305,3 +333,4 @@ echo -e "3. シークレットを確認 (既に Secret Manager に保存済み)"
 
 echo -e "\n${GREEN}設定が完了しました！${NC}"
 echo -e "${YELLOW}Firestoreの'process_time'コレクションに処理時間データが記録されます${NC}"
+echo -e "${YELLOW}Firestoreに'inquiries'コレクションが作成され、問い合わせと問題報告データが保存されます${NC}"

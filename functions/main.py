@@ -38,12 +38,17 @@ from performance import (
     save_summary_text
 )
 
-# StripeのCloud Functionsをインポート - この部分を追加する
+# StripeのCloud Functionsをインポート
 from stripe_functions import (
     create_stripe_checkout,
     cancel_stripe_subscription,
     update_payment_method,
     stripe_webhook
+)
+
+# 管理者向け機能をインポート
+from admin_functions import (
+    share_paper_with_admin
 )
 
 # ロギング設定
@@ -670,3 +675,14 @@ def get_signed_url(request: Request):
         stop_timer(session_id, temp_paper_id, False, f"Unhandled error: {str(e)}")
         
         return jsonify({"error": "Failed to generate signed URL", "details": str(e)}), 500, headers
+
+# Stripe関数のリダイレクト - 変更なし
+
+# 管理者機能関数のリダイレクト
+@functions_framework.http
+def share_paper_with_admin_router(request: Request):
+    """
+    share_paper_with_admin関数へのルーターとして機能
+    """
+    from admin_functions import share_paper_with_admin
+    return share_paper_with_admin(request)
