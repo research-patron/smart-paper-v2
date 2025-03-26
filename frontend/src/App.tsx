@@ -25,6 +25,8 @@ import PrivacyPage from './pages/LegalPages/PrivacyPage';
 import CommercePage from './pages/LegalPages/CommercePage';
 import SubscriptionPage from './pages/SubscriptionPage';
 import ContactPage from './pages/ContactPage';
+import AdminPapersPage from './pages/AdminPapersPage';
+import AdminReportDetailPage from './pages/AdminReportDetailPage';
 
 // Firebase
 import { auth, db } from './api/firebase';
@@ -48,6 +50,29 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   if (!user) {
     return <Navigate to="/login" />;
   }
+  return <>{children}</>;
+};
+
+// 管理者ルートのコンポーネント
+const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, loading } = useAuthStore();
+  
+  if (loading) {
+    return (
+      <Container sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+        <CircularProgress />
+      </Container>
+    );
+  }
+  
+  // 管理者メールアドレスのチェック
+  const isAdmin = user?.email === 'smart-paper-v2@student-subscription.com' || 
+                 user?.email === 's.kosei0626@gmail.com';
+  
+  if (!user || !isAdmin) {
+    return <Navigate to="/" />;
+  }
+  
   return <>{children}</>;
 };
 
@@ -270,6 +295,19 @@ function App() {
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/commerce" element={<CommercePage />} />
               <Route path="/contact" element={<ContactPage />} />
+              
+              {/* 管理者ルート */}
+              <Route path="/admin/papers" element={
+                <AdminRoute>
+                  <AdminPapersPage />
+                </AdminRoute>
+              } />
+              <Route path="/admin/report/:reportId" element={
+                <AdminRoute>
+                  <AdminReportDetailPage />
+                </AdminRoute>
+              } />
+              
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Box>

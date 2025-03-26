@@ -10,6 +10,7 @@ import {
   Tab,
   CircularProgress,
   Alert,
+  AlertTitle,
   Button,
   Chip,
   Divider,
@@ -38,6 +39,7 @@ import CloudDoneIcon from '@mui/icons-material/CloudDone';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import RefreshIcon from '@mui/icons-material/Refresh'; // 追加: リフレッシュアイコン
+import ReportProblemIcon from '@mui/icons-material/ReportProblem';
 import { usePaperStore } from '../store/paperStore';
 import { useAuthStore } from '../store/authStore';
 import ErrorMessage from '../components/common/ErrorMessage';
@@ -61,7 +63,8 @@ import {
   getPaperPdfUrl, 
   getPaperTranslatedText, 
   getPaper as getPaperOriginal, // 修正: 既存の関数を別名でインポート
-  Paper as PaperType
+  Paper as PaperType,
+  formatDate
 } from '../api/papers';
 
 // ObsidianSettings型のデフォルト値は obsidian.ts から importしています
@@ -118,6 +121,10 @@ const PaperViewPage: React.FC = () => {
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [obsidianExportStatus, setObsidianExportStatus] = useState<'success' | 'error' | 'pending' | 'none'>('none');
   const [isLoadingText, setIsLoadingText] = useState<boolean>(false); // 追加: テキスト読み込み中の状態
+
+  // 管理者かどうかをチェック
+  const isAdmin = user?.email === 'smart-paper-v2@student-subscription.com' || 
+                 user?.email === 's.kosei0626@gmail.com';
 
   // カスタム関数: 論文データを取得して再読み込み
   const refreshPaper = async () => {
@@ -238,7 +245,7 @@ const PaperViewPage: React.FC = () => {
     loadObsidianSettings();
   }, [user]);
   
-  // PDFのキャッシュ状態を追跡するステート
+  // PDFのキャッシュ状態を追跡するためのref
   const [pdfCached, setPdfCached] = useState<boolean>(false);
   
   // PDFのキャッシュ状態を確認
@@ -711,6 +718,8 @@ const PaperViewPage: React.FC = () => {
       );
     } else if (currentPaper.status === 'error') {
       return <Chip label="エラー" color="error" />;
+    } else if (currentPaper.status === 'reported') {
+      return <Chip label="問題報告あり" color="warning" icon={<ReportProblemIcon />} />;
     } else {
       let progress = currentPaper.progress || 0;
       let statusText = '';
@@ -827,6 +836,35 @@ const PaperViewPage: React.FC = () => {
                 </Box>
               </Grid>
             </Grid>
+            
+            {/* 問題報告アラート */}
+            {currentPaper.status === 'reported' && (
+              <Alert 
+                severity="warning" 
+                icon={<ReportProblemIcon />}
+                sx={{ mb: 2 }}
+                action={
+                  isAdmin && currentPaper.report_id ? (
+                    <Button 
+                      color="warning" 
+                      size="small"
+                      variant="outlined"
+                      onClick={() => navigate(`/admin/report/${currentPaper.report_id}`)}
+                    >
+                      報告詳細
+                    </Button>
+                  ) : null
+                }
+              >
+                <AlertTitle>問題報告あり</AlertTitle>
+                この論文には問題報告が提出されています。{isAdmin ? '詳細を確認してください。' : '管理者が確認中です。'}
+                {currentPaper.reported_at && (
+                  <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                    報告日時: {formatDate(currentPaper.reported_at)}
+                  </Typography>
+                )}
+              </Alert>
+            )}
             
             <Divider sx={{ my: 2 }} />
             

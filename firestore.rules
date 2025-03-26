@@ -2,47 +2,87 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // 管理者かどうかを判定する関数
+    function isAdmin() {
+      return request.auth != null && 
+        (request.auth.token.email == 'smart-paper-v2@student-subscription.com' || 
+         request.auth.token.email == 's.kosei0626@gmail.com');
+    }
+
+    // コレクショングループクエリのための権限設定
+    match /{document=**}/papers/{paperId} {
+      allow read, list: if isAdmin();
+    }
+
     // ユーザードキュメント
     match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
       allow write: if request.auth != null && request.auth.uid == userId;
+      
+      // Obsidian設定サブコレクション
+      match /obsidian_settings/{settingId} {
+        allow read, write: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      }
     }
     
     // 論文ドキュメント
     match /papers/{paperId} {
       allow read: if request.auth != null && (
         resource.data.user_id == request.auth.uid || 
-        exists(/databases/$(database)/documents/papers/$(paperId)/shared_with_admins/$(request.auth.uid))
+        exists(/databases/$(database)/documents/papers/$(paperId)/shared_with_admins/$(request.auth.uid)) ||
+        isAdmin()
       );
       allow create: if request.auth != null;
-      allow update, delete: if request.auth != null && resource.data.user_id == request.auth.uid;
+      allow update, delete: if request.auth != null && (
+        resource.data.user_id == request.auth.uid ||
+        isAdmin()
+      );
       
       // 章の翻訳サブコレクション
       match /translated_chapters/{chapterId} {
-        allow read: if request.auth != null && get(/databases/$(database)/documents/papers/$(paperId)).data.user_id == request.auth.uid;
-        allow write: if request.auth != null && get(/databases/$(database)/documents/papers/$(paperId)).data.user_id == request.auth.uid;
+        allow read, write: if request.auth != null && (
+          get(/databases/$(database)/documents/papers/$(paperId)).data.user_id == request.auth.uid ||
+          isAdmin()
+        );
+      }
+      
+      // 管理者共有サブコレクション
+      match /shared_with_admins/{adminId} {
+        allow read, write: if request.auth != null && (
+          get(/databases/$(database)/documents/papers/$(paperId)).data.user_id == request.auth.uid ||
+          isAdmin()
+        );
       }
     }
     
-    // 問い合わせ/問題報告ドキュメント - ここを修正
+    // 問い合わせ/問題報告ドキュメント (フラットなコレクション)
     match /inquiries/{inquiryId} {
-      // 読み取り権限 - 自分の問い合わせと管理者のみ
-      allow read: if request.auth != null && (
-        resource.data.user_id == request.auth.uid || 
-        request.auth.token.email == 's.kosei0626@gmail.com'
-      );
+      // 管理者にはすべてのドキュメントへのアクセスを許可
+      allow read, write: if isAdmin();
+      // 読み取り権限 - 自分の問い合わせのみ
+      allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
       // 作成権限 - 未認証ユーザーを含め、誰でも作成可能
       allow create: if true;
-      // 更新・削除権限 - 自分の問い合わせと管理者のみ
-      allow update, delete: if request.auth != null && (
-        resource.data.user_id == request.auth.uid || 
-        request.auth.token.email == 's.kosei0626@gmail.com'
+      // 更新・削除権限 - 自分の問い合わせのみ
+      allow update, delete: if request.auth != null && resource.data.user_id == request.auth.uid;
+    }
+    
+    // 問い合わせエントリーサブコレクション (新しい階層構造)
+    match /inquiries/{type}/items/{docId} {
+      allow create: if true; // 誰でも作成可能
+      allow read: if request.auth != null && (
+        resource.data.user_id == request.auth.uid || isAdmin()
       );
+      allow update, delete: if request.auth != null && (
+        resource.data.user_id == request.auth.uid || isAdmin()
+      );
+      // サブコレクション全体の読み取り権限を管理者に付与
+      allow list: if isAdmin();
     }
     
     // パフォーマンス計測データ
     match /process_time/{docId} {
-      allow read: if request.auth != null && request.auth.token.email == 's.kosei0626@gmail.com';
+      allow read: if isAdmin();
       allow write: if true; // Cloud Functions からの書き込みを許可
     }
   }
