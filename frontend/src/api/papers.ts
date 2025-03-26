@@ -71,7 +71,7 @@ export interface Paper {
   id: string;
   user_id: string;
   file_path: string;
-  status: 'pending' | 'metadata_extracted' | 'processing' | 'completed' | 'error';
+  status: 'pending' | 'metadata_extracted' | 'processing' | 'completed' | 'error' | 'reported' | 'problem';
   uploaded_at: Timestamp;
   completed_at: Timestamp | null;
   metadata: PaperMetadata | null;
@@ -84,6 +84,8 @@ export interface Paper {
   error_message?: string;
   progress?: number; 
   obsidian?: ObsidianState;
+  reported_at?: Timestamp; // 問題報告された日時
+  report_id?: string;      // 問題報告のドキュメントID
 }
 
 // Cloud Functionsへのリクエスト型
@@ -128,6 +130,38 @@ export const getCurrentUserToken = async (): Promise<string | null> => {
   } catch (error) {
     console.error('Error getting auth token:', error);
     return null;
+  }
+};
+
+// 日付フォーマット関数
+export const formatDate = (timestamp: any): string => {
+  if (!timestamp) return '不明';
+  
+  try {
+    // Firestoreのタイムスタンプからのミリ秒値
+    let date: Date;
+    
+    if (timestamp.toDate) {
+      // Firestore Timestamp
+      date = timestamp.toDate();
+    } else if (timestamp.seconds) {
+      // seconds, nanoseconds形式
+      date = new Date(timestamp.seconds * 1000);
+    } else {
+      // 通常のDateオブジェクトまたはミリ秒
+      date = new Date(timestamp);
+    }
+    
+    return date.toLocaleDateString('ja-JP', {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  } catch (error) {
+    console.error('Date format error:', error);
+    return '日付エラー';
   }
 };
 
@@ -202,6 +236,8 @@ export const uploadPDF = async (file: File, userId: string): Promise<string> => 
     // 無料会員の場合は翻訳数をチェック
     if (userData.subscription_status === 'free' && !needsNewPeriod) {
       const translationCount = userData.translation_count || 0;
+      
+      // 月3件の上限に達している場合はエラー
       if (translationCount >= 3) {
         throw new Error('月間翻訳数の上限（3件）に達しました。プレミアムプランにアップグレードすると無制限に翻訳できます。');
       }
@@ -315,7 +351,9 @@ export const getUserPapers = async (userId: string): Promise<Paper[]> => {
         related_papers: data.related_papers,
         progress: data.progress,
         error_message: data.error_message,
-        obsidian: data.obsidian // Obsidian連携状態を追加
+        obsidian: data.obsidian, // Obsidian連携状態を追加
+        reported_at: data.reported_at, // 問題報告日時
+        report_id: data.report_id // 問題報告ID
       });
     });
     
@@ -358,7 +396,9 @@ export const getPaper = async (paperId: string): Promise<Paper> => {
         related_papers: data.related_papers,
         progress: data.progress,
         error_message: data.error_message,
-        obsidian: data.obsidian // Obsidian連携状態を追加
+        obsidian: data.obsidian, // Obsidian連携状態を追加
+        reported_at: data.reported_at, // 問題報告日時
+        report_id: data.report_id // 問題報告ID
       };
     } else {
       throw new Error('論文が見つかりません');
@@ -516,7 +556,9 @@ export const watchPaperStatus = (
         related_papers: data.related_papers,
         progress: data.progress, // 進捗フィールドを追加
         error_message: data.error_message, // エラーメッセージも追加
-        obsidian: data.obsidian // Obsidian連携状態を追加
+        obsidian: data.obsidian, // Obsidian連携状態を追加
+        reported_at: data.reported_at, // 問題報告日時
+        report_id: data.report_id // 問題報告ID
       });
     }
   }, (error) => {

@@ -271,7 +271,7 @@ gcloud functions deploy share_paper_with_admin \
   --memory=512MB \
   --timeout=60s \
   --allow-unauthenticated \
-  --set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
+  --set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},ADMIN_EMAIL_MASTER=s.kosei0626@gmail.com,ADMIN_EMAIL_SERVICE=smart-paper-v2@student-subscription.com
 
 echo -e "\n${GREEN}デプロイが完了しました！${NC}"
 echo -e "以下のURLでCloud Functionsにアクセスできます:"

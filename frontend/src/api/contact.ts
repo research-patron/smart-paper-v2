@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/api/contact.ts
-import { collection, addDoc, serverTimestamp, doc, updateDoc, arrayUnion, getDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, updateDoc, arrayUnion, getDoc, setDoc } from 'firebase/firestore';
 import { db, auth } from './firebase';
 import { getCurrentUserToken } from './papers';
 
@@ -32,8 +32,18 @@ export const submitInquiry = async (inquiry: Inquiry): Promise<void> => {
     const currentUser = auth.currentUser;
     const userId = currentUser ? currentUser.uid : null;
     
-    // Firestoreに保存
-    await addDoc(collection(db, 'inquiries'), {
+    // ドキュメントID生成（user-id_date形式）
+    const date = new Date().toISOString().replace(/[:.]/g, '-');
+    const docId = `${userId || 'anonymous'}_${date}`;
+    
+    // 問い合わせIDを生成（user-id_date形式）
+    const inquiryId = `${userId || 'anonymous'}_${date}`;
+    
+    // inquiries/service/items/{inquiryId}へのリファレンス
+    const inquiryRef = doc(db, 'inquiries', 'service', 'items', inquiryId);
+    
+    // サービス問い合わせを追加
+    await setDoc(inquiryRef, {
       ...inquiry,
       user_id: userId,  // 認証されていなくてもnullとして保存
       type: 'inquiry',
@@ -43,7 +53,7 @@ export const submitInquiry = async (inquiry: Inquiry): Promise<void> => {
     });
     
     // デバッグ
-    console.log('Inquiry submitted successfully');
+    console.log('Inquiry submitted successfully to inquiries/service/items collection');
   } catch (error) {
     console.error('Failed to submit inquiry:', error);
     throw error;
@@ -57,6 +67,10 @@ export const submitProblemReport = async (report: ProblemReport): Promise<void> 
     const currentUser = auth.currentUser;
     const userId = currentUser ? currentUser.uid : null;
     
+    // ドキュメントID生成（user-id_date形式）
+    const date = new Date().toISOString().replace(/[:.]/g, '-');
+    const docId = `${userId || 'anonymous'}_${date}`;
+    
     // 基本情報
     const reportData = {
       ...report,
@@ -68,16 +82,22 @@ export const submitProblemReport = async (report: ProblemReport): Promise<void> 
       paper_shared: false  // 初期値はfalse
     };
     
-    // Firestoreに保存
-    const reportRef = await addDoc(collection(db, 'inquiries'), reportData);
+    // 問題報告IDを生成（user-id_date形式）
+    const reportId = `${userId || 'anonymous'}_${date}`;
     
-    console.log('Problem report submitted with ID:', reportRef.id);
+    // inquiries/pdf/items/{reportId}へのリファレンス
+    const reportRef = doc(db, 'inquiries', 'pdf', 'items', reportId);
+    
+    // 問題報告を追加
+    await setDoc(reportRef, reportData);
+    
+    console.log('Problem report submitted with ID:', reportId);
     
     // 論文共有の処理（share_with_adminがtrueかつpaper_idがある場合）
     if (report.share_with_admin && report.paper_id && userId) {
       try {
         // 論文ドキュメントを更新して管理者と共有
-        await sharePaperWithAdmin(report.paper_id, reportRef.id);
+        await sharePaperWithAdmin(report.paper_id, reportId);
         console.log('Paper shared with admin successfully');
       } catch (shareError) {
         console.error('Failed to share paper with admin, but problem report was submitted:', shareError);
@@ -93,7 +113,7 @@ export const submitProblemReport = async (report: ProblemReport): Promise<void> 
 // 論文を管理者と共有
 export const sharePaperWithAdmin = async (paperId: string, reportId: string): Promise<void> => {
   try {
-    // 管理者のメールアドレス
+    // 管理者のメールアドレス (自動転送設定済み)
     const adminEmail = 's.kosei0626@gmail.com';
     
     // 認証トークンを取得（通常は認証済みと想定）

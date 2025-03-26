@@ -401,19 +401,6 @@ const HomePage = () => {
                     secondary="ボタンクリックで自動でZoteroに論文を登録" 
                   />
                 </ListItem>
-                <ListItem>
-                  <ListItemIcon sx={{ minWidth: 36 }}>
-                    <EmailIcon fontSize="small" color="primary" />
-                  </ListItemIcon>
-                  <ListItemText 
-                    primary={
-                      <Link component={RouterLink} to="/contact" color="inherit">
-                        お問い合わせ・問題報告
-                      </Link>
-                    } 
-                    secondary="サービスに関する質問や問題を報告" 
-                  />
-                </ListItem>
               </List>
               
               <Button 

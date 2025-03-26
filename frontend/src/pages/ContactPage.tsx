@@ -224,20 +224,19 @@ const ContactPage = () => {
       setError(null);
       
       // バリデーション
-      if (!problemForm.category || !problemForm.description) {
-        throw new Error('すべての必須項目を入力してください');
+      if (!problemForm.category || !problemForm.description || !problemForm.paper_id) {
+        throw new Error('カテゴリ、説明、関連する論文は必須項目です');
       }
       
-      // 論文を共有する場合はpaper_idが必要
-      if (problemForm.share_with_admin && !problemForm.paper_id) {
-        throw new Error('論文を共有する場合は、関連する論文を選択してください');
-      }
+      // 論文IDがある場合は自動的に共有を有効にする
+      const updatedProblemForm = {
+        ...problemForm,
+        share_with_admin: true, // 常にtrueに設定
+        user_id: user?.uid || null,
+      };
       
       // APIを呼び出して問題報告を送信
-      await submitProblemReport({
-        ...problemForm,
-        user_id: user?.uid || null,
-      });
+      await submitProblemReport(updatedProblemForm);
       
       // 成功時の処理
       setSuccess(true);
@@ -433,19 +432,16 @@ const ContactPage = () => {
                 </Grid>
                 
                 <Grid item xs={12} sm={6}>
-                  <FormControl fullWidth>
-                    <InputLabel id="paper-select-label">関連する論文（任意）</InputLabel>
+                  <FormControl fullWidth required>
+                    <InputLabel id="paper-select-label">関連する論文</InputLabel>
                     <Select
                       labelId="paper-select-label"
                       id="paper-id"
                       name="paper_id"
                       value={problemForm.paper_id}
-                      label="関連する論文（任意）"
+                      label="関連する論文"
                       onChange={handleSelectChange}
                     >
-                      <MenuItem value="">
-                        <em>なし</em>
-                      </MenuItem>
                       {papers.map((paper) => (
                         <MenuItem key={paper.id} value={paper.id}>
                           {paper.metadata?.title || `論文 ID: ${paper.id}`}
@@ -481,24 +477,6 @@ const ContactPage = () => {
                     value={problemForm.steps_to_reproduce}
                     onChange={handleProblemChange}
                     placeholder="問題を再現する手順を教えてください"
-                  />
-                </Grid>
-                
-                <Grid item xs={12}>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={problemForm.share_with_admin}
-                        onChange={handleShareChange}
-                        name="share_with_admin"
-                        color="primary"
-                      />
-                    }
-                    label={
-                      <Typography variant="body2">
-                        問題調査のために、選択した論文を管理者と共有することに同意します
-                      </Typography>
-                    }
                   />
                 </Grid>
                 
