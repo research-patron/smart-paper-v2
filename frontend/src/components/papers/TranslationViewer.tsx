@@ -79,6 +79,32 @@ const extractTranslatedText = (text: string | null): string | null => {
     // 見出しの処理
     let processedText = text;
     
+    // サブ章の重複タイトル検出と修正ロジック
+    const subheadingRegex = /<h([3-6])>\s*(\d+\.\d+(?:\.|:)\s*)([^<]+)<\/h\1>\s*<h\1>\s*\2([^<]+)<\/h\1>/gi;
+    processedText = processedText.replace(subheadingRegex, (match, tag, num, title1, title2) => {
+      // ローマ数字やラテン文字が多く含まれる方は英語タイトルと判断
+      const isTitle1English = /\b[IVX]+\b|(?:[A-Z][a-z]+\s+){2,}/i.test(title1);
+      // 日本語文字が含まれる方は日本語タイトルと判断
+      const isTitle2Japanese = /[\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF]/i.test(title2);
+      
+      if (isTitle1English && isTitle2Japanese) {
+        // 英語→日本語の順番の場合、日本語のみ残す
+        return `<h${tag}>${num}${title2}</h${tag}>`;
+      } else if (isTitle2Japanese) {
+        // 日本語が検出された場合は後者を優先
+        return `<h${tag}>${num}${title2}</h${tag}>`;
+      } else {
+        // それ以外の場合は後者を優先（デフォルト）
+        return `<h${tag}>${num}${title2}</h${tag}>`;
+      }
+    });
+
+    // サブ章の重複見出し検出（"2.1. Raw materials 2.1. 原材料"のような形式）
+    processedText = processedText.replace(
+      /<h([3-6])>\s*(\d+\.\d+(?:\.|:)\s*)([^<]+?)\s+\2([^<]+)<\/h\1>/gi, 
+      (match, tagNum, num, engTitle, jpTitle) => `<h${tagNum}>${num}${jpTitle}</h${tagNum}>`
+    );
+    
     // 連続する見出しの重複を検出して除去
     // 例: <h2>1. I. Introduction</h2><h2>1. 序論</h2> → <h2>1. 序論</h2>
     const headingRegex = /<h([1-6])>\s*(\d+)(?:\.|:)\s*([^<]+)<\/h\1>\s*<h\1>\s*\2(?:\.|:)\s*([^<]+)<\/h\1>/gi;

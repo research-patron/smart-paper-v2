@@ -84,8 +84,11 @@ const CommercePage: React.FC = () => {
                   </TableCell>
                   <TableCell>
                     <Typography>
-                      メールアドレス: support@smart-paper.example.com<br />
-                      サービス利用時の不具合報告フォーム: <Link href="https://github.com/your-repository/issues/new" target="_blank" rel="noopener noreferrer">GitHub Issues</Link>
+                      メールアドレス: smart-paper-v2@student-subscription.com<br />
+                      お問い合わせフォーム: <Link href="/contact" onClick={(e) => {
+                        e.preventDefault();
+                        navigate('/contact');
+                      }}>お問い合わせページ</Link>
                     </Typography>
                     <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
                       ※お問い合わせには平日3営業日以内に対応いたします。
@@ -100,8 +103,8 @@ const CommercePage: React.FC = () => {
                   <TableCell>
                     <Typography>
                       無料プラン: 0円<br />
-                      月額プラン: 300円（税込）/月<br />
-                      年額プラン: 3,000円（税込）/年
+                      月額プラン: 500円（税込）/月<br />
+                      年額プラン: 5,000円（税込）/年
                     </Typography>
                     <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
                       ※表示価格はすべて消費税込みです。
