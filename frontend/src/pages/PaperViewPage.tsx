@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/pages/PaperViewPage.tsx
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -874,7 +874,7 @@ const PaperViewPage: React.FC = () => {
               </Box>
               
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {currentPaper.status === 'completed' && (
+              {(currentPaper.status === 'completed' || currentPaper.status === 'reported' || currentPaper.status === 'problem') && (
                 <>
                   <Button 
                     variant="outlined" 
@@ -979,7 +979,7 @@ const PaperViewPage: React.FC = () => {
         
         <Box sx={{ height: 'calc(100vh - 350px)', minHeight: '600px' }}>
           <TabPanel value={tabValue} index={0}>
-            {currentPaper.status !== 'completed' ? (
+            {!['completed', 'reported', 'problem'].includes(currentPaper.status) ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
                 <Typography>翻訳が完了するまでお待ちください...</Typography>
               </Box>
@@ -1036,7 +1036,7 @@ const PaperViewPage: React.FC = () => {
           </TabPanel>
           
           <TabPanel value={tabValue} index={1}>
-            {currentPaper.status !== 'completed' ? (
+            {!['completed', 'reported', 'problem'].includes(currentPaper.status) ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
                 <Typography>要約が完了するまでお待ちください...</Typography>
               </Box>

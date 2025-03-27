@@ -27,6 +27,7 @@ import SubscriptionPage from './pages/SubscriptionPage';
 import ContactPage from './pages/ContactPage';
 import AdminPapersPage from './pages/AdminPapersPage';
 import AdminReportDetailPage from './pages/AdminReportDetailPage';
+import AdminGeminiLogPage from './pages/AdminGeminiLogPage';
 
 // Firebase
 import { auth, db } from './api/firebase';
@@ -305,6 +306,11 @@ function App() {
               <Route path="/admin/report/:reportId" element={
                 <AdminRoute>
                   <AdminReportDetailPage />
+                </AdminRoute>
+              } />
+              <Route path="/admin/gemini-logs/:paperId" element={
+                <AdminRoute>
+                  <AdminGeminiLogPage />
                 </AdminRoute>
               } />
               

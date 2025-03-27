@@ -29,6 +29,7 @@ import WarningIcon from '@mui/icons-material/Warning';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
+import ScienceIcon from '@mui/icons-material/Science';
 
 import { useAuthStore } from '../store/authStore';
 import { getAdminPapers, getReportedPapers } from '../api/admin';
@@ -410,6 +411,16 @@ const PaperTable = ({
                     onClick={() => navigate(`/papers/${paper.id}`)}
                   >
                     <VisibilityIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                
+                <Tooltip title="Geminiログを表示">
+                  <IconButton
+                    size="small"
+                    color="info"
+                    onClick={() => navigate(`/admin/gemini-logs/${paper.id}`)}
+                  >
+                    <ScienceIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
                 
