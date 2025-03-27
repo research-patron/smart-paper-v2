@@ -33,6 +33,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import HomeIcon from '@mui/icons-material/Home';
 import ScienceIcon from '@mui/icons-material/Science';
+import DataObjectIcon from '@mui/icons-material/DataObject';
 import { useAuthStore } from '../store/authStore';
 import { getGeminiLogs } from '../api/admin';
 import { getPaper, formatDate } from '../api/papers';
@@ -58,6 +59,75 @@ const TabPanel = (props: TabPanelProps) => {
       {value === index && <Box sx={{ py: 2 }}>{children}</Box>}
     </div>
   );
+};
+
+// JSONから内容を抽出する関数
+const extractContentFromJson = (jsonObj: any, operation: string): string => {
+  if (!jsonObj || typeof jsonObj !== 'object') {
+    return "内容を抽出できません";
+  }
+  
+  // 操作タイプに応じて抽出
+  if (operation === "translate") {
+    return jsonObj.translated_text || "翻訳内容が見つかりません";
+  } else if (operation === "summarize") {
+    return jsonObj.summary || "要約内容が見つかりません";
+  } else if (operation === "extract_metadata_and_chapters") {
+    // メタデータ抽出の場合は構造化データなのでJSON形式で返す
+    return JSON.stringify(jsonObj, null, 2);
+  } else {
+    // その他の操作の場合は、よく使われるキーを探す
+    for (const key of ["text", "content", "result", "output", "data"]) {
+      if (key in jsonObj) {
+        return jsonObj[key];
+      }
+    }
+    
+    // 最終手段: JSONをそのまま文字列化して返す
+    return JSON.stringify(jsonObj, null, 2);
+  }
+};
+
+// レスポンスからJSONを抽出する関数
+// フロントエンドでextract_json_from_response関数のロジックを再現
+const extractJsonFromResponse = (responseText: string, operation: string) => {
+  try {
+    // 前処理: 余分な空白、改行を削除
+    const cleanedText = responseText.trim();
+    
+    // マークダウンのコードブロックを検索
+    const jsonBlockMatch = cleanedText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (jsonBlockMatch && jsonBlockMatch[1]) {
+      try {
+        return JSON.parse(jsonBlockMatch[1]);
+      } catch (e) {
+        // JSONパースエラー
+      }
+    }
+    
+    // JSONオブジェクトパターンを検索
+    const jsonPattern = /(\{[\s\S]*\})/;
+    const match = jsonPattern.exec(cleanedText);
+    if (match) {
+      try {
+        return JSON.parse(match[1]);
+      } catch (e) {
+        // JSONパースエラー
+      }
+    }
+    
+    // 翻訳処理の特殊フォールバック
+    if (operation === 'translate') {
+      return { translated_text: cleanedText };
+    } else if (operation === 'summarize') {
+      return { summary: cleanedText };
+    }
+    
+    // その他のケースはプレーンテキストを返す
+    return { text: cleanedText };
+  } catch (e) {
+    return { error: 'JSON抽出エラー', text: responseText };
+  }
 };
 
 const AdminGeminiLogPage: React.FC = () => {
@@ -100,8 +170,25 @@ const AdminGeminiLogPage: React.FC = () => {
 
         // Geminiログを取得
         const logsData = await getGeminiLogs(paperId);
-        setLogs(logsData);
-
+        
+        // ログにパース済みJSONとその内容を追加
+        const enhancedLogs = logsData.map(log => {
+          // バックエンドから直接取得できる場合
+          const processedJson = log.processed_json || null;
+          const extractedContent = log.extracted_content || null;
+          
+          // バックエンドから取得できない場合はフロントエンドで処理
+          const parsedJson = processedJson || (log.response ? extractJsonFromResponse(log.response, log.operation || 'unknown') : null);
+          const content = extractedContent || (parsedJson ? extractContentFromJson(parsedJson, log.operation || 'unknown') : null);
+          
+          return {
+            ...log,
+            parsed_json: parsedJson,
+            content: content
+          };
+        });
+        
+        setLogs(enhancedLogs);
         setLoading(false);
       } catch (err) {
         console.error('Error fetching data:', err);
@@ -360,146 +447,231 @@ interface LogsListProps {
   onCopy: (text: string) => void;
 }
 
-
 const LogsList: React.FC<LogsListProps> = ({ logs, onCopy }) => {
-    const getOperationText = (operation: string) => {
-      switch (operation) {
-        case 'translate':
-          return '翻訳';
-        case 'summarize':
-          return '要約';
-        case 'extract_metadata_and_chapters':
-          return 'メタデータ抽出';
-        default:
-          return operation;
-      }
-    };
-  
-    return (
-      <Box sx={{ p: 2 }}>
-        {logs.map((log, index) => (
-          <Accordion key={log.id || index} sx={{ mb: 2 }}>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-                  <Typography variant="subtitle1">
-                    {log.operation ? getOperationText(log.operation) : 'Gemini処理'}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {log.timestamp ? formatDate(log.timestamp) : '日時不明'}
-                  </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
-                  {log.model && (
-                    <Chip 
-                      label={`モデル: ${log.model}`} 
-                      size="small" 
-                      variant="outlined" 
-                      color="primary"
-                    />
-                  )}
-                  {log.parameters?.temperature && (
-                    <Chip 
-                      label={`温度: ${log.parameters.temperature}`} 
-                      size="small" 
-                      variant="outlined" 
-                    />
-                  )}
-                  {log.parameters?.max_output_tokens && (
-                    <Chip 
-                      label={`最大トークン: ${log.parameters.max_output_tokens}`} 
-                      size="small" 
-                      variant="outlined" 
-                    />
-                  )}
-                  {log.parameters?.top_p && (
-                    <Chip 
-                      label={`Top-p: ${log.parameters.top_p}`} 
-                      size="small" 
-                      variant="outlined" 
-                    />
-                  )}
-                  {log.parameters?.top_k && (
-                    <Chip 
-                      label={`Top-k: ${log.parameters.top_k}`} 
-                      size="small" 
-                      variant="outlined" 
-                    />
-                  )}
-                </Box>
-              </Box>
-            </AccordionSummary>
-            <AccordionDetails>
-              {/* 追加: 完全なパラメータ情報 */}
-              {log.parameters && (
-                <Box sx={{ mb: 3 }}>
-                  <Typography variant="subtitle2" gutterBottom>パラメータ</Typography>
-                  <Paper variant="outlined" sx={{ p: 2, backgroundColor: '#f5f5f5', maxHeight: '200px', overflow: 'auto' }}>
-                    <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {JSON.stringify(log.parameters, null, 2)}
-                    </pre>
-                  </Paper>
-                </Box>
-              )}
-            
-              <Box sx={{ mb: 3 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                  <Typography variant="subtitle2">プロンプト</Typography>
-                  <Tooltip title="プロンプトをコピー">
-                    <IconButton size="small" onClick={() => onCopy(log.prompt || '')}>
-                      <ContentCopyIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </Box>
-                <TextField
-                  fullWidth
-                  multiline
-                  variant="outlined"
-                  value={log.prompt || 'プロンプトなし'}
-                  InputProps={{
-                    readOnly: true,
-                  }}
-                  minRows={3}
-                  maxRows={15}
-                />
-                {log.parameters?.prompt_length && (
-                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                    プロンプト長: {log.parameters.prompt_length} 文字
-                  </Typography>
-                )}
-              </Box>
-              
-              <Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                  <Typography variant="subtitle2">レスポンス</Typography>
-                  <Tooltip title="レスポンスをコピー">
-                    <IconButton size="small" onClick={() => onCopy(log.response || '')}>
-                      <ContentCopyIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </Box>
-                <TextField
-                  fullWidth
-                  multiline
-                  variant="outlined"
-                  value={log.response || 'レスポンスなし'}
-                  InputProps={{
-                    readOnly: true,
-                  }}
-                  minRows={3}
-                  maxRows={15}
-                />
-                {log.parameters?.response_length && (
-                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                    レスポンス長: {log.parameters.response_length} 文字
-                  </Typography>
-                )}
-              </Box>
-            </AccordionDetails>
-          </Accordion>
-        ))}
-      </Box>
-    );
+  const getOperationText = (operation: string) => {
+    switch (operation) {
+      case 'translate':
+        return '翻訳';
+      case 'summarize':
+        return '要約';
+      case 'extract_metadata_and_chapters':
+        return 'メタデータ抽出';
+      default:
+        return operation;
+    }
   };
+
+  return (
+    <Box sx={{ p: 2 }}>
+      {logs.map((log, index) => (
+        <Accordion key={log.id || index} sx={{ mb: 2 }}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                <Typography variant="subtitle1">
+                  {log.operation ? getOperationText(log.operation) : 'Gemini処理'}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {log.timestamp ? formatDate(log.timestamp) : '日時不明'}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                {log.model && (
+                  <Chip 
+                    label={`モデル: ${log.model}`} 
+                    size="small" 
+                    variant="outlined" 
+                    color="primary"
+                  />
+                )}
+                {log.parameters?.temperature && (
+                  <Chip 
+                    label={`温度: ${log.parameters.temperature}`} 
+                    size="small" 
+                    variant="outlined" 
+                  />
+                )}
+                {log.parameters?.max_output_tokens && (
+                  <Chip 
+                    label={`最大トークン: ${log.parameters.max_output_tokens}`} 
+                    size="small" 
+                    variant="outlined" 
+                  />
+                )}
+                {log.parameters?.top_p && (
+                  <Chip 
+                    label={`Top-p: ${log.parameters.top_p}`} 
+                    size="small" 
+                    variant="outlined" 
+                  />
+                )}
+                {log.parameters?.top_k && (
+                  <Chip 
+                    label={`Top-k: ${log.parameters.top_k}`} 
+                    size="small" 
+                    variant="outlined" 
+                  />
+                )}
+              </Box>
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            {/* パラメータ情報 */}
+            {log.parameters && (
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="subtitle2" gutterBottom>パラメータ</Typography>
+                <Paper variant="outlined" sx={{ p: 2, backgroundColor: '#f5f5f5', maxHeight: '200px', overflow: 'auto' }}>
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {JSON.stringify(log.parameters, null, 2)}
+                  </pre>
+                </Paper>
+              </Box>
+            )}
+          
+            {/* プロンプト */}
+            <Box sx={{ mb: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="subtitle2">プロンプト</Typography>
+                <Tooltip title="プロンプトをコピー">
+                  <IconButton size="small" onClick={() => onCopy(log.prompt || '')}>
+                    <ContentCopyIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+              <TextField
+                fullWidth
+                multiline
+                variant="outlined"
+                value={log.prompt || 'プロンプトなし'}
+                InputProps={{
+                  readOnly: true,
+                }}
+                minRows={3}
+                maxRows={15}
+              />
+              {log.parameters?.prompt_length && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  プロンプト長: {log.parameters.prompt_length} 文字
+                </Typography>
+              )}
+            </Box>
+            
+            {/* 元のレスポンス */}
+            <Box sx={{ mb: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="subtitle2">レスポンス（元のテキスト）</Typography>
+                <Tooltip title="レスポンスをコピー">
+                  <IconButton size="small" onClick={() => onCopy(log.response || '')}>
+                    <ContentCopyIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+              <TextField
+                fullWidth
+                multiline
+                variant="outlined"
+                value={log.response || 'レスポンスなし'}
+                InputProps={{
+                  readOnly: true,
+                }}
+                minRows={3}
+                maxRows={15}
+              />
+              {log.parameters?.response_length && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  レスポンス長: {log.parameters.response_length} 文字
+                </Typography>
+              )}
+            </Box>
+            
+            {/* JSONパース結果 */}
+            <Box sx={{ mb: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="subtitle2">
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <DataObjectIcon fontSize="small" sx={{ mr: 0.5 }} />
+                    JSONパース結果
+                  </Box>
+                </Typography>
+                <Tooltip title="JSON結果をコピー">
+                  <IconButton 
+                    size="small" 
+                    onClick={() => onCopy(
+                      log.parsed_json 
+                        ? JSON.stringify(log.parsed_json, null, 2) 
+                        : '結果なし'
+                    )}
+                  >
+                    <ContentCopyIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+              <Paper 
+                variant="outlined" 
+                sx={{ 
+                  p: 2, 
+                  backgroundColor: '#f5f7ff', 
+                  minHeight: '100px',
+                  maxHeight: '300px', 
+                  overflow: 'auto' 
+                }}
+              >
+                <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {log.parsed_json 
+                    ? JSON.stringify(log.parsed_json, null, 2) 
+                    : '結果なし'}
+                </pre>
+              </Paper>
+            </Box>
+            
+            {/* 抽出された内容 */}
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="subtitle2">
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    抽出された内容
+                  </Box>
+                </Typography>
+                <Tooltip title="内容をコピー">
+                  <IconButton 
+                    size="small" 
+                    onClick={() => onCopy(log.content || '')}
+                  >
+                    <ContentCopyIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+              <Paper 
+                variant="outlined" 
+                sx={{ 
+                  p: 2, 
+                  backgroundColor: '#f0fff0', 
+                  minHeight: '100px',
+                  maxHeight: '400px', 
+                  overflow: 'auto' 
+                }}
+              >
+                <div style={{ 
+                  margin: 0, 
+                  whiteSpace: 'pre-wrap', 
+                  wordBreak: 'break-word',
+                  fontFamily: log.operation === 'extract_metadata_and_chapters' ? 'monospace' : 'inherit'
+                }}>
+                  {log.content || '内容を抽出できません'}
+                </div>
+              </Paper>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                {log.operation === 'translate' && '翻訳テキスト'}
+                {log.operation === 'summarize' && '要約テキスト'}
+                {log.operation === 'extract_metadata_and_chapters' && 'メタデータ構造'}
+                {!log.operation && '抽出された内容'}
+              </Typography>
+            </Box>
+          </AccordionDetails>
+        </Accordion>
+      ))}
+    </Box>
+  );
+};
 
 export default AdminGeminiLogPage;
