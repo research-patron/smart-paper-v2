@@ -116,7 +116,7 @@ def log_gemini_details(paper_id: str, operation: str, prompt: str, response: str
         log_error("GeminiLogsError", f"Failed to save Gemini details: {str(e)}")
         # この関数の失敗で主要な処理を止めないようエラーは内部で処理する
 
-def process_with_chat(paper_id: str, prompt: str, temperature: float = 0.6, max_retries: int = 2, operation: str = "unknown") -> str:
+def process_with_chat(paper_id: str, prompt: str, temperature: float = 1, max_retries: int = 2, operation: str = "unknown") -> str:
     """
     既存のチャットセッションを使用してプロンプトを処理する
 
@@ -222,7 +222,7 @@ def end_chat_session(paper_id: str) -> bool:
 
 # 以下の関数は互換性のために残しておくが、内部では新しい会話ベースの関数を使用
 def process_pdf_content(model: GenerativeModel, pdf_gs_path: str, prompt: str, 
-                       temperature: float = 0.6, paper_id: str = None) -> str:
+                       temperature: float = 1, paper_id: str = None) -> str:
     """
     PDFファイルの内容を処理する (互換性のために残す)
 
@@ -252,7 +252,7 @@ def process_pdf_content(model: GenerativeModel, pdf_gs_path: str, prompt: str,
                  {"error": str(e), "paper_id": paper_id})
         raise VertexAIError(f"Error in process_pdf_content: {str(e)}") from e
 
-def generate_content(model: GenerativeModel, prompt: str, temperature: float = 0.6, max_retries: int = 3, paper_id: str = None) -> str:
+def generate_content(model: GenerativeModel, prompt: str, temperature: float = 1, max_retries: int = 3, paper_id: str = None) -> str:
     """
     Vertex AIのGenerative AIモデルを呼び出す (互換性のために残す)
 

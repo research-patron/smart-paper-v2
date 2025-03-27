@@ -37,30 +37,19 @@ METADATA_AND_CHAPTER_PROMPT_FILE = ""
 
 # デフォルトのプロンプト (プロンプトファイルが読み込めない場合に使用)
 DEFAULT_TRANSLATION_PROMPT = """
-あなたは学術論文の翻訳者です。与えられた英語または他の言語の論文を日本語に翻訳してください。
-翻訳は学術的に正確であるべきですが、読みやすさも考慮してください。
-専門用語は適切な日本語訳または原語のままにしてください。
-数式、図表の参照、引用は原文のまま残してください。
-
-以下の章番号に対応する章全体を翻訳してください：
+以下の章番号に対応する章を日本語に翻訳してください：
 Chapter Number: {chapter_number}
 Chapter Title: {chapter_title}
 
-PDF全体を考慮して、章番号{chapter_number}に該当する部分を見つけ、その章全体を翻訳してください。
-ページ番号は参考情報として使用することがありますが、章全体を翻訳することを優先してください。
-
 重要な指示：
-1. 章の見出しは必ず「数字. タイトル」の形式にしてください。例えば「Chapter 3: Results and Discussion」は「3. 結果と考察」としてください。
-2. サブ見出しも同様に「3.1. 実験結果」のような形式にしてください。
-3. 翻訳したテキストは<p>タグで段落を区切ってください。
-4. 見出しは<h2>、<h3>などの適切なタグを使用してください。
-5. <h2><h3>タグ、<p>タグ以外のタグ（<sup>や<sub>など）は一切使用しないでください。
-6. References」「Bibliography」「参考文献」など参考文献リストのセクションは翻訳しないでください。このようなセクションを検出した場合は、単に「<h2>参考文献</h2><p>（参考文献リストは省略）</p>」と出力してください。
+1. 専門用語は適切な日本語訳または原語のままにしてください。
+2. 数式、図表の参照、引用は原文のまま残してください。
+3. 5. References」「Bibliography」「参考文献」など参考文献リストのセクションは翻訳しないでください。このようなセクションを検出した場合は、単に「<h2>参考文献</h2><p>（参考文献リストは省略）</p>」と出力してください。
 
 出力形式：
 ```json
 {
-  "translated_text": "翻訳されたテキスト（HTMLマークアップ形式）"
+  "translated_text": "翻訳されたテキスト"
 }
 ```
 """
@@ -96,10 +85,18 @@ DEFAULT_METADATA_PROMPT = """
 
 **章構成:**
 * chapters (章): 章のリスト
-    * chapter_number (章番号): アラビア数字で表記 (例: 1, 2, 3)。章番号がない場合は、論文の先頭からの通し番号を付与してください。
+    * chapter_number (章番号): 正確な形式で表記してください。
+      - メイン章は "1", "2", "3" など
+      - サブ章は "1.1", "1.2", "2.1", "2.2" など
     * title (章タイトル): 章のタイトル。タイトルがない場合は、「(章番号) の内容」と記述してください。
     * start_page (開始ページ): 章の開始ページ番号。
     * end_page (終了ページ): 章の終了ページ番号。
+
+重要な指示：
+1. メイン章だけでなく、サブ章（例：1.1, 1.2）も必ず抽出してください。
+2. 章番号は正確な形式で表記してください。サブ章の場合は親章の番号を含めて「1.1」のように表記します。
+3. 章番号がない場合でも、論文の構造に基づいて適切な階層番号を割り当ててください。
+4. チャプターとサブチャプターの階層関係は番号で示されるので、別途階層フィールドを追加する必要はありません。
 
 出力形式:
 ```json
@@ -120,15 +117,98 @@ DEFAULT_METADATA_PROMPT = """
  },
  "chapters": [
   {
-   "chapter_number": 0,
-   "title": "",
-   "start_page": 0,
-   "end_page": 0
+   "chapter_number": "1",
+   "title": "Introduction",
+   "start_page": 1,
+   "end_page": 2
+  },
+  {
+   "chapter_number": "1.1",
+   "title": "Background",
+   "start_page": 1,
+   "end_page": 1
+  },
+  {
+   "chapter_number": "1.2",
+   "title": "Related Work",
+   "start_page": 2,
+   "end_page": 2
+  },
+  {
+   "chapter_number": "2",
+   "title": "Methods",
+   "start_page": 3,
+   "end_page": 5
   }
  ]
 }
 ```
 """
+
+def is_subchapter(chapter_number) -> bool:
+    """
+    章番号がサブ章かどうかを判定する
+    
+    Args:
+        chapter_number: 章番号（文字列または数値）
+        
+    Returns:
+        bool: サブ章の場合はTrue、主章の場合はFalse
+    """
+    # 章番号を文字列に変換
+    str_number = str(chapter_number)
+    
+    # 数値部分のみを抽出して判定
+    # サブ章パターン (例: "3.1", "3.1.2" など)
+    parts = str_number.split('.')
+    return len(parts) > 1
+
+def get_main_chapter_number(chapter_number) -> str:
+    """
+    章番号から主章番号を抽出する
+    
+    Args:
+        chapter_number: 章番号（文字列または数値）
+        
+    Returns:
+        str: 主章番号の文字列表現
+    """
+    # 章番号を文字列に変換
+    str_number = str(chapter_number)
+    
+    # 最初のピリオドまでを取得
+    parts = str_number.split('.')
+    return parts[0]
+
+def has_subchapters(chapter_number, chapters: list) -> bool:
+    """
+    指定された主章番号にサブ章があるかどうかを判定する
+    
+    Args:
+        chapter_number: 主章番号
+        chapters: 全章のリスト
+        
+    Returns:
+        bool: サブ章がある場合はTrue、ない場合はFalse
+    """
+    # 主章の番号を取得 (例: "3")
+    main_number = get_main_chapter_number(chapter_number)
+    
+    # サブ章の有無を確認
+    for chapter in chapters:
+        other_number = chapter.get("chapter_number")
+        # 自分自身は除外
+        if other_number == chapter_number:
+            continue
+            
+        # 他の章の主章番号を取得
+        other_main = get_main_chapter_number(other_number)
+        
+        # 主章番号が一致し、かつサブ章である場合
+        if other_main == main_number and is_subchapter(other_number):
+            return True
+    
+    return False
 
 def load_prompt(filename: str) -> str:
     """
@@ -237,6 +317,22 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
         # 1. 翻訳フェーズ - 各章を順番に翻訳
         for i, chapter in enumerate(sorted_chapters, 1):
             try:
+                chapter_number = chapter['chapter_number']
+                
+                # 主章で、かつサブ章が存在する場合はスキップ
+                if not is_subchapter(chapter_number) and has_subchapters(chapter_number, sorted_chapters):
+                    log_info("ProcessAllChapters", f"Skipping main chapter {chapter_number} as it has subchapters",
+                            {"paper_id": paper_id})
+                    
+                    # 結果に「スキップ」と記録
+                    results.append({
+                        "chapter_number": chapter_number,
+                        "translated": False,
+                        "skipped": True,
+                        "reason": "has_subchapters"
+                    })
+                    continue
+                
                 log_info("ProcessAllChapters", f"Processing chapter {i}/{total_chapters}: Chapter {chapter['chapter_number']}",
                          {"paper_id": paper_id})
                 
