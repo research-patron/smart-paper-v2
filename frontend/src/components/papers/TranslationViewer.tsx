@@ -17,6 +17,7 @@ import ErrorMessage from '../common/ErrorMessage';
 
 interface TranslationViewerProps {
   translatedText: string | null;
+  processedContent?: string | null; // 追加: バックエンドで処理済みのコンテンツ
   loading?: boolean;
   error?: string | null;
   chapter?: {
@@ -28,7 +29,14 @@ interface TranslationViewerProps {
 }
 
 // JSONパース関数: 翻訳テキストからJSON構造を抽出する
-const extractTranslatedText = (text: string | null): string | null => {
+// このロジックはバックエンド側と一致させる必要があります
+const extractTranslatedText = (text: string | null, processedContent?: string | null): string | null => {
+  // バックエンドで処理済みのコンテンツがある場合はそれを優先
+  if (processedContent) {
+    return processedContent;
+  }
+
+  // バックエンドのデータがない場合はフロントエンドでパース処理
   if (!text) return null;
 
   try {
@@ -201,6 +209,7 @@ const extractTranslatedText = (text: string | null): string | null => {
 
 const TranslationViewer: React.FC<TranslationViewerProps> = ({
   translatedText,
+  processedContent, // 追加: バックエンドで処理済みのコンテンツ
   loading = false,
   error = null,
   chapter,
@@ -213,8 +222,8 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
   
   // 処理された翻訳テキスト（JSONパース処理を含む）
   const processedText = useMemo(() => {
-    return extractTranslatedText(translatedText);
-  }, [translatedText]);
+    return extractTranslatedText(translatedText, processedContent);
+  }, [translatedText, processedContent]);
   
   // フォントサイズを変更
   const changeFontSize = (delta: number) => {

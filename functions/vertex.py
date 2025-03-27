@@ -6,6 +6,8 @@ from vertexai.generative_models import Part, GenerationConfig, GenerativeModel, 
 from google.api_core import exceptions
 from google.cloud import firestore
 from error_handling import log_error, log_info, log_warning, VertexAIError
+# 新しい共通モジュールからインポート
+from json_utils import extract_json_from_response, extract_content_from_json
 
 # 環境変数から設定を取得
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT")
@@ -99,10 +101,28 @@ def log_gemini_details(paper_id: str, operation: str, prompt: str, response: str
         # papers/<paper_id>/gemini_logs/<timestamp> にデータを保存
         log_ref = db.collection("papers").document(paper_id).collection("gemini_logs").document()
         
+        # JSONパース結果とその内容を保存
+        processed_json = None
+        extracted_content = None
+        
+        try:
+            # JSONを抽出
+            processed_json = extract_json_from_response(response, operation)
+            
+            # さらにJSONから内容を抽出
+            extracted_content = extract_content_from_json(processed_json, operation)
+            
+        except Exception as json_error:
+            log_warning("GeminiLogs", f"Failed to extract JSON from response: {str(json_error)}")
+            processed_json = {"error": str(json_error)}
+            extracted_content = "JSONパースエラー: " + str(json_error)
+        
         log_data = {
             "operation": operation,
             "prompt": prompt,
             "response": response,
+            "processed_json": processed_json,      # JSONパース結果
+            "extracted_content": extracted_content, # JSONから抽出した内容
             "timestamp": firestore.SERVER_TIMESTAMP,
             "model": MODEL_NAME
         }
