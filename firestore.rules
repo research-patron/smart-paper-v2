@@ -25,7 +25,7 @@ service cloud.firestore {
       }
     }
     
-    // 論文ドキュメント
+     // 論文ドキュメント
     match /papers/{paperId} {
       allow read: if request.auth != null && (
         resource.data.user_id == request.auth.uid || 
@@ -52,6 +52,11 @@ service cloud.firestore {
           get(/databases/$(database)/documents/papers/$(paperId)).data.user_id == request.auth.uid ||
           isAdmin()
         );
+      }
+      
+      // Geminiログサブコレクション - 追加
+      match /gemini_logs/{logId} {
+        allow read, write: if isAdmin();
       }
     }
     

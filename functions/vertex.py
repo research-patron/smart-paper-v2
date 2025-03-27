@@ -1,8 +1,10 @@
 import vertexai
 import json
 import os
+import datetime
 from vertexai.generative_models import Part, GenerationConfig, GenerativeModel, ChatSession
 from google.api_core import exceptions
+from google.cloud import firestore
 from error_handling import log_error, log_info, log_warning, VertexAIError
 
 # 環境変数から設定を取得
@@ -80,7 +82,41 @@ def start_chat_session(paper_id: str, pdf_gs_path: str) -> ChatSession:
         log_error("VertexAIError", f"Failed to start chat session", {"error": str(e), "paper_id": paper_id})
         raise VertexAIError(f"Failed to start chat session: {str(e)}") from e
 
-def process_with_chat(paper_id: str, prompt: str, temperature: float = 0.2, max_retries: int = 2) -> str:
+def log_gemini_details(paper_id: str, operation: str, prompt: str, response: str, params: dict = None):
+    """
+    Geminiのプロンプトとレスポンスの詳細をFirestoreに保存する
+    
+    Args:
+        paper_id: 論文ID
+        operation: 操作タイプ ('translate', 'summarize', 'extract_metadata_and_chapters')
+        prompt: 送信されたプロンプト全文
+        response: 受信したレスポンス全文
+        params: 生成パラメータ (オプション)
+    """
+    try:
+        db = firestore.Client()
+        
+        # papers/<paper_id>/gemini_logs/<timestamp> にデータを保存
+        log_ref = db.collection("papers").document(paper_id).collection("gemini_logs").document()
+        
+        log_data = {
+            "operation": operation,
+            "prompt": prompt,
+            "response": response,
+            "timestamp": firestore.SERVER_TIMESTAMP,
+            "model": MODEL_NAME
+        }
+        
+        if params:
+            log_data["parameters"] = params
+            
+        log_ref.set(log_data)
+        log_info("GeminiLogs", f"Saved Gemini details for paper: {paper_id}, operation: {operation}")
+    except Exception as e:
+        log_error("GeminiLogsError", f"Failed to save Gemini details: {str(e)}")
+        # この関数の失敗で主要な処理を止めないようエラーは内部で処理する
+
+def process_with_chat(paper_id: str, prompt: str, temperature: float = 0.6, max_retries: int = 2, operation: str = "unknown") -> str:
     """
     既存のチャットセッションを使用してプロンプトを処理する
 
@@ -89,6 +125,7 @@ def process_with_chat(paper_id: str, prompt: str, temperature: float = 0.2, max_
         prompt: プロンプト文字列
         temperature: 生成の温度パラメータ（デフォルト: 0.2）
         max_retries: 最大リトライ回数
+        operation: 操作タイプ (追加: 処理の種類を識別するため)
 
     Returns:
         str: 生成されたテキスト
@@ -103,18 +140,45 @@ def process_with_chat(paper_id: str, prompt: str, temperature: float = 0.2, max_
             
             chat = active_chat_sessions[paper_id]
             
+            # 生成パラメータを設定
+            generation_config = GenerationConfig(
+                temperature=temperature,
+                max_output_tokens=8192,
+                top_p=0.95,
+                top_k=40,
+            )
+            
             # メッセージを送信
             response = chat.send_message(
                 prompt,
-                generation_config=GenerationConfig(
-                    temperature=temperature,
-                    max_output_tokens=8192,
-                    top_p=0.95,
-                    top_k=40,
-                )
+                generation_config=generation_config
             )
             
             log_info("VertexAI", f"Successfully processed prompt with chat session for paper: {paper_id}")
+            
+            # パラメータ情報を完全に保存するよう修正
+            full_params = {
+                "model": MODEL_NAME,
+                "temperature": temperature,
+                "max_output_tokens": 8192,
+                "top_p": 0.95,
+                "top_k": 40,
+                "retry_count": retry_count,
+                "location": LOCATION,
+                "prompt_length": len(prompt),
+                "response_length": len(response.text),
+                "timestamp": datetime.datetime.now().isoformat()
+            }
+            
+            # Geminiのプロンプトとレスポンスをログに保存
+            log_gemini_details(
+                paper_id, 
+                operation, 
+                prompt, 
+                response.text, 
+                full_params
+            )
+            
             return response.text
             
         except exceptions.DeadlineExceeded as e:
@@ -158,7 +222,7 @@ def end_chat_session(paper_id: str) -> bool:
 
 # 以下の関数は互換性のために残しておくが、内部では新しい会話ベースの関数を使用
 def process_pdf_content(model: GenerativeModel, pdf_gs_path: str, prompt: str, 
-                       temperature: float = 0.2, paper_id: str = None) -> str:
+                       temperature: float = 0.6, paper_id: str = None) -> str:
     """
     PDFファイルの内容を処理する (互換性のために残す)
 
@@ -188,7 +252,7 @@ def process_pdf_content(model: GenerativeModel, pdf_gs_path: str, prompt: str,
                  {"error": str(e), "paper_id": paper_id})
         raise VertexAIError(f"Error in process_pdf_content: {str(e)}") from e
 
-def generate_content(model: GenerativeModel, prompt: str, temperature: float = 0.2, max_retries: int = 3, paper_id: str = None) -> str:
+def generate_content(model: GenerativeModel, prompt: str, temperature: float = 0.6, max_retries: int = 3, paper_id: str = None) -> str:
     """
     Vertex AIのGenerative AIモデルを呼び出す (互換性のために残す)
 

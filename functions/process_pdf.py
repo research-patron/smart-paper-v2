@@ -54,6 +54,8 @@ PDF全体を考慮して、章番号{chapter_number}に該当する部分を見�
 2. サブ見出しも同様に「3.1. 実験結果」のような形式にしてください。
 3. 翻訳したテキストは<p>タグで段落を区切ってください。
 4. 見出しは<h2>、<h3>などの適切なタグを使用してください。
+5. <h2><h3>タグ、<p>タグ以外のタグ（<sup>や<sub>など）は一切使用しないでください。
+6. References」「Bibliography」「参考文献」など参考文献リストのセクションは翻訳しないでください。このようなセクションを検出した場合は、単に「<h2>参考文献</h2><p>（参考文献リストは省略）</p>」と出力してください。
 
 出力形式：
 ```json
@@ -625,7 +627,7 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
         def api_call():
             # リソースエラー対策のためのスリープ (ランダム要素を含める)
             time.sleep(1.0 + random.uniform(0.1, 0.5))
-            return process_with_chat(paper_id, prompt)
+            return process_with_chat(paper_id, prompt, operation=operation)  # operation パラメータを追加
         
         # APIコール開始時間を記録
         api_start = time.time()
