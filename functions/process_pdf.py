@@ -89,6 +89,7 @@ DEFAULT_METADATA_PROMPT = """
       - メイン章は "1", "2", "3" など
       - サブ章は "1.1", "1.2", "2.1", "2.2" など
     * title (章タイトル): 章のタイトル。タイトルがない場合は、「(章番号) の内容」と記述してください。
+    * title_ja (章タイトル日本語訳): 章タイトルの日本語訳を提供してください。英語タイトルの場合は適切な日本語訳を、日本語タイトルの場合はそのまま記載してください。
     * start_page (開始ページ): 章の開始ページ番号。
     * end_page (終了ページ): 章の終了ページ番号。
 
@@ -97,6 +98,13 @@ DEFAULT_METADATA_PROMPT = """
 2. 章番号は正確な形式で表記してください。サブ章の場合は親章の番号を含めて「1.1」のように表記します。
 3. 章番号がない場合でも、論文の構造に基づいて適切な階層番号を割り当ててください。
 4. チャプターとサブチャプターの階層関係は番号で示されるので、別途階層フィールドを追加する必要はありません。
+5. 英語の章タイトルには必ず日本語訳を提供してください。一般的な翻訳例:
+   - "Introduction" → "はじめに"または"序論"
+   - "Methods" → "方法"
+   - "Results" → "結果"
+   - "Discussion" → "考察"
+   - "Conclusion" → "結論"
+   - "References" → "参考文献"
 
 出力形式:
 ```json
@@ -119,26 +127,23 @@ DEFAULT_METADATA_PROMPT = """
   {
    "chapter_number": "1",
    "title": "Introduction",
+   "title_ja": "はじめに",
    "start_page": 1,
    "end_page": 2
   },
   {
    "chapter_number": "1.1",
    "title": "Background",
+   "title_ja": "背景",
    "start_page": 1,
    "end_page": 1
   },
   {
    "chapter_number": "1.2",
    "title": "Related Work",
+   "title_ja": "関連研究",
    "start_page": 2,
    "end_page": 2
-  },
-  {
-   "chapter_number": "2",
-   "title": "Methods",
-   "start_page": 3,
-   "end_page": 5
   }
  ]
 }
@@ -314,6 +319,9 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
         # 全章の翻訳テキストを結合するための変数
         all_translated_text = ""
         
+        # 章番号からその章のデータを取得するための辞書を作成（効率化のため）
+        chapter_dict = {ch['chapter_number']: ch for ch in sorted_chapters}
+        
         # 1. 翻訳フェーズ - 各章を順番に翻訳
         for i, chapter in enumerate(sorted_chapters, 1):
             try:
@@ -385,25 +393,40 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
                     if "end_page" not in final_result:
                         final_result["end_page"] = chapter["end_page"]
 
-                # 全体の翻訳テキストに追加
+                # 全体の翻訳テキストに追加（ここで構造化された日本語見出しを使用）
                 chapter_translated_text = final_result.get("translated_text", "")
                 if chapter_translated_text:
                     if all_translated_text:
                         all_translated_text += "\n\n"
                     
-                    # 章番号とタイトルを追加
-                    chapter_number = final_result.get("chapter_number", "?")
-                    chapter_title = final_result.get("title", "")
+                    # メタデータに日本語タイトルがあればそれを使用
+                    chapter_title_ja = ""
                     
-                    # タイトルが「数字. タイトル」の形式かチェック
-                    title_pattern = rf"^{chapter_number}\.\s+.*"
-                    if not re.match(title_pattern, chapter_title):
-                        chapter_title = f"{chapter_number}. {chapter_title}"
+                    # 対応する章のメタデータを検索
+                    chapter_metadata = chapter_dict.get(chapter_number, {})
+                    if "title_ja" in chapter_metadata and chapter_metadata["title_ja"]:
+                        # メタデータから日本語タイトルを取得
+                        chapter_title_ja = chapter_metadata["title_ja"]
+                    else:
+                        # 日本語タイトルがなければ英語タイトルを使用
+                        chapter_title_ja = chapter.get("title", final_result.get("title", f"Chapter {chapter_number}"))
                     
-                    all_translated_text += f"<h2>{chapter_title}</h2>\n\n"
+                    # 章番号がタイトルに含まれていない場合は追加
+                    if not chapter_title_ja.startswith(f"{chapter_number}"):
+                        chapter_title_ja = f"{chapter_number}. {chapter_title_ja}"
+                    
+                    # 見出しレベルを設定（サブ章か主章かで分ける）
+                    heading_level = 3 if is_subchapter(chapter_number) else 2
+                    
+                    # 見出しと翻訳内容を追加
+                    all_translated_text += f"<h{heading_level}>{chapter_title_ja}</h{heading_level}>\n\n"
                     all_translated_text += chapter_translated_text
 
                 # FirestoreのサブコレクションにTranslation結果を保存
+                # (章のメタデータが提供されていれば、日本語タイトルも含める)
+                if "title_ja" in chapter:
+                    final_result["title_ja"] = chapter["title_ja"]
+                
                 chapter_ref = doc_ref.collection("translated_chapters").document(f"chapter_{chapter['chapter_number']}")
                 chapter_ref.set(final_result)
                 
@@ -417,8 +440,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
                     chapter_time_sec
                 )
                 
-                # パフォーマンス計測モジュールに翻訳テキストを保存 - ここでは個別章のテキストだけを保存
-                # save_translated_text(session_id, chapter_translated_text)
+                # パフォーマンス計測モジュールに翻訳テキストを保存 - 個別章のテキストだけを保存
                 
                 add_step(session_id, paper_id, f"chapter_{chapter['chapter_number']}_translated", 
                         {"chapter_number": chapter["chapter_number"],
@@ -1090,15 +1112,47 @@ def extract_json_from_response(response_text: str, operation: str) -> dict:
                 for chapter_item in chapter_items:
                     chapter = {}
                     
-                    # 章番号
-                    number_match = re.search(r'"chapter_number"\s*:\s*(\d+)', chapter_item)
+                    # 章番号の抽出 - 文字列または数値の両方に対応
+                    chapter_number_pattern = re.compile(r'"chapter_number"\s*:\s*"?([^",]+)"?')
+                    number_match = chapter_number_pattern.search(chapter_item)
                     if number_match:
-                        chapter["chapter_number"] = int(number_match.group(1))
+                        chapter["chapter_number"] = number_match.group(1).strip()
                     
                     # タイトル
                     title_match = re.search(r'"title"\s*:\s*"([^"]+)"', chapter_item)
                     if title_match:
-                        chapter["title"] = title_match.group(1)
+                        chapter["title"] = title_match.group(1).strip()
+                    
+                    # 日本語タイトル (新規追加)
+                    title_ja_match = re.search(r'"title_ja"\s*:\s*"([^"]+)"', chapter_item)
+                    if title_ja_match:
+                        chapter["title_ja"] = title_ja_match.group(1).strip()
+                    else:
+                        # 日本語タイトルがない場合は英語タイトルを使用
+                        if "title" in chapter:
+                            # 英語タイトルを日本語名に自動変換
+                            title_lower = chapter["title"].lower()
+                            if "introduction" in title_lower:
+                                chapter["title_ja"] = "はじめに"
+                            elif "method" in title_lower:
+                                chapter["title_ja"] = "方法"
+                            elif "result" in title_lower:
+                                chapter["title_ja"] = "結果"
+                            elif "discussion" in title_lower:
+                                chapter["title_ja"] = "考察"
+                            elif "conclusion" in title_lower:
+                                chapter["title_ja"] = "結論"
+                            elif "abstract" in title_lower:
+                                chapter["title_ja"] = "要約"
+                            elif "background" in title_lower:
+                                chapter["title_ja"] = "背景"
+                            elif "reference" in title_lower:
+                                chapter["title_ja"] = "参考文献"
+                            elif "bibliography" in title_lower:
+                                chapter["title_ja"] = "参考文献"
+                            else:
+                                # 該当なしの場合は元のタイトルを使用
+                                chapter["title_ja"] = chapter["title"]
                     
                     # ページ情報
                     start_page_match = re.search(r'"start_page"\s*:\s*(\d+)', chapter_item)
