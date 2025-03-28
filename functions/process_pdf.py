@@ -341,6 +341,30 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
                         "skipped": True,
                         "reason": "has_subchapters"
                     })
+                    
+                    # サブ章のあるメイン章でも、見出しだけは全体の翻訳テキストに追加
+                    if all_translated_text:
+                        all_translated_text += "\n\n"
+                    
+                    # メタデータに日本語タイトルがあればそれを使用
+                    chapter_title_ja = ""
+                    
+                    # 対応する章のメタデータを検索
+                    chapter_metadata = chapter_dict.get(chapter_number, {})
+                    if "title_ja" in chapter_metadata and chapter_metadata["title_ja"]:
+                        # メタデータから日本語タイトルを取得
+                        chapter_title_ja = chapter_metadata["title_ja"]
+                    else:
+                        # 日本語タイトルがなければ英語タイトルを使用
+                        chapter_title_ja = chapter.get("title", f"Chapter {chapter_number}")
+                    
+                    # 章番号がタイトルに含まれていない場合は追加
+                    if not chapter_title_ja.startswith(f"{chapter_number}"):
+                        chapter_title_ja = f"{chapter_number}. {chapter_title_ja}"
+                    
+                    # メイン章の見出しをHTML形式で追加（内容はスキップ）
+                    all_translated_text += f"<h2>{chapter_title_ja}</h2>\n\n"
+                    
                     continue
                 
                 log_info("ProcessAllChapters", f"Processing chapter {i}/{total_chapters}: Chapter {chapter['chapter_number']}",

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Container, 
@@ -8,7 +8,6 @@ import {
   Paper, 
   Grid, 
   Alert, 
-  LinearProgress,
   Card,
   CardContent,
   CardActionArea,
@@ -24,27 +23,23 @@ import {
   List,
   IconButton,
   Link,
+  LinearProgress,
 } from '@mui/material';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
-import DescriptionIcon from '@mui/icons-material/Description';
-import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import DeleteIcon from '@mui/icons-material/Delete';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
 import StarIcon from '@mui/icons-material/Star';
-import EmailIcon from '@mui/icons-material/Email';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import DescriptionIcon from '@mui/icons-material/Description';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { Link as RouterLink } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { usePaperStore } from '../store/paperStore';
-import { uploadPDF } from '../api/papers';
 import SubscriptionInfoCard from '../components/subscription/SubscriptionInfoCard';
+import PdfUpload from '../components/papers/PdfUpload'; // PdfUploadコンポーネントをインポート
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadError, setUploadError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [paperToDelete, setPaperToDelete] = useState<string | null>(null);
   const [limitAlertOpen, setLimitAlertOpen] = useState(false);
@@ -58,9 +53,6 @@ const HomePage = () => {
       forceRefreshUserData();
     }
   }, [user, forceRefreshUserData]);
-
-  // ファイル入力参照
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 論文のステータスに応じたテキストを返す
   const getStatusText = (status: string) => {
@@ -80,67 +72,11 @@ const HomePage = () => {
     }
   };
 
-  // PDFのアップロードを処理する関数
-  const handleFileUpload = useCallback(async (files: FileList | null) => {
-    if (!files || files.length === 0 || !user) return;
-
-    const isPremium = userData?.subscription_status === 'paid';
-    const translationCount = userData?.translation_count || 0;
-    
-    if (!isPremium && translationCount >= 3) {
-      setLimitAlertOpen(true);
-      return;
-    }
-    
-    try {
-      setIsUploading(true);
-      setUploadError(null);
-      setUploadProgress(10);
-
-      const progressInterval = setInterval(() => {
-        setUploadProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return 90;
-          }
-          return prev + 5;
-        });
-      }, 500);
-
-      const file = files[0];
-      const paperId = await uploadPDF(file, user.uid);
-
-      clearInterval(progressInterval);
-      setUploadProgress(100);
-
-      setTimeout(() => {
-        setIsUploading(false);
-        setUploadProgress(0);
-        forceRefreshUserData();
-        navigate(`/papers/${paperId}`);
-      }, 500);
-    } catch (error) {
-      console.error('Failed to upload PDF:', error);
-      setUploadError(error instanceof Error ? error.message : '論文のアップロードに失敗しました');
-      setIsUploading(false);
-      setUploadProgress(0);
-    }
-  }, [user, userData, navigate, forceRefreshUserData]);
-
-  // ファイル選択ダイアログを開く
-  const handleOpenFileDialog = () => {
-    fileInputRef.current?.click();
-  };
-
-  // ドラッグ&ドロップのハンドラー
-  const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    handleFileUpload(event.dataTransfer.files);
-  }, [handleFileUpload]);
-
-  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-  };
+  // PDFアップロード成功時の処理
+  const handleUploadSuccess = useCallback((paperId: string) => {
+    forceRefreshUserData();
+    navigate(`/papers/${paperId}`);
+  }, [navigate, forceRefreshUserData]);
 
   // 論文削除のハンドラー
   const handleConfirmDelete = async () => {
@@ -152,7 +88,6 @@ const HomePage = () => {
       setPaperToDelete(null);
     } catch (error) {
       console.error('Failed to delete paper:', error);
-      setUploadError(error instanceof Error ? error.message : '論文の削除に失敗しました');
     }
   };
 
@@ -188,58 +123,8 @@ const HomePage = () => {
 
         <Grid container spacing={3}>
           <Grid item xs={12} md={8}>
-            {/* PDF アップロードエリア */}
-            <Paper
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              sx={{
-                p: 4,
-                textAlign: 'center',
-                mb: 5,
-                borderStyle: 'dashed',
-                cursor: 'pointer',
-                background: theme => 
-                  `linear-gradient(45deg, ${theme.palette.background.paper} 25%, ${theme.palette.grey[100]} 25%, ${theme.palette.grey[100]} 50%, ${theme.palette.background.paper} 50%, ${theme.palette.background.paper} 75%, ${theme.palette.grey[100]} 75%, ${theme.palette.grey[100]} 100%)`,
-                backgroundSize: '20px 20px',
-                '&:hover': {
-                  backgroundColor: 'rgba(0, 0, 0, 0.02)',
-                }
-              }}
-              onClick={handleOpenFileDialog}
-            >
-              <input
-                type="file"
-                ref={fileInputRef}
-                style={{ display: 'none' }}
-                accept=".pdf"
-                onChange={(e) => handleFileUpload(e.target.files)}
-              />
-              
-              <CloudUploadIcon sx={{ fontSize: 60, mb: 2, color: 'primary.main' }} />
-              
-              <Typography variant="h5" gutterBottom>
-                PDFをドラッグ＆ドロップまたはクリックしてアップロード
-              </Typography>
-              
-              <Typography variant="body2" color="text.secondary">
-                サポートしているファイル形式: PDFのみ（最大20MB）
-              </Typography>
-
-              {isUploading && (
-                <Box sx={{ width: '100%', mt: 2 }}>
-                  <LinearProgress variant="determinate" value={uploadProgress} />
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    アップロード中... {uploadProgress}%
-                  </Typography>
-                </Box>
-              )}
-            </Paper>
-
-            {uploadError && (
-              <Alert severity="error" sx={{ mb: 3 }}>
-                {uploadError}
-              </Alert>
-            )}
+            {/* PDF アップロードコンポーネント */}
+            <PdfUpload onUploadSuccess={handleUploadSuccess} />
 
             {/* 論文一覧 */}
             <Box sx={{ mb: 3 }}>
@@ -265,7 +150,9 @@ const HomePage = () => {
               </Box>
 
               {loading ? (
-                <LinearProgress />
+                <Paper sx={{ p: 3, textAlign: 'center' }}>
+                  <Typography>読み込み中...</Typography>
+                </Paper>
               ) : error ? (
                 <Alert severity="error">{error}</Alert>
               ) : papers.length === 0 ? (
@@ -328,11 +215,15 @@ const HomePage = () => {
                             )}
                             
                             {paper.status === 'processing' && paper.progress && (
-                              <LinearProgress 
-                                variant="determinate" 
-                                value={paper.progress} 
-                                sx={{ mt: 2 }}
-                              />
+                              <Box sx={{ mt: 2 }}>
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                                  <Typography variant="caption" color="text.secondary">処理中...</Typography>
+                                  <Typography variant="caption" color="text.secondary">{paper.progress}%</Typography>
+                                </Box>
+                                <Box sx={{ width: '100%', mr: 1 }}>
+                                  <LinearProgress variant="determinate" value={paper.progress} />
+                                </Box>
+                              </Box>
                             )}
                           </CardContent>
                         </CardActionArea>
@@ -402,16 +293,6 @@ const HomePage = () => {
                   />
                 </ListItem>
               </List>
-              
-              <Button 
-                variant="outlined" 
-                fullWidth 
-                onClick={handleOpenFileDialog}
-                startIcon={<CloudUploadIcon />}
-                sx={{ mt: 2 }}
-              >
-                論文を翻訳する
-              </Button>
             </Paper>
             
             {/* プレミアムプラン宣伝 */}
