@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect } from 'react';
+// ~/Desktop/smart-paper-v2/frontend/src/pages/HomePage.tsx
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Container, 
@@ -36,7 +37,8 @@ import { Link as RouterLink } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { usePaperStore } from '../store/paperStore';
 import SubscriptionInfoCard from '../components/subscription/SubscriptionInfoCard';
-import PdfUpload from '../components/papers/PdfUpload'; // PdfUploadコンポーネントをインポート
+import PdfUpload from '../components/papers/PdfUpload';
+import { Paper as PaperType } from '../api/papers';
 
 const HomePage = () => {
   const navigate = useNavigate();
@@ -75,8 +77,9 @@ const HomePage = () => {
   // PDFアップロード成功時の処理
   const handleUploadSuccess = useCallback((paperId: string) => {
     forceRefreshUserData();
-    navigate(`/papers/${paperId}`);
-  }, [navigate, forceRefreshUserData]);
+    // ブラウザ全体をリロード
+    window.location.reload();
+  }, [forceRefreshUserData]);
 
   // 論文削除のハンドラー
   const handleConfirmDelete = async () => {
@@ -101,6 +104,26 @@ const HomePage = () => {
   // ユーザーデータ情報
   const isPremium = userData?.subscription_status === 'paid';
 
+  // 処理中の論文を取得（ステータスが 'pending', 'metadata_extracted', 'processing'のもの）
+  const processingPapers = useMemo(() => {
+    return papers.filter(paper => 
+      ['pending', 'metadata_extracted', 'processing'].includes(paper.status)
+    ).sort((a, b) => {
+      // uploaded_atで降順に並べ替え（最新のものが先頭に）
+      return b.uploaded_at.toMillis() - a.uploaded_at.toMillis();
+    });
+  }, [papers]);
+
+  // 最新の処理中の論文
+  const latestProcessingPaper = processingPapers.length > 0 ? processingPapers[0] : null;
+
+  // 表示できる論文一覧（処理中以外または最新の処理中以外の論文）
+  const displayablePapers = useMemo(() => {
+    return papers
+      .filter(paper => !latestProcessingPaper || paper.id !== latestProcessingPaper.id)
+      .slice(0, 6); // 最大6件まで表示
+  }, [papers, latestProcessingPaper]);
+
   return (
     <Container maxWidth="lg">
       <Box sx={{ my: 4 }}>
@@ -123,8 +146,85 @@ const HomePage = () => {
 
         <Grid container spacing={3}>
           <Grid item xs={12} md={8}>
-            {/* PDF アップロードコンポーネント */}
-            <PdfUpload onUploadSuccess={handleUploadSuccess} />
+            {/* 最新の処理中の論文があれば表示、なければPDFアップロードを表示 */}
+            {latestProcessingPaper ? (
+              <Box sx={{ mb: 4 }}>
+                <Typography variant="h5" gutterBottom>
+                  処理中の論文
+                </Typography>
+                <Card sx={{ mb: 3, boxShadow: 3 }}>
+                  <CardContent sx={{ padding: 3 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                      <Chip
+                        label={getStatusText(latestProcessingPaper.status)}
+                        size="small"
+                        color="primary"
+                        variant="outlined"
+                      />
+                      {latestProcessingPaper.status === 'processing' && latestProcessingPaper.progress && (
+                        <Typography variant="caption" color="text.secondary">
+                          {latestProcessingPaper.progress}%
+                        </Typography>
+                      )}
+                    </Box>
+                    
+                    <Typography variant="h5" gutterBottom>
+                      {latestProcessingPaper.metadata?.title || '無題の論文'}
+                    </Typography>
+                    
+                    <Typography variant="body1" sx={{ mb: 2 }}>
+                      {latestProcessingPaper.metadata?.authors?.map(a => a.name).join(', ') || '著者不明'}
+                    </Typography>
+                    
+                    {latestProcessingPaper.metadata?.journal && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                        {latestProcessingPaper.metadata.journal}
+                      </Typography>
+                    )}
+                    
+                    {latestProcessingPaper.status === 'processing' && latestProcessingPaper.progress && (
+                      <Box sx={{ mt: 3 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                          <Typography variant="body2">処理中...</Typography>
+                          <Typography variant="body2">{latestProcessingPaper.progress}%</Typography>
+                        </Box>
+                        <LinearProgress
+                          variant="determinate"
+                          value={latestProcessingPaper.progress}
+                          sx={{ height: 8, borderRadius: 4 }}
+                        />
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                          処理が完了すると自動的に詳細ページに移動します
+                        </Typography>
+                      </Box>
+                    )}
+                    
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 3 }}>
+                      <Button
+                        variant="contained"
+                        color="primary"
+                        onClick={() => navigate(`/papers/${latestProcessingPaper.id}`)}
+                      >
+                        詳細を見る
+                      </Button>
+                      
+                      <IconButton 
+                        size="small"
+                        color="error"
+                        onClick={() => {
+                          setPaperToDelete(latestProcessingPaper.id);
+                          setDeleteDialogOpen(true);
+                        }}
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Box>
+            ) : (
+              <PdfUpload onUploadSuccess={handleUploadSuccess} />
+            )}
 
             {/* 論文一覧 */}
             <Box sx={{ mb: 3 }}>
@@ -155,7 +255,7 @@ const HomePage = () => {
                 </Paper>
               ) : error ? (
                 <Alert severity="error">{error}</Alert>
-              ) : papers.length === 0 ? (
+              ) : displayablePapers.length === 0 ? (
                 <Paper sx={{ p: 3, textAlign: 'center' }}>
                   <MenuBookIcon sx={{ fontSize: 60, color: 'text.secondary', opacity: 0.3 }} />
                   <Typography variant="h6">論文がありません</Typography>
@@ -165,7 +265,7 @@ const HomePage = () => {
                 </Paper>
               ) : (
                 <Grid container spacing={2}>
-                  {papers.slice(0, 6).map((paper) => (
+                  {displayablePapers.map((paper) => (
                     <Grid item xs={12} sm={6} key={paper.id}>
                       <Card variant="outlined">
                         <CardActionArea onClick={() => navigate(`/papers/${paper.id}`)}>
