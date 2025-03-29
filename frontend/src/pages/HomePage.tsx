@@ -155,26 +155,15 @@ const HomePage = () => {
   return (
     <Container maxWidth="lg">
       <Box sx={{ my: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mb: 3 }}>
           <Typography variant="h4" component="h1" gutterBottom>
             論文を翻訳する
           </Typography>
-          
-          <Box>
-            <Button
-              variant="outlined"
-              startIcon={<AccountCircleIcon />}
-              onClick={() => navigate('/profile')}
-              sx={{ mr: 1 }}
-            >
-              プロフィール
-            </Button>
-          </Box>
         </Box>
 
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={8}>
-            {/* 最新の処理中の論文があれば表示、なければPDFアップロードを表示 */}
+        {/* PDFアップロードエリアを画面幅いっぱいに拡大 */}
+        <Grid container>
+          <Grid item xs={12}>
             {latestProcessingPaper ? (
               <Box sx={{ mb: 4 }}>
                 <Typography variant="h5" gutterBottom>
@@ -253,7 +242,12 @@ const HomePage = () => {
             ) : (
               <PdfUpload onUploadSuccess={handleUploadSuccess} />
             )}
+          </Grid>
+        </Grid>
 
+        {/* 論文一覧とプランカードを同じ高さレベルに配置 */}
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={8}>
             {/* 論文一覧 */}
             <Box sx={{ mb: 3 }}>
               <Box sx={{ 
@@ -384,6 +378,15 @@ const HomePage = () => {
 
           <Grid item xs={12} md={4}>
             {/* プロフィールと翻訳状況表示 */}
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+              <Button
+                variant="outlined"
+                startIcon={<AccountCircleIcon />}
+                onClick={() => navigate('/profile')}
+              >
+                プロフィール
+              </Button>
+            </Box>
             {userData && <SubscriptionInfoCard userData={userData} />}
             
             {/* 機能紹介 */}
