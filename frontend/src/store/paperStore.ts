@@ -28,6 +28,9 @@ interface PaperState {
   watchingPapers: Set<string>;
   unwatchCallbacks: Map<string, () => void>;
   
+  // 完了時に詳細ページに自動でリダイレクトするかどうか
+  redirectOnCompletion: boolean;
+  
   // アクション
   fetchUserPapers: (userId: string) => Promise<void>;
   fetchPaper: (paperId: string) => Promise<void>;
@@ -37,6 +40,7 @@ interface PaperState {
   deletePaper: (paperId: string) => Promise<void>;
   clearCurrentPaper: () => void;
   clearError: () => void;
+  setRedirectOnCompletion: (enable: boolean) => void;
 }
 
 export const usePaperStore = create<PaperState>()(
@@ -56,6 +60,14 @@ export const usePaperStore = create<PaperState>()(
       // 翻訳・要約の進捗監視
       watchingPapers: new Set<string>(),
       unwatchCallbacks: new Map<string, () => void>(),
+      
+      // 完了時の自動リダイレクト設定
+      redirectOnCompletion: true,
+      
+      // リダイレクト設定の更新
+      setRedirectOnCompletion: (enable: boolean) => {
+        set({ redirectOnCompletion: enable });
+      },
       
       // ユーザーの論文一覧を取得
       fetchUserPapers: async (userId: string) => {
@@ -143,6 +155,15 @@ export const usePaperStore = create<PaperState>()(
             if (paper.status === 'completed') {
               get().fetchTranslatedChapters(paperId);
             }
+          }
+          
+          // ここが新しい部分: 処理完了時の自動リダイレクト
+          if (paper.status === 'completed' && get().redirectOnCompletion) {
+            console.log(`Paper ${paperId} processing completed! Redirecting to details page.`);
+            
+            // リダイレクトを実行
+            // ブラウザAPIを使って直接リダイレクト（確実な方法）
+            window.location.href = `/papers/${paperId}`;
           }
           
           // 翻訳完了または失敗したら監視終了

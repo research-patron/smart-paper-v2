@@ -47,7 +47,15 @@ const HomePage = () => {
   const [limitAlertOpen, setLimitAlertOpen] = useState(false);
   
   const { user, userData, forceRefreshUserData } = useAuthStore();
-  const { papers, loading, error, fetchUserPapers, deletePaper } = usePaperStore();
+  const { 
+    papers, 
+    loading, 
+    error, 
+    fetchUserPapers, 
+    deletePaper,
+    watchPaperProgress,
+    setRedirectOnCompletion
+  } = usePaperStore();
 
   // ユーザーデータを初期ロード時に強制リフレッシュ
   useEffect(() => {
@@ -101,6 +109,17 @@ const HomePage = () => {
     }
   }, [user, fetchUserPapers]);
 
+  // ページロード時にリダイレクトを有効化
+  useEffect(() => {
+    // リダイレクト機能を有効化
+    setRedirectOnCompletion(true);
+    
+    // クリーンアップでも状態を維持（他の画面での動作に影響しないため）
+    return () => {
+      // ここでfalseに戻さない
+    };
+  }, [setRedirectOnCompletion]);
+
   // ユーザーデータ情報
   const isPremium = userData?.subscription_status === 'paid';
 
@@ -116,6 +135,15 @@ const HomePage = () => {
 
   // 最新の処理中の論文
   const latestProcessingPaper = processingPapers.length > 0 ? processingPapers[0] : null;
+
+  // 処理中の論文を監視
+  useEffect(() => {
+    if (latestProcessingPaper) {
+      console.log(`Setting up global status watch for paper: ${latestProcessingPaper.id}`);
+      // グローバルなStore内の監視機能を使用
+      watchPaperProgress(latestProcessingPaper.id);
+    }
+  }, [latestProcessingPaper?.id, watchPaperProgress]);
 
   // 表示できる論文一覧（処理中以外または最新の処理中以外の論文）
   const displayablePapers = useMemo(() => {
