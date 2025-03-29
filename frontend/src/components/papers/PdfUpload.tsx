@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/components/papers/PdfUpload.tsx
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { 
   Box, 
   Button, 
@@ -28,21 +28,48 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const [reloadCountdown, setReloadCountdown] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const theme = useTheme();
+
+  // 10秒カウントダウン後にリロードする
+  useEffect(() => {
+    if (reloadCountdown === null) return;
+    
+    if (reloadCountdown <= 0) {
+      // カウントダウン終了時にリロード
+      window.location.reload();
+      return;
+    }
+    
+    // 1秒ごとにカウントダウン
+    const timer = setTimeout(() => {
+      setReloadCountdown(prev => prev !== null ? prev - 1 : null);
+    }, 1000);
+    
+    return () => clearTimeout(timer);
+  }, [reloadCountdown]);
   
   // ファイルのバリデーション
   const validateFile = (file: File): boolean => {
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
+    // PDFファイルであるかチェック
+    const isPdf = file.name.toLowerCase().endsWith('.pdf');
+    // ファイルサイズが20MB以下であるかチェック
+    const isValidSize = file.size <= 20 * 1024 * 1024; // 20MB
+    
+    if (!isPdf) {
       setError('PDFファイルのみアップロード可能です');
       return false;
     }
     
-    if (file.size > 20 * 1024 * 1024) { // 20MB
+    if (!isValidSize) {
       setError('ファイルサイズは20MB以下にしてください');
       return false;
     }
+    
+    // バリデーション通過時に10秒カウントダウン開始
+    setReloadCountdown(10);
     
     return true;
   };
@@ -135,17 +162,21 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
         onUploadSuccess(paperId);
       }
       
-      // リセット
-      setTimeout(() => {
-        setSelectedFile(null);
-        setIsUploading(false);
-      }, 500);
+      // リセット - カウントダウン中はリセットしない
+      if (reloadCountdown === null) {
+        setTimeout(() => {
+          setSelectedFile(null);
+          setIsUploading(false);
+        }, 500);
+      }
       
     } catch (error: any) {
       console.error('Upload failed:', error);
       setError(error.message || 'アップロードに失敗しました');
       setErrorDetails(JSON.stringify(error, null, 2));
       setIsUploading(false);
+      // エラー時はカウントダウンをキャンセル
+      setReloadCountdown(null);
     }
   };
   
@@ -155,6 +186,7 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
     setSelectedFile(null);
     setError(null);
     setErrorDetails(null);
+    setReloadCountdown(null); // カウントダウンもキャンセル
     
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -280,7 +312,9 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
                 {isUploading && (
                   <Box sx={{ mt: 1, mx: 'auto', width: '80%', maxWidth: 400 }}>
                     <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 1 }}>
-                      ファイルをアップロード中...
+                      {reloadCountdown !== null 
+                        ? `検証完了！ ${reloadCountdown}秒後にリロードします...` 
+                        : 'ファイルをアップロード中...'}
                     </Typography>
                     <LinearProgress />
                   </Box>
