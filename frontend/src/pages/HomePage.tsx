@@ -155,7 +155,7 @@ const HomePage = () => {
   return (
     <Container maxWidth="lg">
       <Box sx={{ my: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mb: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'left', alignItems: 'left', mb: 3 }}>
           <Typography variant="h4" component="h1" gutterBottom>
             論文を翻訳する
           </Typography>
