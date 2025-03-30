@@ -1,5 +1,6 @@
 // ~/Desktop/smart-paper-v2/frontend/src/pages/ContactPage.tsx
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Container,
   Typography,
@@ -85,6 +86,9 @@ const problemCategories = [
 ];
 
 const ContactPage = () => {
+  // URLパラメータを取得
+  const [searchParams] = useSearchParams();
+  
   // タブの状態
   const [tabValue, setTabValue] = useState(0);
   
@@ -112,6 +116,26 @@ const ContactPage = () => {
   // ストアからデータを取得
   const { user, userData } = useAuthStore();
   const { papers, fetchUserPapers } = usePaperStore();
+  
+  // URLパラメータに基づいて適切なタブを開き、問題報告フォームに論文IDを設定
+  useEffect(() => {
+    // tabパラメータが存在し、値が数値の場合はそのタブを開く
+    const tabParam = searchParams.get('tab');
+    if (tabParam && !isNaN(Number(tabParam))) {
+      setTabValue(Number(tabParam));
+    }
+    
+    // paper_idパラメータが存在する場合は問題報告フォームに設定
+    const paperIdParam = searchParams.get('paper_id');
+    if (paperIdParam) {
+      setProblemForm(prev => ({
+        ...prev,
+        paper_id: paperIdParam,
+        // 論文IDが設定された場合は自動的に管理者との共有を許可
+        share_with_admin: true
+      }));
+    }
+  }, [searchParams]);
 
   // ユーザーの論文データを取得
   useEffect(() => {
