@@ -39,7 +39,6 @@ const SplitView: React.FC<SplitViewProps> = ({
   chapter
 }) => {
   const theme = useTheme();
-  // ブレークポイントを 'md' から 'lg' に変更してより広い画面サイズまでモバイル表示を有効に
   const isMobile = useMediaQuery(theme.breakpoints.down('lg'));
   
   const [tabValue, setTabValue] = useState(0);
@@ -168,7 +167,14 @@ const SplitView: React.FC<SplitViewProps> = ({
   // モバイル表示の場合はタブ切り替え式にする
   if (isMobile) {
     return (
-      <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ 
+        height: '100%', 
+        display: 'flex', 
+        flexDirection: 'column',
+        width: '100%',
+        flex: 1,
+        overflow: 'hidden'
+      }}>
         <Paper sx={{ mb: 1 }}>
           <Tabs
             value={tabValue}
@@ -176,11 +182,11 @@ const SplitView: React.FC<SplitViewProps> = ({
             variant="fullWidth"
             aria-label="原文/翻訳切り替えタブ"
             sx={{ 
-              minHeight: '48px',  // タブの高さを明示的に指定
+              minHeight: '40px',
               '& .MuiTab-root': { 
-                minHeight: '48px',
-                py: 1,
-                fontSize: { xs: '0.8rem', sm: '0.875rem' }  // モバイル時のフォントサイズを調整
+                minHeight: '40px',
+                py: 0.5,
+                fontSize: { xs: '0.8rem', sm: '0.875rem' }
               }
             }}
           >
@@ -189,28 +195,36 @@ const SplitView: React.FC<SplitViewProps> = ({
           </Tabs>
         </Paper>
         
-        {/* タブ切り替え時の高さを正確に計算するよう修正 */}
         <Box sx={{ 
-          flexGrow: 1, 
-          display: tabValue === 0 ? 'flex' : 'none', 
-          height: 'calc(100% - 56px)',  // タブの高さを考慮
-          overflow: 'hidden'  // オーバーフローを防止
+          flex: 1, 
+          display: 'flex',
+          height: '100%',
+          overflow: 'hidden'
         }}>
-          <PdfViewer url={pdfUrl} />
-        </Box>
-        
-        <Box sx={{ 
-          flexGrow: 1, 
-          display: tabValue === 1 ? 'flex' : 'none', 
-          height: 'calc(100% - 56px)',  // タブの高さを考慮
-          overflow: 'hidden'  // オーバーフローを防止
-        }}>
-          <TranslationViewer 
-            translatedText={translatedText} 
-            loading={loading} 
-            error={error}
-            chapter={chapter}
-          />
+          <Box sx={{ 
+            width: '100%',
+            height: '100%',
+            display: tabValue === 0 ? 'flex' : 'none', 
+            flex: 1,
+            overflow: 'hidden'
+          }}>
+            <PdfViewer url={pdfUrl} />
+          </Box>
+          
+          <Box sx={{ 
+            width: '100%',
+            height: '100%',
+            display: tabValue === 1 ? 'flex' : 'none',
+            flex: 1,
+            overflow: 'hidden'
+          }}>
+            <TranslationViewer 
+              translatedText={translatedText} 
+              loading={loading} 
+              error={error}
+              chapter={chapter}
+            />
+          </Box>
         </Box>
       </Box>
     );
@@ -224,7 +238,9 @@ const SplitView: React.FC<SplitViewProps> = ({
         display: 'flex',
         flexDirection: splitDirection === 'vertical' ? 'row' : 'column',
         position: 'relative',
-        overflow: 'hidden',  // 追加: オーバーフローを防止
+        overflow: 'hidden',
+        width: '100%',
+        flex: 1
       }}
     >
       {/* コントロールバー */}
@@ -290,8 +306,10 @@ const SplitView: React.FC<SplitViewProps> = ({
           width: splitDirection === 'vertical' ? `${splitRatio}%` : '100%',
           height: splitDirection === 'vertical' ? '100%' : `${splitRatio}%`,
           overflow: 'auto',
-          flexShrink: 0,  // 追加: 縮小を防止
-          position: 'relative'  // 追加: 内部コンテンツのポジショニングを相対的に
+          flexShrink: 0,
+          position: 'relative',
+          display: 'flex',
+          flex: splitDirection === 'vertical' ? `0 0 ${splitRatio}%` : '0 0 auto'
         }}
       >
         <PdfViewer url={pdfUrl} />
@@ -307,7 +325,7 @@ const SplitView: React.FC<SplitViewProps> = ({
           cursor: splitDirection === 'vertical' ? 'col-resize' : 'row-resize',
           userSelect: 'none',
           transition: 'background-color 0.2s',
-          flexShrink: 0,  // 追加: 縮小を防止
+          flexShrink: 0,
           '&:hover': {
             backgroundColor: theme.palette.primary.main,
           },
@@ -321,9 +339,10 @@ const SplitView: React.FC<SplitViewProps> = ({
           width: splitDirection === 'vertical' ? `calc(100% - ${splitRatio}% - 4px)` : '100%',
           height: splitDirection === 'vertical' ? '100%' : `calc(100% - ${splitRatio}% - 4px)`,
           overflow: 'auto',
-          flexShrink: 0,  // 追加: 縮小を防止
-          flexGrow: 1,    // 追加: 残りのスペースを埋めるように拡大
-          position: 'relative'  // 追加: 内部コンテンツのポジショニングを相対的に
+          flexShrink: 0,
+          flexGrow: 1,
+          position: 'relative',
+          display: 'flex'
         }}
       >
         <TranslationViewer 

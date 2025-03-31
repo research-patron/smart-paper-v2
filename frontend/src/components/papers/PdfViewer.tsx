@@ -50,7 +50,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
   const [pageNumber, setPageNumber] = useState<number>(1);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [scale, setScale] = useState<number>(1.0); // デフォルトスケールを調整
+  const [scale, setScale] = useState<number>(1.0);
   const [fullscreen, setFullscreen] = useState<boolean>(false);
   
   // PDFのロード完了時
@@ -160,7 +160,8 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          flexDirection: 'column'
+          flexDirection: 'column',
+          flex: 1
         }}
       >
         <ErrorMessage message={error} />
@@ -190,6 +191,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
         bottom: fullscreen ? 0 : 'auto',
         zIndex: fullscreen ? 9999 : 'auto',
         bgcolor: 'background.paper',
+        flex: 1
       }}
     >
       {/* コントロールバー */}
@@ -197,25 +199,25 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
         elevation={1}
         square
         sx={{
-          p: 0.5, // サイズ縮小
+          p: 0.5,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           borderBottom: 1,
           borderColor: 'divider',
-          flexWrap: 'wrap', // モバイル対応のため折り返し許可
-          minHeight: '48px',
+          flexWrap: 'wrap',
+          minHeight: '40px',
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'nowrap' }}>
-          <IconButton onClick={goToPrevPage} disabled={pageNumber <= 1} size={isMobile ? "small" : "medium"}>
+          <IconButton onClick={goToPrevPage} disabled={pageNumber <= 1} size={isMobile ? "small" : "medium"} sx={{ p: 0.5 }}>
             <NavigateBeforeIcon />
           </IconButton>
           
           <Box sx={{ 
             display: 'flex', 
             alignItems: 'center', 
-            width: { xs: 'auto', sm: 100 },
+            width: { xs: 'auto', sm: 80 },
             mx: 0.5
           }}>
             <Typography variant="body2" sx={{ mr: 0.5, fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
@@ -226,14 +228,14 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
             </Typography>
           </Box>
           
-          <IconButton onClick={goToNextPage} disabled={!numPages || pageNumber >= numPages} size={isMobile ? "small" : "medium"}>
+          <IconButton onClick={goToNextPage} disabled={!numPages || pageNumber >= numPages} size={isMobile ? "small" : "medium"} sx={{ p: 0.5 }}>
             <NavigateNextIcon />
           </IconButton>
         </Box>
         
         {/* モバイル以外の場合のみスライダーを表示 */}
         <Box sx={{ 
-          width: { xs: 0, sm: 120, md: 200 }, 
+          width: { xs: 0, sm: 100, md: 150 }, 
           mx: { xs: 0, sm: 1 }, 
           display: { xs: 'none', sm: 'block' } 
         }}>
@@ -256,14 +258,14 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
           ml: { xs: 'auto', sm: 0 } 
         }}>
           <Tooltip title="縮小">
-            <IconButton onClick={zoomOut} disabled={scale <= 0.5} size={isMobile ? "small" : "medium"}>
+            <IconButton onClick={zoomOut} disabled={scale <= 0.5} size={isMobile ? "small" : "medium"} sx={{ p: 0.5 }}>
               <ZoomOutIcon />
             </IconButton>
           </Tooltip>
           
           <Typography variant="body2" sx={{ 
             mx: 0.5, 
-            minWidth: { xs: 30, sm: 40 }, 
+            minWidth: { xs: 25, sm: 30 }, 
             textAlign: 'center',
             fontSize: { xs: '0.75rem', sm: '0.875rem' }
           }}>
@@ -271,13 +273,13 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
           </Typography>
           
           <Tooltip title="拡大">
-            <IconButton onClick={zoomIn} disabled={scale >= 3.0} size={isMobile ? "small" : "medium"}>
+            <IconButton onClick={zoomIn} disabled={scale >= 3.0} size={isMobile ? "small" : "medium"} sx={{ p: 0.5 }}>
               <ZoomInIcon />
             </IconButton>
           </Tooltip>
           
           <Tooltip title={fullscreen ? "フルスクリーン解除" : "フルスクリーン"}>
-            <IconButton onClick={toggleFullscreen} size={isMobile ? "small" : "medium"}>
+            <IconButton onClick={toggleFullscreen} size={isMobile ? "small" : "medium"} sx={{ p: 0.5 }}>
               {fullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
             </IconButton>
           </Tooltip>
@@ -289,13 +291,13 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
         sx={{
           flex: 1,
           overflow: 'auto',
-          overflowX: 'auto',  // 横スクロールを許可
+          overflowX: 'auto',
           backgroundColor: 'background.paper',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'flex-start',
           p: 0.5,
-          position: 'relative',  // 相対位置指定に変更
+          position: 'relative',
         }}
       >
         {loading && (

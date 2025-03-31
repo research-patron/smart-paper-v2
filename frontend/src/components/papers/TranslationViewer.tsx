@@ -19,7 +19,7 @@ import ErrorMessage from '../common/ErrorMessage';
 
 interface TranslationViewerProps {
   translatedText: string | null;
-  processedContent?: string | null; // 追加: バックエンドで処理済みのコンテンツ
+  processedContent?: string | null;
   loading?: boolean;
   error?: string | null;
   chapter?: {
@@ -31,7 +31,6 @@ interface TranslationViewerProps {
 }
 
 // JSONパース関数: 翻訳テキストからJSON構造を抽出する
-// このロジックはバックエンド側と一致させる必要があります
 const extractTranslatedText = (text: string | null, processedContent?: string | null): string | null => {
   // バックエンドで処理済みのコンテンツがある場合はそれを優先
   if (processedContent) {
@@ -211,7 +210,7 @@ const extractTranslatedText = (text: string | null, processedContent?: string | 
 
 const TranslationViewer: React.FC<TranslationViewerProps> = ({
   translatedText,
-  processedContent, // 追加: バックエンドで処理済みのコンテンツ
+  processedContent,
   loading = false,
   error = null,
   chapter,
@@ -261,7 +260,8 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
           height: '100%',
           display: 'flex',
           justifyContent: 'center',
-          alignItems: 'center'
+          alignItems: 'center',
+          flex: 1
         }}
       >
         <CircularProgress />
@@ -278,7 +278,8 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          flexDirection: 'column'
+          flexDirection: 'column',
+          flex: 1
         }}
       >
         <ErrorMessage message={error} />
@@ -294,7 +295,8 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
           height: '100%',
           display: 'flex',
           justifyContent: 'center',
-          alignItems: 'center'
+          alignItems: 'center',
+          flex: 1
         }}
       >
         <Typography>翻訳テキストがありません</Typography>
@@ -309,6 +311,7 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
+        flex: 1
       }}
     >
       {/* コントロールバー */}
@@ -316,14 +319,14 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
         elevation={1}
         square
         sx={{
-          p: 0.5, // サイズ縮小
+          p: 0.5,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           borderBottom: 1,
           borderColor: 'divider',
-          minHeight: '48px',
-          flexWrap: 'wrap', // モバイル対応のため折り返し許可
+          minHeight: '40px',
+          flexWrap: 'wrap',
         }}
       >
         <Box sx={{ 
@@ -369,6 +372,7 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
               onClick={() => changeFontSize(-1)} 
               disabled={fontSize <= 12} 
               size={isMobile ? "small" : "medium"}
+              sx={{ p: 0.5 }}
             >
               <FormatSizeIcon sx={{ fontSize: isMobile ? '0.9rem' : '1rem' }} />
             </IconButton>
@@ -391,6 +395,7 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
               onClick={() => changeFontSize(1)} 
               disabled={fontSize >= 24}
               size={isMobile ? "small" : "medium"}
+              sx={{ p: 0.5 }}
             >
               <FormatSizeIcon sx={{ fontSize: isMobile ? '1.2rem' : '1.4rem' }} />
             </IconButton>
@@ -399,7 +404,7 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
           <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
           
           <Tooltip title={copied ? "コピーしました" : "テキストをコピー"}>
-            <IconButton onClick={copyText} size={isMobile ? "small" : "medium"}>
+            <IconButton onClick={copyText} size={isMobile ? "small" : "medium"} sx={{ p: 0.5 }}>
               {copied ? <DoneIcon color="success" /> : <ContentCopyIcon />}
             </IconButton>
           </Tooltip>
@@ -412,7 +417,7 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
         sx={{
           flex: 1,
           overflow: 'auto',
-          p: { xs: 2, sm: 4 }, // モバイルではパディングを小さく
+          p: { xs: 2, sm: 3, md: 4 },
           bgcolor: 'background.paper',
           fontSize: `${fontSize}px`,
           lineHeight: 1.6,
@@ -426,7 +431,7 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
             mb: 2
           },
           '& img': {
-            maxWidth: '100%', // 画像がはみ出ないように
+            maxWidth: '100%',
             height: 'auto'
           }
         }}

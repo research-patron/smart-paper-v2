@@ -40,7 +40,7 @@ import TocIcon from '@mui/icons-material/Toc';
 import CloudDoneIcon from '@mui/icons-material/CloudDone';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import RefreshIcon from '@mui/icons-material/Refresh'; // 追加: リフレッシュアイコン
+import RefreshIcon from '@mui/icons-material/Refresh';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
 import { usePaperStore } from '../store/paperStore';
 import { useAuthStore } from '../store/authStore';
@@ -64,12 +64,10 @@ import { db } from '../api/firebase';
 import { 
   getPaperPdfUrl, 
   getPaperTranslatedText, 
-  getPaper as getPaperOriginal, // 修正: 既存の関数を別名でインポート
+  getPaper as getPaperOriginal,
   Paper as PaperType,
   formatDate
 } from '../api/papers';
-
-// ObsidianSettings型のデフォルト値は obsidian.ts から importしています
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -85,14 +83,17 @@ const TabPanel: React.FC<TabPanelProps> = ({ children, value, index, ...other })
       id={`paper-tabpanel-${index}`}
       aria-labelledby={`paper-tab-${index}`}
       {...other}
-      style={{ height: '100%', width: '100%' }} // 幅を100%に修正
+      style={{ height: '100%', width: '100%', display: value === index ? 'flex' : 'none' }}
     >
       {value === index && (
         <Box sx={{ 
-          p: { xs: 0, sm: '0 0 24px 0' }, 
+          p: { xs: 0, sm: '0 0 12px 0' }, 
           height: '100%', 
-          width: '100%',  // 幅を100%に修正
-          overflow: 'hidden' // オーバーフローを防止
+          width: '100%',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1
         }}>
           {children}
         </Box>
@@ -129,7 +130,7 @@ const PaperViewPage: React.FC = () => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [obsidianExportStatus, setObsidianExportStatus] = useState<'success' | 'error' | 'pending' | 'none'>('none');
-  const [isLoadingText, setIsLoadingText] = useState<boolean>(false); // 追加: テキスト読み込み中の状態
+  const [isLoadingText, setIsLoadingText] = useState<boolean>(false);
 
   // 管理者かどうかをチェック
   const isAdmin = user?.email === 'smart-paper-v2@student-subscription.com' || 
@@ -801,32 +802,38 @@ const PaperViewPage: React.FC = () => {
   return (
     <Container 
       maxWidth={false} 
+      disableGutters 
       sx={{ 
-        px: { xs: 1, sm: 2 },
-        overflow: 'hidden' // オーバーフローを防止
+        px: { xs: 0.5, sm: 1, md: 2 }, 
+        overflow: 'hidden',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column'
       }}
     >
       <Box sx={{ 
-        my: 1,
         display: 'flex',
         flexDirection: 'column',
-        height: 'calc(100vh - 120px)', // 高さの明示的な指定
-        overflow: 'hidden' // オーバーフローを防止
+        height: '100%', 
+        width: '100%',
+        flex: 1,
+        overflow: 'hidden',
+        pb: 1
       }}>
         <Button 
           startIcon={<ArrowBackIcon />} 
           onClick={() => navigate('/')}
-          sx={{ mb: 2 }}
+          sx={{ alignSelf: 'flex-start', mb: 1, mt: 1, ml: 1 }}
         >
           ホームに戻る
         </Button>
         
         {/* 論文情報カードの改善されたデザイン */}
-        <Card sx={{ mb: 3, overflow: 'visible' }}>
-          <CardContent sx={{ p: 3 }}>
-            <Grid container spacing={2}>
+        <Card sx={{ mb: 2, mx: 1 }}>
+          <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+            <Grid container spacing={1}>
               <Grid item xs={12}>
-                <Typography variant="h4" component="h1" fontWeight="medium" gutterBottom>
+                <Typography variant="h5" component="h1" fontWeight="medium" gutterBottom>
                   {currentPaper.metadata?.title || '無題の論文'}
                 </Typography>
               </Grid>
@@ -966,37 +973,38 @@ const PaperViewPage: React.FC = () => {
         </Card>
         
         {error && (
-          <ErrorMessage 
-            message={error} 
-            onRetry={() => {
-              setError(null);
-              refreshPaper(); // エラー時は論文データを再読み込み
-            }} 
-          />
+          <Box sx={{ mx: 1, mb: 2 }}>
+            <ErrorMessage 
+              message={error} 
+              onRetry={() => {
+                setError(null);
+                refreshPaper(); // エラー時は論文データを再読み込み
+              }} 
+            />
+          </Box>
         )}
         
         <Box sx={{ 
           display: 'flex', 
           justifyContent: 'space-between',
           alignItems: 'center',
-          borderBottom: 1, 
-          borderColor: 'divider',
-          flexWrap: 'wrap' // フレックスアイテムを折り返し可能に
+          flexWrap: 'wrap',
+          mx: 1
         }}>
           <Tabs 
             value={tabValue} 
             onChange={handleTabChange} 
             aria-label="論文タブ"
-            variant="scrollable" // タブがはみ出す場合はスクロール可能に
-            scrollButtons="auto" // スクロールボタンを自動表示
-            allowScrollButtonsMobile // モバイルでもスクロールボタンを許可
+            variant="scrollable"
+            scrollButtons="auto"
+            allowScrollButtonsMobile
             sx={{ 
-              flex: '1 0 auto', // フレックスアイテムの伸縮性を調整
-              minHeight: '48px', // 最小高さを明示的に指定
+              flex: '1 0 auto', 
+              minHeight: '40px',
               '& .MuiTab-root': {
-                minHeight: '48px', // タブの最小高さを指定
+                minHeight: '40px',
                 py: 1,
-                fontSize: { xs: '0.75rem', sm: '0.875rem' } // レスポンシブフォントサイズ
+                fontSize: { xs: '0.75rem', sm: '0.875rem' }
               }
             }}
           >
@@ -1004,7 +1012,7 @@ const PaperViewPage: React.FC = () => {
               icon={<TranslateIcon fontSize="small" />} 
               label="翻訳" 
               id="paper-tab-0"
-              sx={{ minWidth: { xs: '80px', sm: '120px' } }} // タブの最小幅を指定
+              sx={{ minWidth: { xs: '80px', sm: '120px' } }}
             />
             <Tab 
               icon={<SummarizeIcon fontSize="small" />} 
@@ -1024,9 +1032,9 @@ const PaperViewPage: React.FC = () => {
             <Box sx={{ 
               display: 'flex', 
               alignItems: 'center',
-              mt: { xs: 1, sm: 0 }, // モバイルでは上マージンを追加
-              mb: { xs: 1, sm: 0 }, // モバイルでは下マージンを追加
-              width: { xs: '100%', sm: 'auto' } // モバイルでは幅100%
+              mt: { xs: 1, sm: 0 },
+              mb: { xs: 1, sm: 0 },
+              width: { xs: '100%', sm: 'auto' }
             }}>
               <Button
                 variant="outlined"
@@ -1034,7 +1042,7 @@ const PaperViewPage: React.FC = () => {
                 startIcon={<TocIcon />}
                 onClick={toggleDrawer}
                 color={drawerOpen ? 'primary' : 'inherit'}
-                sx={{ mr: 1, width: { xs: '100%', sm: 'auto' } }} // モバイルでは幅100%
+                sx={{ mr: 1, width: { xs: '100%', sm: 'auto' } }}
               >
                 目次
               </Button>
@@ -1043,24 +1051,25 @@ const PaperViewPage: React.FC = () => {
         </Box>
         
         <Box sx={{ 
-          height: 'calc(100vh - 350px)', 
-          minHeight: '500px',
+          flex: 1,
           width: '100%',
-          overflow: 'hidden', // オーバーフローを防止
-          position: 'relative' // 相対位置指定
+          display: 'flex',
+          overflow: 'hidden', 
+          position: 'relative',
+          mx: 1
         }}>
           <TabPanel value={tabValue} index={0}>
             {!['completed', 'reported', 'problem'].includes(currentPaper.status) ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
                 <Typography>翻訳が完了するまでお待ちください...</Typography>
               </Box>
             ) : isLoadingText ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', flexDirection: 'column' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%', flexDirection: 'column' }}>
                 <CircularProgress size={40} sx={{ mb: 2 }} />
                 <Typography>翻訳テキストを読み込み中...</Typography>
               </Box>
             ) : !getSelectedChapterText() ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', flexDirection: 'column' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%', flexDirection: 'column' }}>
                 <Typography gutterBottom>翻訳テキストが見つかりません</Typography>
                 <Button 
                   variant="contained" 
@@ -1075,9 +1084,10 @@ const PaperViewPage: React.FC = () => {
             ) : (
               <Box sx={{ 
                 height: '100%', 
-                display: 'flex', 
                 width: '100%',
-                overflow: 'hidden' // オーバーフローを防止
+                display: 'flex', 
+                overflow: 'hidden',
+                flex: 1
               }}>
                 <Drawer
                   anchor="left"
@@ -1087,7 +1097,7 @@ const PaperViewPage: React.FC = () => {
                     '& .MuiDrawer-paper': { 
                       width: '80%', 
                       maxWidth: '300px',
-                      pt: 2 // ドロワーにパディングを追加
+                      pt: 2
                     }
                   }}
                 >
@@ -1104,7 +1114,7 @@ const PaperViewPage: React.FC = () => {
                   flex: 1, 
                   height: '100%', 
                   width: '100%',
-                  overflow: 'hidden' // オーバーフローを防止
+                  overflow: 'hidden'
                 }}>
                   {pdfUrl && (
                     <SplitView
@@ -1120,11 +1130,11 @@ const PaperViewPage: React.FC = () => {
           
           <TabPanel value={tabValue} index={1}>
             {!['completed', 'reported', 'problem'].includes(currentPaper.status) ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
                 <Typography>要約が完了するまでお待ちください...</Typography>
               </Box>
             ) : !currentPaper.summary ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', flexDirection: 'column' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%', flexDirection: 'column' }}>
                 <Typography gutterBottom>要約が見つかりません</Typography>
                 <Button 
                   variant="contained" 
@@ -1137,7 +1147,7 @@ const PaperViewPage: React.FC = () => {
                 </Button>
               </Box>
             ) : (
-              <Paper elevation={0} sx={{ p: 3, height: '100%', overflow: 'auto' }}>
+              <Paper elevation={0} sx={{ p: 3, height: '100%', width: '100%', overflow: 'auto', flex: 1 }}>
                 <Summary 
                   summaryText={currentPaper.summary} 
                   requiredKnowledgeText={currentPaper.required_knowledge} 
@@ -1149,7 +1159,7 @@ const PaperViewPage: React.FC = () => {
           
           <TabPanel value={tabValue} index={2}>
             {!currentPaper.metadata ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', flexDirection: 'column' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%', flexDirection: 'column' }}>
                 <Typography gutterBottom>メタデータが見つかりません</Typography>
                 <Button 
                   variant="contained" 
@@ -1162,7 +1172,7 @@ const PaperViewPage: React.FC = () => {
                 </Button>
               </Box>
             ) : (
-              <Paper elevation={0} sx={{ p: 6, height: '100%', overflow: 'auto' }}>
+              <Paper elevation={0} sx={{ p: { xs: 2, sm: 4 }, height: '100%', width: '100%', overflow: 'auto', flex: 1 }}>
                 <Typography variant="h5" gutterBottom sx={{ mb: 3 }}>
                   <strong><u style={{ paddingTop: '5px', display: 'inline-block', textUnderlineOffset: '3px' }}>論文のメタデータ</u></strong>
                 </Typography>
