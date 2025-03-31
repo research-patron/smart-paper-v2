@@ -25,7 +25,9 @@ import {
   Snackbar,
   Card,
   CardContent,
-  Grid
+  Grid,
+  useTheme,
+  useMediaQuery
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -83,10 +85,15 @@ const TabPanel: React.FC<TabPanelProps> = ({ children, value, index, ...other })
       id={`paper-tabpanel-${index}`}
       aria-labelledby={`paper-tab-${index}`}
       {...other}
-      style={{ height: '100%' }}
+      style={{ height: '100%', width: '100%' }} // 幅を100%に修正
     >
       {value === index && (
-        <Box sx={{ p: { xs: 0, sm: '0 0 24px 0' }, height: '100%' }}>
+        <Box sx={{ 
+          p: { xs: 0, sm: '0 0 24px 0' }, 
+          height: '100%', 
+          width: '100%',  // 幅を100%に修正
+          overflow: 'hidden' // オーバーフローを防止
+        }}>
           {children}
         </Box>
       )}
@@ -97,6 +104,8 @@ const TabPanel: React.FC<TabPanelProps> = ({ children, value, index, ...other })
 const PaperViewPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { user } = useAuthStore();
   const { 
     currentPaper, 
@@ -711,7 +720,7 @@ const PaperViewPage: React.FC = () => {
     
     if (currentPaper.status === 'completed') {
       return (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           <Chip label="翻訳完了" color="success" />
           <ObsidianExportStatusChip />
           <Tooltip title="問題を報告する">
@@ -777,7 +786,7 @@ const PaperViewPage: React.FC = () => {
             onClick={() => navigate('/')}
             sx={{ mb: 2 }}
           >
-            マイ論文に戻る
+            ホームに戻る
           </Button>
           <ErrorMessage 
             title="論文の読み込みに失敗しました"
@@ -790,14 +799,26 @@ const PaperViewPage: React.FC = () => {
   }
   
   return (
-    <Container maxWidth={false} sx={{ px: { xs: 1, sm: 2 } }}>
-      <Box sx={{ my: 1 }}>
+    <Container 
+      maxWidth={false} 
+      sx={{ 
+        px: { xs: 1, sm: 2 },
+        overflow: 'hidden' // オーバーフローを防止
+      }}
+    >
+      <Box sx={{ 
+        my: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        height: 'calc(100vh - 120px)', // 高さの明示的な指定
+        overflow: 'hidden' // オーバーフローを防止
+      }}>
         <Button 
           startIcon={<ArrowBackIcon />} 
           onClick={() => navigate('/')}
           sx={{ mb: 2 }}
         >
-          マイ論文に戻る
+          ホームに戻る
         </Button>
         
         {/* 論文情報カードの改善されたデザイン */}
@@ -959,28 +980,61 @@ const PaperViewPage: React.FC = () => {
           justifyContent: 'space-between',
           alignItems: 'center',
           borderBottom: 1, 
-          borderColor: 'divider' 
+          borderColor: 'divider',
+          flexWrap: 'wrap' // フレックスアイテムを折り返し可能に
         }}>
           <Tabs 
             value={tabValue} 
             onChange={handleTabChange} 
             aria-label="論文タブ"
-            sx={{ flex: 1 }}
+            variant="scrollable" // タブがはみ出す場合はスクロール可能に
+            scrollButtons="auto" // スクロールボタンを自動表示
+            allowScrollButtonsMobile // モバイルでもスクロールボタンを許可
+            sx={{ 
+              flex: '1 0 auto', // フレックスアイテムの伸縮性を調整
+              minHeight: '48px', // 最小高さを明示的に指定
+              '& .MuiTab-root': {
+                minHeight: '48px', // タブの最小高さを指定
+                py: 1,
+                fontSize: { xs: '0.75rem', sm: '0.875rem' } // レスポンシブフォントサイズ
+              }
+            }}
           >
-            <Tab icon={<TranslateIcon />} label="翻訳" id="paper-tab-0" />
-            <Tab icon={<SummarizeIcon />} label="要約" id="paper-tab-1" />
-            <Tab icon={<InfoIcon />} label="メタデータ" id="paper-tab-2" />
+            <Tab 
+              icon={<TranslateIcon fontSize="small" />} 
+              label="翻訳" 
+              id="paper-tab-0"
+              sx={{ minWidth: { xs: '80px', sm: '120px' } }} // タブの最小幅を指定
+            />
+            <Tab 
+              icon={<SummarizeIcon fontSize="small" />} 
+              label="要約" 
+              id="paper-tab-1"
+              sx={{ minWidth: { xs: '80px', sm: '120px' } }}
+            />
+            <Tab 
+              icon={<InfoIcon fontSize="small" />} 
+              label="メタデータ" 
+              id="paper-tab-2"
+              sx={{ minWidth: { xs: '80px', sm: '120px' } }}
+            />
           </Tabs>
           
           {tabValue === 0 && currentPaper.chapters && currentPaper.chapters.length > 0 && (
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <Box sx={{ 
+              display: 'flex', 
+              alignItems: 'center',
+              mt: { xs: 1, sm: 0 }, // モバイルでは上マージンを追加
+              mb: { xs: 1, sm: 0 }, // モバイルでは下マージンを追加
+              width: { xs: '100%', sm: 'auto' } // モバイルでは幅100%
+            }}>
               <Button
                 variant="outlined"
                 size="small"
                 startIcon={<TocIcon />}
                 onClick={toggleDrawer}
                 color={drawerOpen ? 'primary' : 'inherit'}
-                sx={{ mr: 1 }}
+                sx={{ mr: 1, width: { xs: '100%', sm: 'auto' } }} // モバイルでは幅100%
               >
                 目次
               </Button>
@@ -988,20 +1042,24 @@ const PaperViewPage: React.FC = () => {
           )}
         </Box>
         
-        <Box sx={{ height: 'calc(100vh - 350px)', minHeight: '600px' }}>
+        <Box sx={{ 
+          height: 'calc(100vh - 350px)', 
+          minHeight: '500px',
+          width: '100%',
+          overflow: 'hidden', // オーバーフローを防止
+          position: 'relative' // 相対位置指定
+        }}>
           <TabPanel value={tabValue} index={0}>
             {!['completed', 'reported', 'problem'].includes(currentPaper.status) ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
                 <Typography>翻訳が完了するまでお待ちください...</Typography>
               </Box>
             ) : isLoadingText ? (
-              // 翻訳テキスト読み込み中の表示 (追加)
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', flexDirection: 'column' }}>
                 <CircularProgress size={40} sx={{ mb: 2 }} />
                 <Typography>翻訳テキストを読み込み中...</Typography>
               </Box>
             ) : !getSelectedChapterText() ? (
-              // 翻訳テキストがない場合の表示 (修正)
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', flexDirection: 'column' }}>
                 <Typography gutterBottom>翻訳テキストが見つかりません</Typography>
                 <Button 
@@ -1015,13 +1073,22 @@ const PaperViewPage: React.FC = () => {
                 </Button>
               </Box>
             ) : (
-              <Box sx={{ height: '100%', display: 'flex' }}>
+              <Box sx={{ 
+                height: '100%', 
+                display: 'flex', 
+                width: '100%',
+                overflow: 'hidden' // オーバーフローを防止
+              }}>
                 <Drawer
                   anchor="left"
                   open={drawerOpen}
                   onClose={toggleDrawer}
                   sx={{ 
-                    '& .MuiDrawer-paper': { width: '80%', maxWidth: '300px' }
+                    '& .MuiDrawer-paper': { 
+                      width: '80%', 
+                      maxWidth: '300px',
+                      pt: 2 // ドロワーにパディングを追加
+                    }
                   }}
                 >
                   <Box sx={{ p: 2 }}>
@@ -1033,7 +1100,12 @@ const PaperViewPage: React.FC = () => {
                   </Box>
                 </Drawer>
                 
-                <Box sx={{ flex: 1, height: '100%' }}>
+                <Box sx={{ 
+                  flex: 1, 
+                  height: '100%', 
+                  width: '100%',
+                  overflow: 'hidden' // オーバーフローを防止
+                }}>
                   {pdfUrl && (
                     <SplitView
                       pdfUrl={pdfUrl}
