@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/components/papers/SplitView.tsx
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -13,8 +13,6 @@ import {
 } from '@mui/material';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import DoubleArrowIcon from '@mui/icons-material/DoubleArrow';
-import SyncIcon from '@mui/icons-material/Sync';
-import SyncDisabledIcon from '@mui/icons-material/SyncDisabled';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PdfViewer from './PdfViewer';
@@ -44,10 +42,8 @@ const SplitView: React.FC<SplitViewProps> = ({
   const [tabValue, setTabValue] = useState(0);
   const [splitDirection, setSplitDirection] = useState<'horizontal' | 'vertical'>('vertical');
   const [splitRatio, setSplitRatio] = useState(50);
-  const [syncScroll, setSyncScroll] = useState(true);
   
-  const leftPanelRef = useRef<HTMLDivElement>(null);
-  const rightPanelRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
   const startX = useRef(0);
   const startY = useRef(0);
@@ -63,11 +59,6 @@ const SplitView: React.FC<SplitViewProps> = ({
     setSplitDirection(prev => prev === 'vertical' ? 'horizontal' : 'vertical');
   };
   
-  // 同期スクロールの切り替え
-  const toggleSyncScroll = () => {
-    setSyncScroll(prev => !prev);
-  };
-  
   // 分割比率をリセット
   const resetSplitRatio = () => {
     setSplitRatio(50);
@@ -77,92 +68,6 @@ const SplitView: React.FC<SplitViewProps> = ({
   const adjustSplitRatio = (delta: number) => {
     setSplitRatio(prev => Math.min(Math.max(prev + delta, 20), 80));
   };
-  
-  // 同期スクロール処理
-  useEffect(() => {
-    if (!syncScroll || isMobile) return;
-    
-    const leftPanel = leftPanelRef.current;
-    const rightPanel = rightPanelRef.current;
-    
-    if (!leftPanel || !rightPanel) return;
-    
-    const handleLeftScroll = () => {
-      if (!syncScroll || isDragging.current) return;
-      
-      const leftRatio = leftPanel.scrollTop / (leftPanel.scrollHeight - leftPanel.clientHeight);
-      rightPanel.scrollTop = leftRatio * (rightPanel.scrollHeight - rightPanel.clientHeight);
-    };
-    
-    const handleRightScroll = () => {
-      if (!syncScroll || isDragging.current) return;
-      
-      const rightRatio = rightPanel.scrollTop / (rightPanel.scrollHeight - rightPanel.clientHeight);
-      leftPanel.scrollTop = rightRatio * (leftPanel.scrollHeight - leftPanel.clientHeight);
-    };
-    
-    leftPanel.addEventListener('scroll', handleLeftScroll);
-    rightPanel.addEventListener('scroll', handleRightScroll);
-    
-    return () => {
-      leftPanel.removeEventListener('scroll', handleLeftScroll);
-      rightPanel.removeEventListener('scroll', handleRightScroll);
-    };
-  }, [syncScroll, isMobile]);
-  
-  // ドラッグによる分割比率の調整
-  useEffect(() => {
-    const container = document.getElementById('split-container');
-    const divider = document.getElementById('split-divider');
-    
-    if (!container || !divider) return;
-    
-    const handleMouseDown = (e: MouseEvent) => {
-      isDragging.current = true;
-      startX.current = e.clientX;
-      startY.current = e.clientY;
-      startRatio.current = splitRatio;
-      
-      document.body.style.cursor = splitDirection === 'vertical' ? 'col-resize' : 'row-resize';
-      document.body.style.userSelect = 'none';
-    };
-    
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging.current) return;
-      
-      const containerRect = container.getBoundingClientRect();
-      
-      if (splitDirection === 'vertical') {
-        const deltaX = e.clientX - startX.current;
-        const containerWidth = containerRect.width;
-        const deltaRatio = (deltaX / containerWidth) * 100;
-        setSplitRatio(Math.min(Math.max(startRatio.current + deltaRatio, 20), 80));
-      } else {
-        const deltaY = e.clientY - startY.current;
-        const containerHeight = containerRect.height;
-        const deltaRatio = (deltaY / containerHeight) * 100;
-        setSplitRatio(Math.min(Math.max(startRatio.current + deltaRatio, 20), 80));
-      }
-    };
-    
-    const handleMouseUp = () => {
-      if (!isDragging.current) return;
-      
-      isDragging.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    
-    divider.addEventListener('mousedown', handleMouseDown);
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    
-    return () => {
-      divider.removeEventListener('mousedown', handleMouseDown);
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [splitDirection, splitRatio]);
   
   // モバイル表示の場合はタブ切り替え式にする
   if (isMobile) {
@@ -233,6 +138,7 @@ const SplitView: React.FC<SplitViewProps> = ({
   return (
     <Box
       id="split-container"
+      ref={containerRef}
       sx={{
         height: '100%',
         display: 'flex',
@@ -289,26 +195,17 @@ const SplitView: React.FC<SplitViewProps> = ({
             <ArrowForwardIcon />
           </IconButton>
         </Tooltip>
-        
-        <Divider orientation="vertical" flexItem />
-        
-        <Tooltip title={syncScroll ? "同期スクロールを無効化" : "同期スクロールを有効化"}>
-          <IconButton size="small" onClick={toggleSyncScroll}>
-            {syncScroll ? <SyncIcon color="primary" /> : <SyncDisabledIcon />}
-          </IconButton>
-        </Tooltip>
       </Paper>
       
-      {/* 左側/上側パネル (PDF) */}
+      {/* 左側/上側パネル (PDF) - 固定表示 */}
       <Box
-        ref={leftPanelRef}
         sx={{
           width: splitDirection === 'vertical' ? `${splitRatio}%` : '100%',
           height: splitDirection === 'vertical' ? '100%' : `${splitRatio}%`,
-          overflow: 'auto',
           flexShrink: 0,
           position: 'relative',
           display: 'flex',
+          overflow: 'hidden',
           flex: splitDirection === 'vertical' ? `0 0 ${splitRatio}%` : '0 0 auto'
         }}
       >
@@ -332,9 +229,8 @@ const SplitView: React.FC<SplitViewProps> = ({
         }}
       />
       
-      {/* 右側/下側パネル (翻訳) */}
+      {/* 右側/下側パネル (翻訳) - スクロール可能 */}
       <Box
-        ref={rightPanelRef}
         sx={{
           width: splitDirection === 'vertical' ? `calc(100% - ${splitRatio}% - 4px)` : '100%',
           height: splitDirection === 'vertical' ? '100%' : `calc(100% - ${splitRatio}% - 4px)`,
