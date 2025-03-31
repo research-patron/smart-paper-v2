@@ -44,9 +44,8 @@ Chapter Number: {chapter_number}
 Chapter Title: {chapter_title}
 
 重要な指示：
-1. 専門用語は適切な日本語訳または原語のままにしてください。
-2. 数式、図表の参照、引用は原文のまま残してください。
-3. 5. References」「Bibliography」「参考文献」など参考文献リストのセクションは翻訳しないでください。このようなセクションを検出した場合は、単に「（参考文献リストは省略）」と出力してください。
+1. 数式、図表の参照、引用は原文のまま残してください。
+2. 「References」など参考文献リストのセクションは翻訳せず、単に「（参考文献リストは省略）」と出力してください。
 
 出力形式：
 ```json
@@ -687,6 +686,67 @@ def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None)
                  {"error": str(e), "cache_id": cache_id, "operation": operation})
         raise
 
+def format_basic_html(text: str) -> str:
+    """
+    テキストに基本的な段落タグとシンプルなリスト検出処理を適用する
+    
+    Args:
+        text: 整形するテキスト
+        
+    Returns:
+        str: HTML整形されたテキスト
+    """
+    if not text:
+        return ""
+    
+    # すでにHTMLタグが含まれている場合は処理しない
+    if "<p>" in text or "<ol>" in text:
+        return text
+    
+    # 空行で段落を分割
+    paragraphs = text.split("\n\n")
+    formatted_paragraphs = []
+    
+    # 連続するリスト項目を検出するための変数
+    current_list_items = []
+    
+    for paragraph in paragraphs:
+        if not paragraph.strip():
+            continue
+            
+        # 数字+ピリオドで始まる段落をリスト項目として検出
+        # 例: "1. テキスト" や "2. テキスト" など
+        import re
+        list_match = re.match(r'^\s*(\d+)\.\s+(.*)', paragraph.strip())
+        
+        if list_match:
+            # リスト項目を保存
+            item_content = list_match.group(2)
+            current_list_items.append(item_content)
+        else:
+            # 蓄積されたリスト項目があれば処理
+            if current_list_items:
+                # リスト全体を<ol>タグで囲む
+                list_html = "<ol>\n"
+                for item in current_list_items:
+                    list_html += f"<li>{item}</li>\n"
+                list_html += "</ol>"
+                formatted_paragraphs.append(list_html)
+                current_list_items = []  # リストをクリア
+            
+            # 通常の段落として処理
+            formatted_paragraphs.append(f"<p>{paragraph.strip()}</p>")
+    
+    # 最後に残ったリスト項目があれば処理
+    if current_list_items:
+        list_html = "<ol>\n"
+        for item in current_list_items:
+            list_html += f"<li>{item}</li>\n"
+        list_html += "</ol>"
+        formatted_paragraphs.append(list_html)
+    
+    return "\n\n".join(formatted_paragraphs)
+
 def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_info: dict = None) -> dict:
     """
     PDFファイルを直接処理して翻訳・要約・メタデータ抽出を行う
@@ -790,9 +850,11 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
             result = extract_json_from_response(response_text, operation)
             add_step(session_id, paper_id, "response_parsed")
             
-            # 翻訳結果のHTMLをサニタイズ
+            # 翻訳結果の処理 - 基本的なHTML整形を適用
             if operation == "translate" and "translated_text" in result:
-                result["translated_text"] = sanitize_html(result.get("translated_text", ""))
+                # 段落タグの付与のみを行う
+                translated_text = result.get("translated_text", "")
+                result["translated_text"] = format_basic_html(translated_text)
                 
                 # 章情報を結果に追加
                 result["chapter_number"] = chapter_info["chapter_number"]
@@ -800,11 +862,7 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
                 result["start_page"] = chapter_info["start_page"]
                 result["end_page"] = chapter_info["end_page"]
                 
-                # 個別章の翻訳テキストはここでは保存しない
-                # パフォーマンス計測モジュールに翻訳テキストを保存
-                # save_translated_text(session_id, result["translated_text"])
-                
-                add_step(session_id, paper_id, "html_sanitized")
+                add_step(session_id, paper_id, "translation_processed")
             
             # 要約結果の処理
             elif operation == "summarize" and "summary" in result:
@@ -831,18 +889,16 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
             add_step(session_id, paper_id, "json_parsing_failed", {"error": str(e)})
             
             if operation == "translate":
-                sanitized_text = sanitize_html(response_text)
+                # 基本的なHTML整形処理を適用
+                formatted_text = format_basic_html(response_text, chapter_info)
+                
                 result = {
-                    "translated_text": sanitized_text,
+                    "translated_text": formatted_text,
                     "chapter_number": chapter_info["chapter_number"],
                     "title": chapter_info.get("title", ""),
                     "start_page": chapter_info["start_page"],
                     "end_page": chapter_info["end_page"]
                 }
-                
-                # 個別章の翻訳テキストはここでは保存しない
-                # 翻訳テキストをパフォーマンス計測モジュールに保存
-                # save_translated_text(session_id, sanitized_text)
                 
                 add_step(session_id, paper_id, "used_fallback_translation")
                 
@@ -891,114 +947,3 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
         log_error("ProcessPDFError", f"Failed to process PDF: {operation}", 
                  {"error": str(e), "file_path": pdf_gs_path, "operation": operation})
         raise
-
-def sanitize_html(html_text: str) -> str:
-    """
-    HTMLをサニタイズし、章構造を整える改良版関数
-    
-    Args:
-        html_text: サニタイズするHTML文字列
-        
-    Returns:
-        str: サニタイズされたHTML
-    """
-    if not html_text:
-        return ""
-    
-    # JSON形式の文字列が含まれているか確認し、含まれている場合は抽出
-    json_pattern = re.compile(r'^\s*\{\s*"(?:translated_text|summary)"\s*:\s*"(.+)"\s*\}\s*$', re.DOTALL)
-    json_match = json_pattern.search(html_text)
-    if json_match:
-        # JSON形式の文字列から内容を抽出
-        html_text = json_match.group(1)
-        # エスケープされたクォートとバックスラッシュを戻す
-        html_text = html_text.replace('\\"', '"').replace('\\\\', '\\')
-        # エスケープされた改行を実際の改行に変換
-        html_text = html_text.replace('\\n', '\n')
-    
-    # 参考文献セクションの処理
-    references_pattern = re.compile(r'<h\d>\s*(?:\d+\.\s*)?(?:references|bibliography|参考文献)(?:リスト)?</h\d>.*?$', re.DOTALL | re.IGNORECASE)
-    if re.search(references_pattern, html_text):
-        html_text = re.sub(references_pattern, '<h2>参考文献</h2><p>（参考文献リストは省略）</p>', html_text)
-    
-    # 参考文献リストパターン (例: [1], [2] など)
-    references_list_pattern = re.compile(r'(?:\[\d+\][^\[]{2,})+$', re.MULTILINE)
-    if re.search(references_list_pattern, html_text):
-        html_text = re.sub(references_list_pattern, '', html_text)
-    
-    # <img>タグの処理（画像を適切な表記に置換）
-    img_pattern = re.compile(r'<img[^>]+>')
-    html_text = img_pattern.sub('（図表）', html_text)
-    
-    # 章見出しの形式を修正
-    # 「Chapter X: Title」の形式を「X. タイトル」に変換
-    html_text = re.sub(r'<h(\d)>\s*Chapter\s+(\d+)(?::|\.)\s*(.*?)\s*</h\1>', r'<h\1>\2. \3</h\1>', html_text, flags=re.IGNORECASE)
-    
-    # 「Section X.Y: Title」の形式を「X.Y. タイトル」に変換
-    html_text = re.sub(r'<h(\d)>\s*Section\s+(\d+\.\d+)(?::|\.)\s*(.*?)\s*</h\1>', r'<h\1>\2. \3</h\1>', html_text, flags=re.IGNORECASE)
-    
-    # 1. Introduction のような形式を <h2>1. Introduction</h2> に変換
-    # ただし、既にHTMLタグがある場合は変換しない
-    chapter_pattern = re.compile(r'^(\d+\.\s+[^\n<]+)$', re.MULTILINE)
-    html_text = chapter_pattern.sub(r'<h2>\1</h2>', html_text)
-    
-    # 1.1. Method のような形式を <h3>1.1. Method</h3> に変換
-    subchapter_pattern = re.compile(r'^(\d+\.\d+\.\s+[^\n<]+)$', re.MULTILINE)
-    html_text = subchapter_pattern.sub(r'<h3>\1</h3>', html_text)
-    
-    # 見出しの重複を削除（同じ番号の見出しが連続する場合）
-    html_text = re.sub(
-        r'(<h(\d)>\s*(\d+(?:\.\d+)?)[\.:]?\s*[^<]+</h\2>)\s*<h\2>\s*\3[\.:]?\s*([^<]+)</h\2>',
-        r'\1',
-        html_text,
-        flags=re.IGNORECASE
-    )
-    
-    # 段落の処理: 見出しタグでも段落タグでもない文字列を段落タグで囲む
-    if not re.search(r'<p>', html_text):
-        # テキストを見出しタグで分割
-        parts = re.split(r'(<h\d>.*?</h\d>)', html_text)
-        processed_parts = []
-        
-        for part in parts:
-            # 見出しタグはそのまま保持
-            if re.match(r'<h\d>.*?</h\d>', part):
-                processed_parts.append(part)
-            elif part.strip():
-                # 非見出し部分を段落に分割
-                paragraphs = re.split(r'\n\s*\n', part)
-                for p in paragraphs:
-                    if p.strip():
-                        processed_parts.append(f"<p>{p.strip()}</p>")
-        
-        html_text = '\n\n'.join(processed_parts)
-    
-    # スクリプトタグ、iframe、style、linkタグなどの危険なタグを削除
-    html_text = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', html_text, flags=re.IGNORECASE)
-    html_text = re.sub(r'<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>', '', html_text, flags=re.IGNORECASE)
-    html_text = re.sub(r'<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>', '', html_text, flags=re.IGNORECASE)
-    html_text = re.sub(r'<link\b[^<]*(?:(?!>)(.|\n))*>', '', html_text, flags=re.IGNORECASE)
-    
-    # オンイベント属性（onClick, onLoadなど）を削除
-    html_text = re.sub(r'\bon\w+\s*=\s*"[^"]*"', '', html_text, flags=re.IGNORECASE)
-    
-    # 許可するタグのリスト
-    allowed_tags = [
-        'p', 'br', 'b', 'i', 'u', 'strong', 'em', 
-        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-        'ul', 'ol', 'li', 'blockquote', 'code', 'pre',
-        'table', 'thead', 'tbody', 'tr', 'th', 'td',
-        'sup', 'sub', 'span'
-    ]
-    
-    # 許可されないタグを削除
-    found_tags = set(re.findall(r'</?(\w+)[^>]*>', html_text))
-    for tag in found_tags:
-        if tag.lower() not in allowed_tags:
-            html_text = re.sub(r'<{0}[^>]*>'.format(tag), '', html_text, flags=re.IGNORECASE)
-            html_text = re.sub(r'</{0}[^>]*>'.format(tag), '', html_text, flags=re.IGNORECASE)
-    
-    # 連続する改行を整理
-    html_text = re.sub(r'\n{3,}', '\n\n', html_text)
-    
-    return html_text

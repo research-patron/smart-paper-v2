@@ -138,7 +138,9 @@ const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData })
             月間翻訳使用状況
           </Typography>
           <Typography variant="body2">
-            {translationCount} / {translationLimit}件
+            {isPaid 
+              ? `無制限（${translationCount}件）` 
+              : `${translationCount} / ${translationLimit}件`}
           </Typography>
         </Box>
       </Box>

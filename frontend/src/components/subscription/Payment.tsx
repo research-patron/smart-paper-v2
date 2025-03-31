@@ -26,7 +26,7 @@ const Payment: React.FC<PaymentProps> = ({ planId, onPaymentComplete, onCancel }
   
   const isAnnualPlan = planId === 'annual';
   const planAmount = useMemo(() => 
-    isAnnualPlan ? '3,000' : '300',
+    isAnnualPlan ? '5,000' : '500',
     [isAnnualPlan]
   );
   

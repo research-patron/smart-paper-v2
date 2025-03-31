@@ -63,14 +63,6 @@ const Footer = () => {
           <Typography variant="body2" color="text.secondary">
             &copy; {currentYear} Smart Paper v2. All rights reserved.
           </Typography>
-          
-          <Box>
-            <Typography variant="body2" color="text.secondary">
-              <Link color="inherit" href="mailto:smart-paper-v2@student-subscription.com">
-                smart-paper-v2@student-subscription.com
-              </Link>
-            </Typography>
-          </Box>
         </Box>
       </Container>
     </Box>
