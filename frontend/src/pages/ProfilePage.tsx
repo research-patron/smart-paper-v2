@@ -474,7 +474,7 @@ const ProfilePage = () => {
                       月間翻訳
                     </Typography>
                     <Typography variant="h5">
-                      {translationCount} / {translationLimit}件
+                      {translationCount} / {translationLimit} （件）
                     </Typography>
                   </Box>
                 </Box>

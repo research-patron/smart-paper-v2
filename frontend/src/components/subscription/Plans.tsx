@@ -71,10 +71,10 @@ const Plans: React.FC<PlansProps> = ({
   ], []);
   
   // お得率の計算
-  // 月額: 350円/月 × 12カ月 = 4,200円/年
-  // 年額: 3,000円/年
-  // お得率: (4,200 - 3,000) / 4,200 ≈ 0.2857... = 約29%
-  const savingsPercentage = 29;
+  // 月額: 500円/月 × 12カ月 = 6,000円/年
+  // 年額: 5,000円/年
+  // お得率: (6,000 - 5,000) / 6,000 ≈ 0.1667... = 約17%
+  const savingsPercentage = 17;
   
   // プランオプション - 非会員プランを削除
   const planOptions: PlanOption[] = useMemo(() => [
@@ -89,7 +89,7 @@ const Plans: React.FC<PlansProps> = ({
     {
       id: annually ? 'annual' : 'monthly',
       title: 'プレミアムプラン',
-      price: annually ? '¥3,000' : '¥350',
+      price: annually ? '¥5,000' : '¥500',
       period: annually ? '年額' : '月額',
       description: 'すべての機能を無制限で利用できる有料プラン',
       features: planFeatures,
@@ -129,7 +129,7 @@ const Plans: React.FC<PlansProps> = ({
               <TableRow>
                 <TableCell>機能</TableCell>
                 <TableCell align="center">無料会員プラン</TableCell>
-                <TableCell align="center">プレミアムプラン {annually ? "(年額 ¥3,000)" : "(月額 ¥350)"}</TableCell>
+                <TableCell align="center">プレミアムプラン {annually ? "(年額 ¥5,000)" : "(月額 ¥500)"}</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -176,11 +176,11 @@ const Plans: React.FC<PlansProps> = ({
                 </TableCell>
                 <TableCell align="center">
                   <Typography fontWeight="bold" color="primary">
-                    {annually ? "¥3,000/年" : "¥350/月"}
+                    {annually ? "¥5,000/年" : "¥500/月"}
                   </Typography>
                   {annually && (
                     <Typography variant="caption" color="text.secondary">
-                      (月あたり ¥250)
+                      (月あたり ¥417)
                     </Typography>
                   )}
                 </TableCell>

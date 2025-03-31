@@ -161,7 +161,7 @@ const PrivacyPage = () => {
           </Typography>
           <Typography paragraph>
             担当部署：Smart Paper v2運営事務局<br />
-            Eメールアドレス：	info@student-subscription.com
+            Eメールアドレス：	smart-paper-v2@student-subscription.com
           </Typography>
         </Paper>
       </Box>

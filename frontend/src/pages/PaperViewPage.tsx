@@ -570,7 +570,7 @@ const PaperViewPage: React.FC = () => {
   // 修正: getSelectedChapterText関数の改良
   const getSelectedChapterText = () => {
     if (!currentPaper) return null;
-  
+
     // デバッグ情報
     console.log("Getting chapter text, state:", {
       hasLocalText: !!localTranslatedText, 
@@ -584,11 +584,9 @@ const PaperViewPage: React.FC = () => {
     if (!selectedChapter) {
       // 優先順位: ローカルテキスト > 論文オブジェクトのテキスト
       if (localTranslatedText && localTranslatedText.length > 0) {
-        // Cloud Functionsで処理済みのテキストをそのまま返す
         return localTranslatedText;
       }
       if (currentPaper.translated_text && currentPaper.translated_text.length > 0) {
-        // Cloud Functionsで処理済みのテキストをそのまま返す
         return currentPaper.translated_text;
       }
       // 両方ともない場合はnullを返す
@@ -598,7 +596,6 @@ const PaperViewPage: React.FC = () => {
     // 選択された章がある場合は該当する章のテキストを返す
     const chapter = currentPaperChapters.find(c => c.chapter_number === selectedChapter);
     if (chapter && chapter.translated_text) {
-      // 章の翻訳テキストはすでにCloud Functionsで処理済み
       return chapter.translated_text;
     }
     

@@ -18,7 +18,6 @@ from dateutil.relativedelta import relativedelta
 from process_pdf import (
     process_all_chapters,
     process_content,
-    sanitize_html,
     extract_json_from_response
 )
 from error_handling import (
@@ -211,7 +210,7 @@ def check_and_update_translation_limit(user_id: str, check_only: bool = False):
         # 期間をリセットしたので、翻訳を許可
         return True
     
-    # 無料会員の場合は翻訳数をチェック
+    # 無料会員の場合のみ翻訳数をチェック
     if user_data.get("subscription_status") != "paid":
         translation_count = user_data.get("translation_count", 0)
         
@@ -219,32 +218,32 @@ def check_and_update_translation_limit(user_id: str, check_only: bool = False):
         if translation_count >= 3:
             log_warning("TranslationLimit", f"User {user_id} has reached the translation limit (3/month)")
             raise ValidationError("月間翻訳数の上限（3件）に達しました。プレミアムプランにアップグレードすると無制限に翻訳できます。")
+    
+    # カウントの更新が必要な場合（プレミアムユーザーを含むすべてのユーザー）
+    if not check_only:
+        # トランザクションを使用して確実に更新
+        transaction = db.transaction()
         
-        # カウントの更新が必要な場合
-        if not check_only:
-            # トランザクションを使用して確実に更新
-            transaction = db.transaction()
+        @firestore.transactional
+        def update_in_transaction(transaction, user_ref):
+            # 最新のデータを取得
+            user_snapshot = user_ref.get(transaction=transaction)
+            user_data = user_snapshot.to_dict()
             
-            @firestore.transactional
-            def update_in_transaction(transaction, user_ref):
-                # 最新のデータを取得
-                user_snapshot = user_ref.get(transaction=transaction)
-                user_data = user_snapshot.to_dict()
-                
-                # 最新の翻訳数
-                current_count = user_data.get("translation_count", 0)
-                
-                # カウントを更新
-                transaction.update(user_ref, {
-                    "translation_count": current_count + 1,
-                    "updated_at": datetime.datetime.now()
-                })
-                
-                log_info("TranslationLimit", f"Updated translation count for user {user_id}: {current_count + 1}")
-                return True
+            # 最新の翻訳数
+            current_count = user_data.get("translation_count", 0)
             
-            # トランザクションで更新を実行
-            update_in_transaction(transaction, user_ref)
+            # カウントを更新（プレミアムユーザーを含む全ユーザー）
+            transaction.update(user_ref, {
+                "translation_count": current_count + 1,
+                "updated_at": datetime.datetime.now()
+            })
+            
+            log_info("TranslationLimit", f"Updated translation count for user {user_id}: {current_count + 1}")
+            return True
+        
+        # トランザクションで更新を実行
+        update_in_transaction(transaction, user_ref)
     
     return True
 

@@ -468,7 +468,7 @@ const HomePage = () => {
                   プレミアムにアップグレード
                 </Button>
                 <Typography variant="caption" color="text.secondary" align="center" sx={{ display: 'block', mt: 1 }}>
-                  月額¥350 または 年額¥3,000 (月あたり¥250)
+                  月額¥500 または 年額¥5,000 (月あたり¥417)
                 </Typography>
               </Paper>
             )}

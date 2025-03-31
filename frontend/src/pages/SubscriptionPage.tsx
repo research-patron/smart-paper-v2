@@ -478,8 +478,8 @@ const SubscriptionPage = () => {
                   <ListItemText 
                     primary="料金プラン" 
                     secondary={effectiveUserData.subscription_plan === 'annual' 
-                      ? "年額 ¥3,000（税込）" 
-                      : "月額 ¥300（税込）"} 
+                      ? "年額 ¥5,000（税込）" 
+                      : "月額 ¥500（税込）"} 
                   />
                 </ListItem>
                 

@@ -23,7 +23,7 @@ const TermsPage = () => {
           </Typography>
           
           <Typography variant="subtitle1" gutterBottom color="text.secondary">
-            最終更新日: 2023年12月1日
+            最終更新日: 2025年3月31日
           </Typography>
           
           <Divider sx={{ my: 3 }} />

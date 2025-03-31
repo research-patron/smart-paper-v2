@@ -17,7 +17,7 @@ import ErrorMessage from '../common/ErrorMessage';
 
 interface TranslationViewerProps {
   translatedText: string | null;
-  processedContent?: string | null; // バックエンドで処理済みのコンテンツ
+  processedContent?: string | null; // 追加: バックエンドで処理済みのコンテンツ
   loading?: boolean;
   error?: string | null;
   chapter?: {
@@ -28,9 +28,188 @@ interface TranslationViewerProps {
   height?: number | string;
 }
 
+// JSONパース関数: 翻訳テキストからJSON構造を抽出する
+// このロジックはバックエンド側と一致させる必要があります
+const extractTranslatedText = (text: string | null, processedContent?: string | null): string | null => {
+  // バックエンドで処理済みのコンテンツがある場合はそれを優先
+  if (processedContent) {
+    return processedContent;
+  }
+
+  // バックエンドのデータがない場合はフロントエンドでパース処理
+  if (!text) return null;
+
+  try {
+    // JSONオブジェクトとして解析できるか試す
+    try {
+      const jsonObj = JSON.parse(text);
+      if (jsonObj && typeof jsonObj === 'object') {
+        // 新しい構造に対応 (chapter, translated_text, sub_chapters)
+        if (jsonObj.chapter && jsonObj.translated_text) {
+          // サブチャプターを含めたHTMLを生成
+          let htmlContent = `<h2>${jsonObj.chapter}</h2>\n\n`;
+          htmlContent += jsonObj.translated_text;
+          
+          // サブチャプターがあれば追加
+          if (jsonObj.sub_chapters && Array.isArray(jsonObj.sub_chapters)) {
+            for (const subChapter of jsonObj.sub_chapters) {
+              if (subChapter.title && subChapter.content) {
+                htmlContent += `\n\n<h3>${subChapter.title}</h3>\n\n`;
+                htmlContent += subChapter.content;
+              }
+            }
+          }
+          
+          return htmlContent;
+        }
+        
+        // 旧形式に対応 (translated_text のみ)
+        if (jsonObj.translated_text) {
+          return jsonObj.translated_text;
+        }
+      }
+    } catch (e) {
+      // JSONとして解析できない場合は次の方法を試す
+      console.log('Failed to parse as JSON object:', e);
+    }
+
+    // JSON形式かチェック - 完全なJSON文字列の場合
+    const jsonPattern = /^\s*\{\s*"translated_text"\s*:\s*"(.+)"\s*\}\s*$/;
+    const jsonMatch = jsonPattern.exec(text);
+    if (jsonMatch) {
+      // JSON内の実際の翻訳テキストを抽出
+      let extractedText = jsonMatch[1];
+      // エスケープされた引用符を戻す
+      extractedText = extractedText.replace(/\\"/g, '"');
+      return extractedText;
+    }
+
+    // 見出しの処理
+    let processedText = text;
+    
+    // サブ章の重複タイトル検出と修正ロジック
+    const subheadingRegex = /<h([3-6])>\s*(\d+\.\d+(?:\.|:)\s*)([^<]+)<\/h\1>\s*<h\1>\s*\2([^<]+)<\/h\1>/gi;
+    processedText = processedText.replace(subheadingRegex, (match, tag, num, title1, title2) => {
+      // ローマ数字やラテン文字が多く含まれる方は英語タイトルと判断
+      const isTitle1English = /\b[IVX]+\b|(?:[A-Z][a-z]+\s+){2,}/i.test(title1);
+      // 日本語文字が含まれる方は日本語タイトルと判断
+      const isTitle2Japanese = /[\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF]/i.test(title2);
+      
+      if (isTitle1English && isTitle2Japanese) {
+        // 英語→日本語の順番の場合、日本語のみ残す
+        return `<h${tag}>${num}${title2}</h${tag}>`;
+      } else if (isTitle2Japanese) {
+        // 日本語が検出された場合は後者を優先
+        return `<h${tag}>${num}${title2}</h${tag}>`;
+      } else {
+        // それ以外の場合は後者を優先（デフォルト）
+        return `<h${tag}>${num}${title2}</h${tag}>`;
+      }
+    });
+
+    // サブ章の重複見出し検出（"2.1. Raw materials 2.1. 原材料"のような形式）
+    processedText = processedText.replace(
+      /<h([3-6])>\s*(\d+\.\d+(?:\.|:)\s*)([^<]+?)\s+\2([^<]+)<\/h\1>/gi, 
+      (match, tagNum, num, engTitle, jpTitle) => `<h${tagNum}>${num}${jpTitle}</h${tagNum}>`
+    );
+    
+    // 連続する見出しの重複を検出して除去
+    // 例: <h2>1. I. Introduction</h2><h2>1. 序論</h2> → <h2>1. 序論</h2>
+    const headingRegex = /<h([1-6])>\s*(\d+)(?:\.|:)\s*([^<]+)<\/h\1>\s*<h\1>\s*\2(?:\.|:)\s*([^<]+)<\/h\1>/gi;
+    processedText = processedText.replace(headingRegex, (match, tag, num, title1, title2) => {
+      // ローマ数字（I, II, III等）やラテン文字が多く含まれる方は英語タイトルと判断
+      const isTitle1English = /\b[IVX]+\b|(?:[A-Z][a-z]+\s+){2,}/i.test(title1);
+      // 日本語文字が含まれる方は日本語タイトルと判断
+      const isTitle2Japanese = /[\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF]/i.test(title2);
+      
+      if (isTitle1English && isTitle2Japanese) {
+        // 英語→日本語の順番の場合、日本語のみ残す
+        return `<h${tag}>${num}. ${title2}</h${tag}>`;
+      } else if (isTitle2Japanese) {
+        // 日本語が検出された場合は後者を優先
+        return `<h${tag}>${num}. ${title2}</h${tag}>`;
+      } else {
+        // それ以外の場合は後者を優先（デフォルト）
+        return `<h${tag}>${num}. ${title2}</h${tag}>`;
+      }
+    });
+    
+    // 重複した見出し（数字. 英語タイトル 数字. 日本語タイトル）を修正
+    processedText = processedText.replace(
+      /<h([1-6])>\s*(\d+)(?:\.|:)\s*([^<]+?)\s+\2(?:\.|:)\s*([^<]+)<\/h\1>/gi, 
+      (match, tagNum, num, engTitle, jpTitle) => `<h${tagNum}>${num}. ${jpTitle}</h${tagNum}>`
+    );
+    
+    // 「Chapter X: Title」の形式を「X. タイトル」に変換
+    processedText = processedText.replace(
+      /<h([1-6])>\s*(?:Chapter\s+)?(\d+)(?::|\.)\s*([^<]+)<\/h\1>/gi, 
+      (match, tagNum, num, title) => `<h${tagNum}>${num}. ${title}</h${tagNum}>`
+    );
+    
+    // ローマ数字の見出し (I, II, III, etc.)
+    processedText = processedText.replace(
+      /<h([1-6])>\s*(?:Chapter\s+)?([IVX]+)(?::|\.)\s*([^<]+)<\/h\1>/gi, 
+      (match, tagNum, romanNumeral, title) => {
+        // ローマ数字をアラビア数字に変換
+        const romanToArabic = (roman: string): number => {
+          const romanNumerals: {[key: string]: number} = {
+            'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000
+          };
+          let result = 0;
+          for (let i = 0; i < roman.length; i++) {
+            const current = romanNumerals[roman[i]];
+            const next = romanNumerals[roman[i + 1]];
+            if (next && current < next) {
+              result -= current;
+            } else {
+              result += current;
+            }
+          }
+          return result;
+        };
+
+        const arabicNumeral = romanToArabic(romanNumeral.toUpperCase());
+        return `<h${tagNum}>${arabicNumeral}. ${title}</h${tagNum}>`;
+      }
+    );
+    
+    // 英語のセクション名が残っている場合の処理（サブセクションも含む）
+    const sectionPatterns = [
+      { en: "Introduction", ja: "導入" },
+      { en: "Abstract", ja: "要旨" },
+      { en: "Method", ja: "方法" },
+      { en: "Methods", ja: "方法" },
+      { en: "Methodology", ja: "方法論" },
+      { en: "Results", ja: "結果" },
+      { en: "Discussion", ja: "考察" },
+      { en: "Results and Discussion", ja: "結果と考察" },
+      { en: "Conclusion", ja: "結論" },
+      { en: "Conclusions", ja: "結論" },
+      { en: "Materials", ja: "材料" },
+      { en: "Background", ja: "背景" },
+      { en: "Experimental", ja: "実験" },
+      { en: "Theory", ja: "理論" },
+      { en: "Related Work", ja: "関連研究" },
+      { en: "References", ja: "参考文献" },
+      { en: "Bibliography", ja: "参考文献" }
+    ];
+
+    for (const pattern of sectionPatterns) {
+      // タイトルを日本語に置き換える
+      const regex = new RegExp(`(<h[1-6]>\\s*\\d+(?:\\.\\:|\\.)\\s*)${pattern.en}(\\s*<\\/h[1-6]>)`, 'gi');
+      processedText = processedText.replace(regex, `$1${pattern.ja}$2`);
+    }
+
+    return processedText;
+  } catch (e) {
+    console.error('Error extracting translated text:', e instanceof Error ? e.message : 'Unknown error');
+    return text; // エラーの場合は元のテキストを返す
+  }
+};
+
 const TranslationViewer: React.FC<TranslationViewerProps> = ({
   translatedText,
-  processedContent, // バックエンドで処理済みのコンテンツ
+  processedContent, // 追加: バックエンドで処理済みのコンテンツ
   loading = false,
   error = null,
   chapter,
@@ -41,30 +220,9 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
   const [fontSize, setFontSize] = useState(16);
   const [copied, setCopied] = useState(false);
   
-  // Cloud Functionsからの処理済みテキストを使用
-  // フロントエンドでのJSONパース処理を避ける
+  // 処理された翻訳テキスト（JSONパース処理を含む）
   const processedText = useMemo(() => {
-    // 1. バックエンドから直接処理済みコンテンツが提供されている場合はそれを使用
-    if (processedContent) {
-      console.log("Using pre-processed content from backend");
-      return processedContent;
-    }
-    
-    // 2. 翻訳テキストが直接HTMLとして提供されている場合（Cloud Functionsで処理済み）
-    if (translatedText) {
-      console.log("Using translated text directly (already processed by Cloud Functions)");
-      
-      // 特別なケース：番号付きリストが ##で始まっている可能性がある問題の修正
-      let processedText = translatedText;
-      
-      // 「数字. 」で始まる行の前に ## が含まれる場合、それを削除
-      processedText = processedText.replace(/##\s+(\d+\.\s+)/g, '$1');
-      
-      return processedText;
-    }
-    
-    // 3. どちらも提供されていない場合
-    return null;
+    return extractTranslatedText(translatedText, processedContent);
   }, [translatedText, processedContent]);
   
   // フォントサイズを変更
