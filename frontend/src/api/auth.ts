@@ -5,6 +5,7 @@ import {
   signInWithPopup,
   signOut,
   sendPasswordResetEmail,
+  sendEmailVerification,
   User,
   UserCredential
 } from 'firebase/auth';
@@ -34,8 +35,13 @@ export const registerUser = async (email: string, password: string, name?: strin
       // 翻訳期間の初期設定
       translation_count: 0,
       translation_period_start: Timestamp.fromDate(now),
-      translation_period_end: Timestamp.fromDate(oneMonthLater)
+      translation_period_end: Timestamp.fromDate(oneMonthLater),
+      // メール認証状態
+      email_verified: false
     });
+    
+    // メール認証リンクを送信
+    await sendEmailVerification(user);
     
     return user;
   } catch (error) {
@@ -78,7 +84,9 @@ export const loginWithGoogle = async (): Promise<UserCredential> => {
         // 翻訳期間の初期設定
         translation_count: 0,
         translation_period_start: Timestamp.fromDate(now),
-        translation_period_end: Timestamp.fromDate(oneMonthLater)
+        translation_period_end: Timestamp.fromDate(oneMonthLater),
+        // Googleログインはデフォルトで認証済みとする
+        email_verified: true
       });
     }
     
@@ -119,6 +127,30 @@ export const getUserData = async (userId: string) => {
     return null;
   } catch (error) {
     console.error('Error getting user data:', error);
+    throw error;
+  }
+};
+
+// メール認証の再送信
+export const resendVerificationEmail = async (user: User): Promise<void> => {
+  try {
+    await sendEmailVerification(user);
+  } catch (error) {
+    console.error('Error sending verification email:', error);
+    throw error;
+  }
+};
+
+// Firestoreのユーザーデータをメール認証状態で更新
+export const updateUserEmailVerificationStatus = async (userId: string, isVerified: boolean): Promise<void> => {
+  try {
+    const userRef = doc(db, 'users', userId);
+    await setDoc(userRef, {
+      email_verified: isVerified,
+      updated_at: Timestamp.now()
+    }, { merge: true });
+  } catch (error) {
+    console.error('Error updating email verification status:', error);
     throw error;
   }
 };

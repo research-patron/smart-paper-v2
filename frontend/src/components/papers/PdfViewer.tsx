@@ -9,7 +9,9 @@ import {
   Tooltip,
   Paper,
   Alert,
-  Button
+  Button,
+  useTheme,
+  useMediaQuery
 } from '@mui/material';
 import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import ZoomOutIcon from '@mui/icons-material/ZoomOut';
@@ -40,13 +42,15 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
   height = '100%',
   onPageChange
 }) => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const containerRef = useRef<HTMLDivElement>(null);
   
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageNumber, setPageNumber] = useState<number>(1);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [scale, setScale] = useState<number>(1.4);
+  const [scale, setScale] = useState<number>(1.0); // デフォルトスケールを調整
   const [fullscreen, setFullscreen] = useState<boolean>(false);
   
   // PDFのロード完了時
@@ -116,6 +120,17 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
     setFullscreen(!fullscreen);
   };
   
+  // モバイルデバイスでのスケール自動調整
+  useEffect(() => {
+    if (isMobile && !fullscreen) {
+      // モバイルではデフォルトのスケールを小さくする
+      setScale(0.8);
+    } else if (!isMobile && !fullscreen) {
+      // デスクトップではデフォルトのスケールを1.0に
+      setScale(1.0);
+    }
+  }, [isMobile, fullscreen]);
+  
   // キーボードショートカット
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -140,8 +155,8 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
     return (
       <Box
         sx={{
-          width,
-          height,
+          width: '100%',
+          height: '100%',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
@@ -164,8 +179,8 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
     <Box
       ref={containerRef}
       sx={{
-        width,
-        height,
+        width: '100%',
+        height: '100%',
         display: 'flex',
         flexDirection: 'column',
         position: fullscreen ? 'fixed' : 'relative',
@@ -182,34 +197,46 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
         elevation={1}
         square
         sx={{
-          p: 1,
+          p: 0.5, // サイズ縮小
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           borderBottom: 1,
-          borderColor: 'divider'
+          borderColor: 'divider',
+          flexWrap: 'wrap', // モバイル対応のため折り返し許可
+          minHeight: '48px',
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <IconButton onClick={goToPrevPage} disabled={pageNumber <= 1}>
+        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'nowrap' }}>
+          <IconButton onClick={goToPrevPage} disabled={pageNumber <= 1} size={isMobile ? "small" : "medium"}>
             <NavigateBeforeIcon />
           </IconButton>
           
-          <Box sx={{ display: 'flex', alignItems: 'center', width: 100, mx: 1 }}>
-            <Typography variant="body2" sx={{ mr: 1 }}>
+          <Box sx={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            width: { xs: 'auto', sm: 100 },
+            mx: 0.5
+          }}>
+            <Typography variant="body2" sx={{ mr: 0.5, fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
               {pageNumber}
             </Typography>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
               / {numPages || '--'}
             </Typography>
           </Box>
           
-          <IconButton onClick={goToNextPage} disabled={!numPages || pageNumber >= numPages}>
+          <IconButton onClick={goToNextPage} disabled={!numPages || pageNumber >= numPages} size={isMobile ? "small" : "medium"}>
             <NavigateNextIcon />
           </IconButton>
         </Box>
         
-        <Box sx={{ width: 200, mx: 2, display: { xs: 'none', sm: 'block' } }}>
+        {/* モバイル以外の場合のみスライダーを表示 */}
+        <Box sx={{ 
+          width: { xs: 0, sm: 120, md: 200 }, 
+          mx: { xs: 0, sm: 1 }, 
+          display: { xs: 'none', sm: 'block' } 
+        }}>
           <Slider
             value={pageNumber}
             min={1}
@@ -222,25 +249,35 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
           />
         </Box>
         
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Box sx={{ 
+          display: 'flex', 
+          alignItems: 'center',
+          flexWrap: 'nowrap', 
+          ml: { xs: 'auto', sm: 0 } 
+        }}>
           <Tooltip title="縮小">
-            <IconButton onClick={zoomOut} disabled={scale <= 0.5}>
+            <IconButton onClick={zoomOut} disabled={scale <= 0.5} size={isMobile ? "small" : "medium"}>
               <ZoomOutIcon />
             </IconButton>
           </Tooltip>
           
-          <Typography variant="body2" sx={{ mx: 1, minWidth: 40, textAlign: 'center' }}>
+          <Typography variant="body2" sx={{ 
+            mx: 0.5, 
+            minWidth: { xs: 30, sm: 40 }, 
+            textAlign: 'center',
+            fontSize: { xs: '0.75rem', sm: '0.875rem' }
+          }}>
             {Math.round(scale * 100)}%
           </Typography>
           
           <Tooltip title="拡大">
-            <IconButton onClick={zoomIn} disabled={scale >= 3.0}>
+            <IconButton onClick={zoomIn} disabled={scale >= 3.0} size={isMobile ? "small" : "medium"}>
               <ZoomInIcon />
             </IconButton>
           </Tooltip>
           
           <Tooltip title={fullscreen ? "フルスクリーン解除" : "フルスクリーン"}>
-            <IconButton onClick={toggleFullscreen}>
+            <IconButton onClick={toggleFullscreen} size={isMobile ? "small" : "medium"}>
               {fullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
             </IconButton>
           </Tooltip>
@@ -252,16 +289,23 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
         sx={{
           flex: 1,
           overflow: 'auto',
-          overflowX: 'hidden',
+          overflowX: 'auto',  // 横スクロールを許可
           backgroundColor: 'background.paper',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'flex-start',
           p: 0.5,
+          position: 'relative',  // 相対位置指定に変更
         }}
       >
         {loading && (
-          <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}>
+          <Box sx={{ 
+            position: 'absolute', 
+            top: '50%', 
+            left: '50%', 
+            transform: 'translate(-50%, -50%)',
+            zIndex: 1
+          }}>
             <CircularProgress />
           </Box>
         )}
@@ -290,6 +334,14 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
             renderAnnotationLayer={true}
             renderTextLayer={true}
             loading={<CircularProgress />}
+            width={containerRef.current ? 
+              Math.min(
+                // コンテナ幅の95%を最大幅として設定
+                containerRef.current.clientWidth * 0.95, 
+                // 最大幅のキャップ
+                isMobile ? 1000 : 2000
+              ) : undefined
+            }
           />
         </Document>
       </Box>

@@ -8,7 +8,9 @@ import {
   Tooltip,
   Divider,
   Chip,
-  CircularProgress
+  CircularProgress,
+  useTheme,
+  useMediaQuery
 } from '@mui/material';
 import FormatSizeIcon from '@mui/icons-material/FormatSize';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -216,6 +218,8 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
   width = '100%',
   height = '100%'
 }) => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const contentRef = useRef<HTMLDivElement>(null);
   const [fontSize, setFontSize] = useState(16);
   const [copied, setCopied] = useState(false);
@@ -253,8 +257,8 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
     return (
       <Box
         sx={{
-          width,
-          height,
+          width: '100%',
+          height: '100%',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center'
@@ -269,8 +273,8 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
     return (
       <Box
         sx={{
-          width,
-          height,
+          width: '100%',
+          height: '100%',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
@@ -286,8 +290,8 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
     return (
       <Box
         sx={{
-          width,
-          height,
+          width: '100%',
+          height: '100%',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center'
@@ -301,8 +305,8 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
   return (
     <Box
       sx={{
-        width,
-        height,
+        width: '100%',
+        height: '100%',
         display: 'flex',
         flexDirection: 'column',
       }}
@@ -312,15 +316,23 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
         elevation={1}
         square
         sx={{
-          p: 1,
+          p: 0.5, // サイズ縮小
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           borderBottom: 1,
-          borderColor: 'divider'
+          borderColor: 'divider',
+          minHeight: '48px',
+          flexWrap: 'wrap', // モバイル対応のため折り返し許可
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Box sx={{ 
+          display: 'flex', 
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          mr: 1,
+          mb: { xs: 0.5, sm: 0 }
+        }}>
           {chapter && (
             <>
               <Chip 
@@ -328,36 +340,66 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
                 size="small" 
                 color="primary" 
                 variant="outlined" 
-                sx={{ mr: 1 }}
+                sx={{ mr: 1, mb: { xs: 0.5, sm: 0 } }}
               />
-              <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+              <Typography 
+                variant="body2" 
+                noWrap 
+                sx={{ 
+                  maxWidth: { xs: '150px', sm: '200px' },
+                  fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}
+              >
                 {chapter.title}
               </Typography>
             </>
           )}
         </Box>
         
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Box sx={{ 
+          display: 'flex', 
+          alignItems: 'center',
+          ml: { xs: 'auto', sm: 0 }
+        }}>
           <Tooltip title="フォントサイズを小さく">
-            <IconButton onClick={() => changeFontSize(-1)} disabled={fontSize <= 12}>
-              <FormatSizeIcon sx={{ fontSize: '1rem' }} />
+            <IconButton 
+              onClick={() => changeFontSize(-1)} 
+              disabled={fontSize <= 12} 
+              size={isMobile ? "small" : "medium"}
+            >
+              <FormatSizeIcon sx={{ fontSize: isMobile ? '0.9rem' : '1rem' }} />
             </IconButton>
           </Tooltip>
           
-          <Typography variant="body2" sx={{ mx: 1, minWidth: 20, textAlign: 'center' }}>
+          <Typography 
+            variant="body2" 
+            sx={{ 
+              mx: 0.5, 
+              minWidth: 20, 
+              textAlign: 'center',
+              fontSize: { xs: '0.75rem', sm: '0.875rem' }
+            }}
+          >
             {fontSize}
           </Typography>
           
           <Tooltip title="フォントサイズを大きく">
-            <IconButton onClick={() => changeFontSize(1)} disabled={fontSize >= 24}>
-              <FormatSizeIcon sx={{ fontSize: '1.4rem' }} />
+            <IconButton 
+              onClick={() => changeFontSize(1)} 
+              disabled={fontSize >= 24}
+              size={isMobile ? "small" : "medium"}
+            >
+              <FormatSizeIcon sx={{ fontSize: isMobile ? '1.2rem' : '1.4rem' }} />
             </IconButton>
           </Tooltip>
           
-          <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
+          <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
           
           <Tooltip title={copied ? "コピーしました" : "テキストをコピー"}>
-            <IconButton onClick={copyText}>
+            <IconButton onClick={copyText} size={isMobile ? "small" : "medium"}>
               {copied ? <DoneIcon color="success" /> : <ContentCopyIcon />}
             </IconButton>
           </Tooltip>
@@ -370,10 +412,23 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
         sx={{
           flex: 1,
           overflow: 'auto',
-          p: 4,
+          p: { xs: 2, sm: 4 }, // モバイルではパディングを小さく
           bgcolor: 'background.paper',
           fontSize: `${fontSize}px`,
           lineHeight: 1.6,
+          '& h1, & h2, & h3, & h4, & h5, & h6': {
+            lineHeight: 1.4,
+            mb: 2,
+            mt: 3,
+            fontWeight: 'bold'
+          },
+          '& p': {
+            mb: 2
+          },
+          '& img': {
+            maxWidth: '100%', // 画像がはみ出ないように
+            height: 'auto'
+          }
         }}
       >
         <div dangerouslySetInnerHTML={{ __html: processedText }} />

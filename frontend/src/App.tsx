@@ -1,6 +1,6 @@
 // ~/Desktop/smart-paper-v2/frontend/src/App.tsx
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { BrowserRouter as Router, Route, Routes, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Routes, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Box, CssBaseline, ThemeProvider, CircularProgress, Container } from '@mui/material';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
@@ -28,6 +28,8 @@ import ContactPage from './pages/ContactPage';
 import AdminPapersPage from './pages/AdminPapersPage';
 import AdminReportDetailPage from './pages/AdminReportDetailPage';
 import AdminGeminiLogPage from './pages/AdminGeminiLogPage';
+// 新規追加：EmailVerificationページをインポート
+import EmailVerificationPage from './pages/EmailVerificationPage';
 
 // Firebase
 import { auth, db } from './api/firebase';
@@ -36,7 +38,7 @@ import { usePaperStore } from './store/paperStore'; // 追加: PaperStoreをイ�
 
 // 認証が必要なルートのラッパーコンポーネント
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, loading } = useAuthStore();
+  const { user, loading, isEmailVerified } = useAuthStore();
   
   if (loading) {
     // ローディング中はここに表示するコンテンツを設定
@@ -51,6 +53,12 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   if (!user) {
     return <Navigate to="/login" />;
   }
+  
+  // メール認証されていない場合は確認ページにリダイレクト
+  if (!isEmailVerified()) {
+    return <Navigate to="/verify-email" />;
+  }
+  
   return <>{children}</>;
 };
 
@@ -118,7 +126,9 @@ const convertToUserData = (data: any) => {
     name: data.name,
     email: data.email,
     created_at: data.created_at,
-    updated_at: data.updated_at
+    updated_at: data.updated_at,
+    // 追加: メール認証状態
+    email_verified: data.email_verified === true
   };
 };
 
@@ -272,6 +282,10 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
+              
+              {/* 追加: メール確認ページ */}
+              <Route path="/verify-email" element={<EmailVerificationPage />} />
+              
               <Route path="/papers/:id" element={
                 <ProtectedRoute>
                   <PaperViewPage />

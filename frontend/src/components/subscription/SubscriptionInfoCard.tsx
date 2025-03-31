@@ -51,6 +51,9 @@ const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData })
   const isPaid = userData?.subscription_status === 'paid';
   const isCanceled = userData?.subscription_cancel_at_period_end === true;
   
+  // ここでユーザーの年間プランかどうかをチェック
+  const isAnnualPlan = userData?.subscription_plan === 'annual';
+  
   const subscriptionEnd = userData?.subscription_end_date 
     ? new Date(userData.subscription_end_date.seconds * 1000) 
     : null;
@@ -165,6 +168,19 @@ const SubscriptionInfoCard: React.FC<SubscriptionInfoCardProps> = ({ userData })
       
       {isPaid && subscriptionEnd && (
         <>          
+          {/* 料金プラン - ここを修正 */}
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+            <CreditCardIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
+            <Box>
+              <Typography variant="caption" color="text.secondary">
+                料金プラン
+              </Typography>
+              <Typography variant="body2">
+                {isAnnualPlan ? '年額 ¥5,000（税込）' : '月額 ¥500（税込）'}
+              </Typography>
+            </Box>
+          </Box>
+          
           {/* 有効期限または次回更新日 */}
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
             <CalendarTodayIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />

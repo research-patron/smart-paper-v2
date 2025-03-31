@@ -9,7 +9,9 @@ import {
   logoutUser,
   registerUser,
   resetPassword,
-  getUserData
+  getUserData,
+  resendVerificationEmail,
+  updateUserEmailVerificationStatus
 } from '../api/auth';
 import { db } from '../api/firebase';
 
@@ -23,6 +25,8 @@ interface UserData {
   email?: string;
   created_at?: Timestamp;
   updated_at?: Timestamp;
+  // 追加: メール認証状態
+  email_verified?: boolean;
   // 翻訳回数の管理用フィールドを追加
   translation_count?: number;
   translation_period_start?: Timestamp | null;
@@ -49,6 +53,10 @@ interface AuthState {
   clearError: () => void;
   updateUserData: (forceRefresh?: boolean) => Promise<void>;
   forceRefreshUserData: () => Promise<void>; // 強制的にデータを更新する新しいメソッド
+  // 追加: メール認証関連
+  sendVerificationEmail: () => Promise<void>;
+  updateEmailVerificationStatus: () => Promise<void>;
+  isEmailVerified: () => boolean;
 }
 
 // DocumentData を UserData に変換する関数
@@ -61,6 +69,7 @@ const convertToUserData = (data: DocumentData | null): UserData | null => {
     subscription_plan: data.subscription_plan,
     subscription_end_date: data.subscription_end_date,
     subscription_cancel_at_period_end: data.subscription_cancel_at_period_end,
+    email_verified: data.email_verified, // 追加: メール認証状態
     translation_count: data.translation_count, // 追加: 翻訳回数
     translation_period_start: data.translation_period_start, // 追加: 翻訳期間開始日
     translation_period_end: data.translation_period_end // 追加: 翻訳期間終了日
@@ -78,6 +87,8 @@ const convertToUserData = (data: DocumentData | null): UserData | null => {
     email: data.email,
     created_at: data.created_at,
     updated_at: data.updated_at,
+    // 追加: メール認証状態（デフォルトはfalse）
+    email_verified: data.email_verified === true,
     // 翻訳回数関連フィールドを追加
     translation_count: data.translation_count || 0,
     translation_period_start: data.translation_period_start || null,
@@ -293,6 +304,69 @@ export const useAuthStore = create<AuthState>()(
           const { updateCount } = get();
           console.log(`Force refreshing user data (request #${updateCount})...`);
           return await get().updateUserData(true);
+        },
+        
+        // 追加: メール認証メールを再送信
+        sendVerificationEmail: async () => {
+          const { user } = get();
+          
+          if (!user) {
+            throw new Error('ユーザーがログインしていません');
+          }
+          
+          try {
+            set({ loading: true, error: null });
+            await resendVerificationEmail(user);
+            set({ loading: false });
+          } catch (error: any) {
+            let errorMessage = 'メール認証の送信に失敗しました。';
+            set({ error: errorMessage, loading: false });
+            throw error;
+          }
+        },
+        
+        // 追加: メール認証状態を更新
+        updateEmailVerificationStatus: async () => {
+          const { user } = get();
+          
+          if (!user) {
+            return;
+          }
+          
+          try {
+            // Firebaseから最新のユーザー情報を取得（認証状態が更新されている可能性があるため）
+            await user.reload();
+            
+            // Firestoreのユーザーデータを更新
+            await updateUserEmailVerificationStatus(user.uid, user.emailVerified);
+            
+            // ユーザーデータを強制的に更新
+            await get().forceRefreshUserData();
+            
+          } catch (error) {
+            console.error('Error updating email verification status:', error);
+          }
+        },
+        
+        // 追加: メール認証されているかを確認
+        isEmailVerified: () => {
+          const { user, userData } = get();
+          
+          // ユーザーがいない場合はfalse
+          if (!user) return false;
+          
+          // Firebase Authのemailverified状態を優先
+          if (user.emailVerified) return true;
+          
+          // Firestoreのデータも確認
+          if (userData?.email_verified) return true;
+          
+          // Google認証の場合は検証済みとみなす
+          const isGoogleProvider = user.providerData.some(
+            provider => provider.providerId === 'google.com'
+          );
+          
+          return isGoogleProvider;
         }
       }),
       {

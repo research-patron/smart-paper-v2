@@ -162,7 +162,7 @@ const HomePage = () => {
         </Box>
 
         {/* PDFアップロードエリアを画面幅いっぱいに拡大 */}
-        <Grid container>
+        <Grid container sx={{ mb: 6 }}> {/* ここに mb: 5 を追加 */}
           <Grid item xs={12}>
             {latestProcessingPaper ? (
               <Box sx={{ mb: 4 }}>

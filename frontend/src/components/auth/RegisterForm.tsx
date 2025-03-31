@@ -53,9 +53,9 @@ const RegisterForm = () => {
       clearError();
       await registerUser(data.email, data.password, data.name);
       setRegistered(true);
-      // 登録成功後、ホームページにリダイレクト
+      // 登録成功後、メール確認ページにリダイレクト
       setTimeout(() => {
-        navigate('/');
+        navigate('/verify-email');
       }, 2000);
     } catch (err) {
       console.error(err);
@@ -131,7 +131,7 @@ const RegisterForm = () => {
       
       {registered && (
         <Alert severity="success" sx={{ mb: 2 }}>
-          登録が完了しました。ホームページにリダイレクトします...
+          登録が完了しました。確認メールを送信しましたので、メール内のリンクをクリックしてアカウントを有効化してください。
         </Alert>
       )}
       
