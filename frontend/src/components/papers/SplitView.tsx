@@ -135,6 +135,109 @@ const SplitView: React.FC<SplitViewProps> = ({
     );
   }
   
+  // 縦分割（左右）の場合
+  if (splitDirection === 'vertical') {
+    return (
+      <Box
+        sx={{
+          height: '100%',
+          width: '100%',
+          display: 'flex',
+          position: 'relative',
+          flex: 1,
+          gap: '4px' // 分割線の幅
+        }}
+      >
+        {/* コントロールバー */}
+        <Paper
+          sx={{
+            position: 'absolute',
+            top: 4,
+            right: 4,
+            zIndex: 100,
+            py: 0.25,
+            px: 0.5,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.5,
+            bgcolor: 'rgba(255, 255, 255, 0.8)',
+            backdropFilter: 'blur(4px)',
+          }}
+        >
+          <Tooltip title="横/縦分割の切り替え">
+            <IconButton size="small" onClick={toggleSplitDirection}>
+              <CompareArrowsIcon 
+                sx={{ 
+                  transform: 'rotate(90deg)',
+                  transition: 'transform 0.2s'
+                }} 
+              />
+            </IconButton>
+          </Tooltip>
+          
+          <Divider orientation="vertical" flexItem />
+          
+          <Tooltip title="左側を広げる">
+            <IconButton size="small" onClick={() => adjustSplitRatio(-5)} disabled={splitRatio <= 20}>
+              <ArrowBackIcon />
+            </IconButton>
+          </Tooltip>
+          
+          <Tooltip title="比率をリセット">
+            <IconButton size="small" onClick={resetSplitRatio}>
+              <DoubleArrowIcon sx={{ transform: 'rotate(90deg)' }} />
+            </IconButton>
+          </Tooltip>
+          
+          <Tooltip title="右側を広げる">
+            <IconButton size="small" onClick={() => adjustSplitRatio(5)} disabled={splitRatio >= 80}>
+              <ArrowForwardIcon />
+            </IconButton>
+          </Tooltip>
+        </Paper>
+        
+        {/* 左側スティッキーパネル (PDF) */}
+        <Box
+          sx={{
+            width: `${splitRatio}%`,
+            height: '100vh', // 画面の高さいっぱいに
+            position: 'sticky',
+            top: 0,
+            left: 0,
+            display: 'flex',
+            overflow: 'auto', // PDFコンテンツのスクロールを可能に
+            boxShadow: '2px 0 5px rgba(0,0,0,0.1)',
+            alignSelf: 'flex-start',
+            backgroundColor: 'background.paper',
+            flexDirection: 'column' // PdfViewerを縦方向いっぱいに表示
+          }}
+        >
+          <PdfViewer url={pdfUrl} height="100%" />
+        </Box>
+        
+        {/* 右側スクロール可能パネル (翻訳) */}
+        <Box
+          sx={{
+            width: `calc(100% - ${splitRatio}% - 4px)`,
+            height: '100%',
+            overflow: 'auto',
+            position: 'relative',
+            display: 'flex',
+            flex: 1
+          }}
+        >
+          <TranslationViewer 
+            translatedText={translatedText} 
+            loading={loading} 
+            error={error}
+            chapter={chapter}
+          />
+        </Box>
+      </Box>
+    );
+  }
+  
+  // 横分割（上下）の場合
   return (
     <Box
       id="split-container"
@@ -142,7 +245,7 @@ const SplitView: React.FC<SplitViewProps> = ({
       sx={{
         height: '100%',
         display: 'flex',
-        flexDirection: splitDirection === 'vertical' ? 'row' : 'column',
+        flexDirection: 'column',
         position: 'relative',
         overflow: 'hidden',
         width: '100%',
@@ -169,7 +272,7 @@ const SplitView: React.FC<SplitViewProps> = ({
           <IconButton size="small" onClick={toggleSplitDirection}>
             <CompareArrowsIcon 
               sx={{ 
-                transform: splitDirection === 'vertical' ? 'rotate(90deg)' : 'rotate(0deg)',
+                transform: 'rotate(0deg)',
                 transition: 'transform 0.2s'
               }} 
             />
@@ -178,7 +281,7 @@ const SplitView: React.FC<SplitViewProps> = ({
         
         <Divider orientation="vertical" flexItem />
         
-        <Tooltip title="左側/上側を広げる">
+        <Tooltip title="上側を広げる">
           <IconButton size="small" onClick={() => adjustSplitRatio(-5)} disabled={splitRatio <= 20}>
             <ArrowBackIcon />
           </IconButton>
@@ -190,23 +293,23 @@ const SplitView: React.FC<SplitViewProps> = ({
           </IconButton>
         </Tooltip>
         
-        <Tooltip title="右側/下側を広げる">
+        <Tooltip title="下側を広げる">
           <IconButton size="small" onClick={() => adjustSplitRatio(5)} disabled={splitRatio >= 80}>
             <ArrowForwardIcon />
           </IconButton>
         </Tooltip>
       </Paper>
       
-      {/* 左側/上側パネル (PDF) - 固定表示 */}
+      {/* 上側パネル (PDF) */}
       <Box
         sx={{
-          width: splitDirection === 'vertical' ? `${splitRatio}%` : '100%',
-          height: splitDirection === 'vertical' ? '100%' : `${splitRatio}%`,
+          width: '100%',
+          height: `${splitRatio}%`,
           flexShrink: 0,
           position: 'relative',
           display: 'flex',
           overflow: 'hidden',
-          flex: splitDirection === 'vertical' ? `0 0 ${splitRatio}%` : '0 0 auto'
+          flex: `0 0 ${splitRatio}%`
         }}
       >
         <PdfViewer url={pdfUrl} />
@@ -216,10 +319,10 @@ const SplitView: React.FC<SplitViewProps> = ({
       <Box
         id="split-divider"
         sx={{
-          width: splitDirection === 'vertical' ? '4px' : '100%',
-          height: splitDirection === 'vertical' ? '100%' : '4px',
+          width: '100%',
+          height: '4px',
           backgroundColor: theme.palette.divider,
-          cursor: splitDirection === 'vertical' ? 'col-resize' : 'row-resize',
+          cursor: 'row-resize',
           userSelect: 'none',
           transition: 'background-color 0.2s',
           flexShrink: 0,
@@ -229,11 +332,11 @@ const SplitView: React.FC<SplitViewProps> = ({
         }}
       />
       
-      {/* 右側/下側パネル (翻訳) - スクロール可能 */}
+      {/* 下側パネル (翻訳) - スクロール可能 */}
       <Box
         sx={{
-          width: splitDirection === 'vertical' ? `calc(100% - ${splitRatio}% - 4px)` : '100%',
-          height: splitDirection === 'vertical' ? '100%' : `calc(100% - ${splitRatio}% - 4px)`,
+          width: '100%',
+          height: `calc(100% - ${splitRatio}% - 4px)`,
           overflow: 'auto',
           flexShrink: 0,
           flexGrow: 1,

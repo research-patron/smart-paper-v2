@@ -90,7 +90,7 @@ const TabPanel: React.FC<TabPanelProps> = ({ children, value, index, ...other })
           p: { xs: 0, sm: '0 0 12px 0' }, 
           height: '100%', 
           width: '100%',
-          overflow: 'hidden',
+          overflow: 'visible',
           display: 'flex',
           flexDirection: 'column',
           flex: 1
@@ -805,7 +805,7 @@ const PaperViewPage: React.FC = () => {
       disableGutters 
       sx={{ 
         px: { xs: 0.5, sm: 1, md: 2 }, 
-        overflow: 'hidden',
+        overflow: 'visible',
         height: '100%',
         display: 'flex',
         flexDirection: 'column'
@@ -817,7 +817,7 @@ const PaperViewPage: React.FC = () => {
         height: '100%', 
         width: '100%',
         flex: 1,
-        overflow: 'hidden',
+        overflow: 'visible',
         pb: 1
       }}>
         <Button 
@@ -1054,7 +1054,7 @@ const PaperViewPage: React.FC = () => {
           flex: 1,
           width: '100%',
           display: 'flex',
-          overflow: 'hidden', 
+          overflow: 'visible', 
           position: 'relative',
           mx: 1
         }}>
@@ -1086,14 +1086,16 @@ const PaperViewPage: React.FC = () => {
                 height: '100%', 
                 width: '100%',
                 display: 'flex', 
-                overflow: 'hidden',
-                flex: 1
+                overflow: 'visible',
+                flex: 1,
+                position: 'relative' 
               }}>
                 <Drawer
                   anchor="left"
                   open={drawerOpen}
                   onClose={toggleDrawer}
                   sx={{ 
+                    zIndex: 1200, // Drawerが必ず最前面に表示されるように
                     '& .MuiDrawer-paper': { 
                       width: '80%', 
                       maxWidth: '300px',
@@ -1114,7 +1116,8 @@ const PaperViewPage: React.FC = () => {
                   flex: 1, 
                   height: '100%', 
                   width: '100%',
-                  overflow: 'hidden'
+                  position: 'static',
+                  overflow: 'visible'
                 }}>
                   {pdfUrl && (
                     <SplitView
