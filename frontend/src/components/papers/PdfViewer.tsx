@@ -191,7 +191,8 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
         bottom: fullscreen ? 0 : 'auto',
         zIndex: fullscreen ? 9999 : 'auto',
         bgcolor: 'background.paper',
-        flex: 1
+        flex: 1,
+        minHeight: 0 // Flexboxでスクロールを正しく動作させるために必要
       }}
     >
       {/* コントロールバー */}
@@ -298,6 +299,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
           alignItems: 'flex-start',
           p: 0.5,
           position: 'relative',
+          minHeight: 0 // スクロールを正しく動作させるために必要
         }}
       >
         {loading && (
