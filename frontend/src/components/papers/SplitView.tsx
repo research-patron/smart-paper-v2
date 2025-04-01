@@ -2,7 +2,6 @@
 import { useState, useRef } from 'react';
 import {
   Box,
-  Paper,
   Tabs,
   Tab,
   IconButton,
@@ -28,6 +27,30 @@ interface SplitViewProps {
     chapter_number: number;
   };
 }
+
+// コントロールバーコンポーネント
+const ToolbarControl = ({ children }: { children: React.ReactNode }) => (
+  <Box
+    sx={{
+      position: 'absolute',
+      top: 4,
+      right: 4,
+      zIndex: 100,
+      padding: '4px 8px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 0.5,
+      // 調整されたスタイル
+      bgcolor: 'rgba(255, 255, 255, 0.95)',
+      border: '1px solid',
+      borderColor: 'divider',
+      borderRadius: '2px',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+    }}
+  >
+    {children}
+  </Box>
+);
 
 const SplitView: React.FC<SplitViewProps> = ({
   pdfUrl,
@@ -80,25 +103,23 @@ const SplitView: React.FC<SplitViewProps> = ({
         flex: 1,
         overflow: 'hidden'
       }}>
-        <Paper sx={{ mb: 1 }}>
-          <Tabs
-            value={tabValue}
-            onChange={handleTabChange}
-            variant="fullWidth"
-            aria-label="原文/翻訳切り替えタブ"
-            sx={{ 
+        <Tabs
+          value={tabValue}
+          onChange={handleTabChange}
+          variant="fullWidth"
+          aria-label="原文/翻訳切り替えタブ"
+          sx={{ 
+            minHeight: '40px',
+            '& .MuiTab-root': { 
               minHeight: '40px',
-              '& .MuiTab-root': { 
-                minHeight: '40px',
-                py: 0.5,
-                fontSize: { xs: '0.8rem', sm: '0.875rem' }
-              }
-            }}
-          >
-            <Tab label="原文" />
-            <Tab label="翻訳" />
-          </Tabs>
-        </Paper>
+              py: 0.5,
+              fontSize: { xs: '0.8rem', sm: '0.875rem' }
+            }
+          }}
+        >
+          <Tab label="原文" />
+          <Tab label="翻訳" />
+        </Tabs>
         
         <Box sx={{ 
           flex: 1, 
@@ -149,21 +170,7 @@ const SplitView: React.FC<SplitViewProps> = ({
         }}
       >
         {/* コントロールバー */}
-        <Paper
-          sx={{
-            position: 'absolute',
-            top: 4,
-            right: 4,
-            zIndex: 100,
-            py: 0.25,
-            px: 0.5,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 0.5,
-            bgcolor: 'rgba(255, 255, 255, 0.8)',
-            backdropFilter: 'blur(4px)',
-          }}
-        >
+        <ToolbarControl>
           <Tooltip title="横/縦分割の切り替え">
             <IconButton size="small" onClick={toggleSplitDirection}>
               <CompareArrowsIcon 
@@ -194,7 +201,7 @@ const SplitView: React.FC<SplitViewProps> = ({
               <ArrowForwardIcon />
             </IconButton>
           </Tooltip>
-        </Paper>
+        </ToolbarControl>
         
         {/* 左側スティッキーパネル (PDF) */}
         <Box
@@ -253,21 +260,7 @@ const SplitView: React.FC<SplitViewProps> = ({
       }}
     >
       {/* コントロールバー */}
-      <Paper
-        sx={{
-          position: 'absolute',
-          top: 4,
-          right: 4,
-          zIndex: 10,
-          py: 0.25,
-          px: 0.5,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 0.5,
-          bgcolor: 'rgba(255, 255, 255, 0.8)',
-          backdropFilter: 'blur(4px)',
-        }}
-      >
+      <ToolbarControl>
         <Tooltip title="横/縦分割の切り替え">
           <IconButton size="small" onClick={toggleSplitDirection}>
             <CompareArrowsIcon 
@@ -298,7 +291,7 @@ const SplitView: React.FC<SplitViewProps> = ({
             <ArrowForwardIcon />
           </IconButton>
         </Tooltip>
-      </Paper>
+      </ToolbarControl>
       
       {/* 上側パネル (PDF) */}
       <Box
