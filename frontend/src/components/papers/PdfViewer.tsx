@@ -7,7 +7,6 @@ import {
   IconButton,
   Slider,
   Tooltip,
-  Paper,
   Alert,
   Button,
   useTheme,
@@ -35,6 +34,28 @@ interface PdfViewerProps {
   height?: number | string;
   onPageChange?: (pageNum: number, totalPages: number) => void;
 }
+
+// コントロールバーコンポーネント
+const ToolbarControl = ({ children }: { children: React.ReactNode }) => (
+  <Box
+    sx={{
+      backgroundColor: 'background.paper',
+      borderBottom: '1px solid',
+      borderColor: 'divider',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '4px 8px',
+      flexWrap: 'wrap',
+      minHeight: '40px',
+      // 角の丸みと影を削除・調整
+      borderRadius: 0,
+      boxShadow: 'none',
+    }}
+  >
+    {children}
+  </Box>
+);
 
 const PdfViewer: React.FC<PdfViewerProps> = ({ 
   url, 
@@ -196,20 +217,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
       }}
     >
       {/* コントロールバー */}
-      <Paper
-        elevation={1}
-        square
-        sx={{
-          p: 0.5,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          borderBottom: 1,
-          borderColor: 'divider',
-          flexWrap: 'wrap',
-          minHeight: '40px',
-        }}
-      >
+      <ToolbarControl>
         <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'nowrap' }}>
           <IconButton onClick={goToPrevPage} disabled={pageNumber <= 1} size={isMobile ? "small" : "medium"} sx={{ p: 0.5 }}>
             <NavigateBeforeIcon />
@@ -285,7 +293,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
             </IconButton>
           </Tooltip>
         </Box>
-      </Paper>
+      </ToolbarControl>
       
       {/* PDFビューア */}
       <Box

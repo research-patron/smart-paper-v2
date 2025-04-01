@@ -2,7 +2,6 @@
 import { useState, useRef, useMemo } from 'react';
 import {
   Box,
-  Paper,
   Typography,
   IconButton,
   Tooltip,
@@ -208,6 +207,28 @@ const extractTranslatedText = (text: string | null, processedContent?: string | 
   }
 };
 
+// コントロールバーコンポーネント
+const ToolbarControl = ({ children }: { children: React.ReactNode }) => (
+  <Box
+    sx={{
+      backgroundColor: 'background.paper',
+      borderBottom: '1px solid',
+      borderColor: 'divider',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '4px 8px',
+      flexWrap: 'wrap',
+      minHeight: '40px',
+      // 角の丸みと影を削除・調整
+      borderRadius: 0,
+      boxShadow: 'none',
+    }}
+  >
+    {children}
+  </Box>
+);
+
 const TranslationViewer: React.FC<TranslationViewerProps> = ({
   translatedText,
   processedContent,
@@ -315,20 +336,7 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
       }}
     >
       {/* コントロールバー */}
-      <Paper
-        elevation={1}
-        square
-        sx={{
-          p: 0.5,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          borderBottom: 1,
-          borderColor: 'divider',
-          minHeight: '40px',
-          flexWrap: 'wrap',
-        }}
-      >
+      <ToolbarControl>
         <Box sx={{ 
           display: 'flex', 
           alignItems: 'center',
@@ -409,7 +417,7 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
             </IconButton>
           </Tooltip>
         </Box>
-      </Paper>
+      </ToolbarControl>
       
       {/* 翻訳テキスト */}
       <Box
