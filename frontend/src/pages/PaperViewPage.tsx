@@ -635,41 +635,50 @@ const PaperViewPage: React.FC = () => {
   };
   
   const TableOfContents = () => (
-    <Paper 
-      sx={{ 
+    <Box
+      sx={{
         width: '100%',
         height: '100%',
-        p: 1, 
         overflow: 'auto',
+        bgcolor: 'transparent'
       }}
-      variant="outlined"
     >
-      <Typography variant="subtitle2" gutterBottom>
-        章の選択
-      </Typography>
-      <List dense disablePadding>
-        <ListItem
-          button
-          selected={selectedChapter === null}
-          onClick={resetChapter}
+      <Box
+        onClick={resetChapter}
+        sx={{
+          px: 1.5,
+          py: 0.75,
+          cursor: 'pointer',
+          bgcolor: 'transparent',
+          '&:hover': {
+            bgcolor: 'rgba(255, 255, 255, 0.15)'
+          }
+        }}
+      >
+        <Typography>全文</Typography>
+      </Box>
+      
+      {currentPaper?.chapters?.map((chapter) => (
+        <Box
+          key={chapter.chapter_number}
+          onClick={() => handleChapterSelect(chapter.chapter_number)}
+          sx={{
+            px: 1.5,
+            py: 0.75,
+            cursor: 'pointer',
+            bgcolor: 'transparent',
+            '&:hover': {
+              bgcolor: 'rgba(255, 255, 255, 0.15)'
+            }
+          }}
         >
-          <ListItemText primary="全文" />
-        </ListItem>
-        {currentPaper?.chapters?.map((chapter) => (
-          <ListItem
-            key={chapter.chapter_number}
-            button
-            selected={selectedChapter === chapter.chapter_number}
-            onClick={() => handleChapterSelect(chapter.chapter_number)}
-          >
-            <ListItemText 
-              primary={`${chapter.chapter_number}. ${chapter.title}`}
-              secondary={`P${chapter.start_page}-${chapter.end_page}`}
-            />
-          </ListItem>
-        ))}
-      </List>
-    </Paper>
+          <Typography>{`${chapter.chapter_number}. ${chapter.title}`}</Typography>
+          <Typography variant="body2" color="text.secondary">
+            {`P${chapter.start_page}-${chapter.end_page}`}
+          </Typography>
+        </Box>
+      ))}
+    </Box>
   );
   
   // Obsidianの連携ステータスを表示するコンポーネント
@@ -829,7 +838,7 @@ const PaperViewPage: React.FC = () => {
         </Button>
         
         {/* 論文情報カードの改善されたデザイン */}
-        <Card sx={{ mb: 2, mx: 1 }}>
+        <Card sx={{ mb: 6, mx: 1 }}>
           <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
             <Grid container spacing={1}>
               <Grid item xs={12}>
@@ -1095,17 +1104,30 @@ const PaperViewPage: React.FC = () => {
                   open={drawerOpen}
                   onClose={toggleDrawer}
                   sx={{ 
-                    zIndex: 1200, // Drawerが必ず最前面に表示されるように
+                    zIndex: 1200,
                     '& .MuiDrawer-paper': { 
                       width: '80%', 
                       maxWidth: '300px',
-                      pt: 2
+                      pt: 2,
+                      bgcolor: 'rgba(255, 255, 255, 0.85)',
+                      boxShadow: 'none',
+                      borderRadius: 0,
+                      margin: 0
                     }
                   }}
                 >
                   <Box sx={{ p: 2 }}>
-                    <Typography variant="h6" gutterBottom>
-                      目次
+                    <Typography 
+                      variant="h5" 
+                      sx={{ 
+                        textAlign: 'center',
+                        fontWeight: 'medium',
+                        borderBottom: '2px solid rgba(137, 135, 135, 0.57)',
+                        pb: 1,
+                        mb: 2
+                      }}
+                    >
+                      - 目次 -
                     </Typography>
                     <Divider sx={{ mb: 2 }} />
                     <TableOfContents />
