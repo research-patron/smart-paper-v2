@@ -27,16 +27,16 @@ except ImportError:
 # Stripeダッシュボードの「製品」タブから作成したプランのIDを確認できます
 SUBSCRIPTION_PLANS = {
     'monthly': {
-        'price_id': 'price_1R4bJwHI4NoEudKd1ZhXt8mX',  # 月額プランのStripe Price ID - 実際のIDに置き換え必須
+        'price_id': 'price_1R3o4LHI4NoEudKd0B9C9U4x',  # 月額プランのStripe Price ID - 実際のIDに置き換え必須
         'name': 'プレミアムプラン(月額)',
-        'amount': 300,  # 月額300円
+        'amount': 500,  # 月額500円
         'interval': 'month',
         'duration_days': 30,
     },
     'annual': {
-        'price_id': 'price_1R4bKrHI4NoEudKdA7ZqlmVm',  # 年額プランのStripe Price ID - 実際のIDに置き換え必須
+        'price_id': 'price_1R4AxkHI4NoEudKdiUc2IhQA',  # 年額プランのStripe Price ID - 実際のIDに置き換え必須
         'name': 'プレミアムプラン(年額)',
-        'amount': 3000,  # 年額3000円
+        'amount': 5000,  # 年額5000円
         'interval': 'year',
         'duration_days': 365,
     }
