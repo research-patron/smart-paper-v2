@@ -193,7 +193,7 @@ gcloud functions deploy process_pdf_background \
   --trigger-http \
   --source=./functions \
   --entry-point=process_pdf_background \
-  --memory=4096MB \
+  --memory=2048MB \
   --timeout=540s \
   --min-instances=1 \
   --max-instances=10 \
