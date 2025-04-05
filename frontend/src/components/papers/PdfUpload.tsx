@@ -69,7 +69,7 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
     }
     
     // バリデーション通過時に10秒カウントダウン開始
-    setReloadCountdown(10);
+    setReloadCountdown(30);
     
     return true;
   };
