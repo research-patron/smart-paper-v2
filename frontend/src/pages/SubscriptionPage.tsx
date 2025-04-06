@@ -35,6 +35,7 @@ import StarIcon from '@mui/icons-material/Star';
 import PeopleIcon from '@mui/icons-material/People';
 import AutorenewIcon from '@mui/icons-material/Autorenew';
 import FreeBreakfastIcon from '@mui/icons-material/FreeBreakfast';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import React from 'react';
 import { useAuthStore } from '../store/authStore';
 import Plans from '../components/subscription/Plans';
@@ -402,7 +403,7 @@ const SubscriptionPage = () => {
       <Box sx={{ my: 4 }}>
         {/* ヘッダータイトル - paymentSuccessが真またはプレミアム会員の場合は表示しない */}
         {!paymentSuccess && !isPaid && (
-          <Typography variant="h4" gutterBottom>
+          <Typography variant="h4" gutterBottom sx={{ mb: 4 }}>
             あなたにぴったりのプランをお選びください
           </Typography>
         )}
@@ -646,12 +647,16 @@ const SubscriptionPage = () => {
             
             <Plans showComparisonOnly />
             
-            <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4, mb: 6 }}>
               <Button
-                startIcon={<PeopleIcon />}
                 variant="outlined"
-                href="https://github.com/your-repository/issues/new"
-                target="_blank"
+                startIcon={<HelpOutlineIcon />}
+                onClick={() => navigate('/contact')}
+                size="large"
+                sx={{ 
+                  borderRadius: 50,
+                  px: 4
+                }}
               >
                 質問・問い合わせ
               </Button>

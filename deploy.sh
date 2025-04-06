@@ -139,6 +139,7 @@ if [ -z "$WEBHOOK_SECRET" ]; then
   fi
 else
   echo -e "${GREEN}Webhook Secret Key を Secret Manager から取得しました (${#WEBHOOK_SECRET} 文字)${NC}"
+  echo -e "${YELLOW}Webhook Secret Key の値: ${WEBHOOK_SECRET}${NC}"
 fi
 
 # Stripeの秘密鍵を取得
@@ -164,6 +165,7 @@ if [ -z "$STRIPE_SECRET_KEY" ]; then
   fi
 else
   echo -e "${GREEN}Stripe Secret Key を Secret Manager から取得しました (${#STRIPE_SECRET_KEY} 文字)${NC}"
+  echo -e "${YELLOW}Stripe Secret Key の値: ${STRIPE_SECRET_KEY}${NC}"
 fi
 
 # ==========================================

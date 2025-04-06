@@ -109,8 +109,12 @@ const Plans: React.FC<PlansProps> = ({
   if (showComparisonOnly) {
     return (
       <Box sx={{ mb: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6">プラン比較</Typography>
+        {/* 修正部分: プラン比較の文字を削除し、スイッチを中央に配置 */}
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          mb: 3 
+        }}>
           <FormControlLabel
             control={
               <Switch
@@ -119,7 +123,41 @@ const Plans: React.FC<PlansProps> = ({
                 color="primary"
               />
             }
-            label={annually ? "年払い" : "月払い"}
+            label={
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Typography
+                  component="span"
+                  variant="body2"
+                  sx={{
+                    fontWeight: !annually ? 'bold' : 'normal',
+                    color: !annually ? 'primary.main' : 'text.secondary'
+                  }}
+                >
+                  月払い
+                </Typography>
+                <Typography component="span" variant="body2" sx={{ mx: 1 }}>|</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Typography
+                    component="span"
+                    variant="body2"
+                    sx={{
+                      fontWeight: annually ? 'bold' : 'normal',
+                      color: annually ? 'primary.main' : 'text.secondary'
+                    }}
+                  >
+                    年払い
+                  </Typography>
+                  {annually && (
+                    <Chip
+                      label={`${savingsPercentage}%お得`}
+                      size="small"
+                      color="secondary"
+                      sx={{ ml: 1, height: 20, fontSize: '0.7rem' }}
+                    />
+                  )}
+                </Box>
+              </Box>
+            }
           />
         </Box>
         
