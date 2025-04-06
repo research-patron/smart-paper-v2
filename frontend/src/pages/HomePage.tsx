@@ -155,11 +155,14 @@ const HomePage = () => {
   return (
     <Container maxWidth="lg">
       <Box sx={{ my: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'left', alignItems: 'left', mb: 3 }}>
-          <Typography variant="h4" component="h1" gutterBottom>
-            論文を翻訳する
-          </Typography>
-        </Box>
+        {/* 処理中の論文がない場合のみ「論文を翻訳する」見出しを表示 */}
+        {!latestProcessingPaper && (
+          <Box sx={{ display: 'flex', justifyContent: 'left', alignItems: 'left', mb: 3 }}>
+            <Typography variant="h4" component="h1" gutterBottom>
+              論文を翻訳する
+            </Typography>
+          </Box>
+        )}
 
         {/* PDFアップロードエリアを画面幅いっぱいに拡大 */}
         <Grid container sx={{ mb: 6 }}> {/* ここに mb: 5 を追加 */}
@@ -178,11 +181,7 @@ const HomePage = () => {
                         color="primary"
                         variant="outlined"
                       />
-                      {latestProcessingPaper.status === 'processing' && latestProcessingPaper.progress && (
-                        <Typography variant="caption" color="text.secondary">
-                          {latestProcessingPaper.progress}%
-                        </Typography>
-                      )}
+                      {/* パーセンテージ表示を削除 */}
                     </Box>
                     
                     <Typography variant="h5" gutterBottom>
@@ -303,11 +302,7 @@ const HomePage = () => {
                                 }
                                 variant={paper.status === 'completed' ? 'filled' : 'outlined'}
                               />
-                              {paper.status === 'processing' && paper.progress && (
-                                <Typography variant="caption" color="text.secondary">
-                                  {paper.progress}%
-                                </Typography>
-                              )}
+                              {/* パーセンテージ表示を削除 */}
                             </Box>
                             
                             <Typography variant="h6" noWrap title={paper.metadata?.title}>
