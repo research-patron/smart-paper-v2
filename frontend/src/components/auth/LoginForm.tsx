@@ -6,12 +6,13 @@ import {
   Button, 
   TextField, 
   Typography, 
-  Link, 
   Divider, 
   CircularProgress,
   Alert,
   Paper,
-  Snackbar
+  Link,
+  Checkbox,
+  FormControlLabel
 } from '@mui/material';
 import GoogleIcon from '@mui/icons-material/Google';
 import { useAuthStore } from '../../store/authStore';
@@ -20,79 +21,83 @@ import { useNavigate } from 'react-router-dom';
 type LoginFormInputs = {
   email: string;
   password: string;
+  rememberMe: boolean;
 };
 
-const LoginForm = () => {
+interface LoginFormProps {
+  enlargedSize?: boolean;
+}
+
+const LoginForm = ({ enlargedSize = false }: LoginFormProps) => {
   const { login, loginWithGoogle, error, loading, clearError } = useAuthStore();
-  const [forgotPassword, setForgotPassword] = useState(false);
-  const [resetEmailSent, setResetEmailSent] = useState(false);
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
   const navigate = useNavigate();
+  const [loginFailed, setLoginFailed] = useState(false);
   
   const { 
     register, 
     handleSubmit, 
-    formState: { errors },
-    watch
+    formState: { errors }
   } = useForm<LoginFormInputs>({
     defaultValues: {
       email: '',
-      password: ''
+      password: '',
+      rememberMe: false
     }
   });
   
   const onSubmit: SubmitHandler<LoginFormInputs> = async (data) => {
     try {
       clearError();
-      if (forgotPassword) {
-        await useAuthStore.getState().resetPassword(data.email);
-        setResetEmailSent(true);
-        setSnackbarOpen(true);
-      } else {
-        await login(data.email, data.password);
-        navigate('/');
-      }
+      setLoginFailed(false);
+      await login(data.email, data.password);
+      navigate('/');
     } catch (err) {
       console.error(err);
-      // エラーはすでにstore内で設定されるのでここでは何もしない
+      setLoginFailed(true);
     }
   };
   
   const handleGoogleLogin = async () => {
     try {
       clearError();
+      setLoginFailed(false);
       await loginWithGoogle();
       navigate('/');
     } catch (err) {
       console.error(err);
+      setLoginFailed(true);
     }
   };
   
-  const toggleForgotPassword = () => {
-    clearError();
-    setForgotPassword(!forgotPassword);
-    setResetEmailSent(false);
-  };
-  
-  const handleSnackbarClose = () => {
-    setSnackbarOpen(false);
-  };
-  
   return (
-    <Paper elevation={3} sx={{ p: 4, maxWidth: 400, mx: 'auto', mt: 4 }}>
-      <Typography variant="h5" align="center" gutterBottom>
-        {forgotPassword ? 'パスワードをリセット' : 'ログイン'}
+    <Paper 
+      elevation={3} 
+      sx={{ 
+        p: enlargedSize ? 5 : 4, // パディングを拡大
+        maxWidth: enlargedSize ? 500 : 400, // 幅を拡大
+        mx: 'auto',
+        borderRadius: enlargedSize ? 3 : 2, // 角丸を調整
+        boxShadow: enlargedSize ? 5 : 3 // 影を強調
+      }}
+    >
+      <Typography 
+        variant={enlargedSize ? "h4" : "h5"} 
+        align="center" 
+        gutterBottom
+        sx={{ mb: enlargedSize ? 3 : 2 }} // 下余白を調整
+      >
+        ログイン
       </Typography>
       
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert severity="error" sx={{ mb: 3 }}>
           {error}
         </Alert>
       )}
       
-      {resetEmailSent && (
-        <Alert severity="success" sx={{ mb: 2 }}>
-          パスワードリセットメールを送信しました。メールをご確認ください。
+      {loginFailed && !error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          ログインに失敗しました。メールアドレスまたはパスワードを確認してください。
         </Alert>
       )}
       
@@ -102,6 +107,7 @@ const LoginForm = () => {
           variant="outlined"
           fullWidth
           margin="normal"
+          size={enlargedSize ? "medium" : "small"} // フィールドサイズ調整
           autoComplete="email"
           {...register('email', { 
             required: 'メールアドレスを入力してください', 
@@ -112,85 +118,97 @@ const LoginForm = () => {
           })}
           error={!!errors.email}
           helperText={errors.email?.message}
+          sx={{ 
+            mb: enlargedSize ? 2 : 1,
+            '& .MuiInputBase-input': {
+              fontSize: enlargedSize ? '1.1rem' : '1rem', // 入力フォントサイズを大きく
+              padding: enlargedSize ? '14px 16px' : undefined // 入力エリアのパディングを大きく
+            }
+          }}
         />
         
-        {!forgotPassword && (
-          <TextField
-            label="パスワード"
-            type="password"
-            variant="outlined"
-            fullWidth
-            margin="normal"
-            autoComplete="current-password"
-            {...register('password', { 
-              required: 'パスワードを入力してください',
-              minLength: {
-                value: 6,
-                message: 'パスワードは6文字以上で入力してください'
-              }
-            })}
-            error={!!errors.password}
-            helperText={errors.password?.message}
-          />
-        )}
+        <TextField
+          label="パスワード"
+          type="password"
+          variant="outlined"
+          fullWidth
+          margin="normal"
+          size={enlargedSize ? "medium" : "small"} // フィールドサイズ調整
+          autoComplete="current-password"
+          {...register('password', { 
+            required: 'パスワードを入力してください'
+          })}
+          error={!!errors.password}
+          helperText={errors.password?.message}
+          sx={{ 
+            mb: enlargedSize ? 2 : 1,
+            '& .MuiInputBase-input': {
+              fontSize: enlargedSize ? '1.1rem' : '1rem', // 入力フォントサイズを大きく
+              padding: enlargedSize ? '14px 16px' : undefined // 入力エリアのパディングを大きく
+            }
+          }}
+        />
+        
+        <FormControlLabel
+          control={
+            <Checkbox
+              {...register('rememberMe')}
+              color="primary"
+              size={enlargedSize ? "medium" : "small"} // チェックボックスサイズ調整
+            />
+          }
+          label={
+            <Typography variant={enlargedSize ? "body1" : "body2"}>
+              ログイン状態を保存する
+            </Typography>
+          }
+          sx={{ mb: 1 }}
+        />
         
         <Button 
           type="submit" 
           variant="contained" 
           color="primary" 
           fullWidth 
-          sx={{ mt: 2 }}
+          size={enlargedSize ? "large" : "medium"} // ボタンサイズ調整
+          sx={{ 
+            mt: 2,
+            mb: 1,
+            py: enlargedSize ? 1.5 : 1, // ボタンの高さ調整
+            fontSize: enlargedSize ? '1.1rem' : '1rem' // フォントサイズ調整
+          }}
           disabled={loading}
         >
-          {loading ? (
-            <CircularProgress size={24} />
-          ) : forgotPassword ? (
-            'リセットメールを送信'
-          ) : (
-            'ログイン'
-          )}
+          {loading ? <CircularProgress size={enlargedSize ? 28 : 24} /> : 'ログイン'}
         </Button>
       </form>
       
-      <Box textAlign="center" mt={2}>
-        <Link
-          component="button"
-          variant="body2"
-          onClick={toggleForgotPassword}
-        >
-          {forgotPassword ? 'ログインに戻る' : 'パスワードをお忘れですか？'}
-        </Link>
+      <Divider sx={{ my: 3 }}>または</Divider>
+      
+      <Button
+        variant="outlined"
+        fullWidth
+        size={enlargedSize ? "large" : "medium"} // ボタンサイズ調整
+        startIcon={<GoogleIcon />}
+        onClick={handleGoogleLogin}
+        disabled={loading}
+        sx={{ 
+          py: enlargedSize ? 1.5 : 1, // ボタンの高さ調整
+          fontSize: enlargedSize ? '1.1rem' : '1rem' // フォントサイズ調整
+        }}
+      >
+        Googleでログイン
+      </Button>
+      
+      <Box textAlign="center" mt={3}>
+        <Typography variant={enlargedSize ? "body1" : "body2"} gutterBottom>
+          アカウントをお持ちでない方は{' '}
+          <Link href="/register">会員登録</Link>
+        </Typography>
+        <Typography variant={enlargedSize ? "body1" : "body2"}>
+          <Link href="/reset-password">パスワードをお忘れですか？</Link>
+        </Typography>
       </Box>
-      
-      {!forgotPassword && (
-        <>
-          <Divider sx={{ my: 3 }}>または</Divider>
-          
-          <Button
-            variant="outlined"
-            fullWidth
-            startIcon={<GoogleIcon />}
-            onClick={handleGoogleLogin}
-            disabled={loading}
-          >
-            Googleでログイン
-          </Button>
-          
-          <Box textAlign="center" mt={2}>
-            <Typography variant="body2">
-              アカウントをお持ちでない方は{' '}
-              <Link href="/register">新規登録</Link>
-            </Typography>
-          </Box>
-        </>
-      )}
-      
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={6000}
-        onClose={handleSnackbarClose}
-        message="パスワードリセットメールを送信しました"
-      />
     </Paper>
   );
 };

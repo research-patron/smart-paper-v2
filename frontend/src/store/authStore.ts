@@ -63,17 +63,7 @@ interface AuthState {
 const convertToUserData = (data: DocumentData | null): UserData | null => {
   if (!data) return null;
   
-  // Raw userData をログに出力（デバッグ用）
-  console.log("Raw user data from Firestore:", {
-    subscription_status: data.subscription_status,
-    subscription_plan: data.subscription_plan,
-    subscription_end_date: data.subscription_end_date,
-    subscription_cancel_at_period_end: data.subscription_cancel_at_period_end,
-    email_verified: data.email_verified, // 追加: メール認証状態
-    translation_count: data.translation_count, // 追加: 翻訳回数
-    translation_period_start: data.translation_period_start, // 追加: 翻訳期間開始日
-    translation_period_end: data.translation_period_end // 追加: 翻訳期間終了日
-  });
+  // デバッグログを削除
   
   // noneステータスの場合はfreeに変換
   const status = data.subscription_status === 'none' ? 'free' : data.subscription_status;
@@ -236,17 +226,14 @@ export const useAuthStore = create<AuthState>()(
         updateUserData: async (forceRefresh = false) => {
           const { user, lastUserDataUpdate, isUpdatingUserData, updateCount } = get();
           
-          // デバッグ用カウンターをインクリメント
           set({ updateCount: updateCount + 1 });
           
           if (!user) {
-            console.log('No user, skipping update');
             return;
           }
           
           // 既に更新中なら新しい更新をスキップ
           if (isUpdatingUserData) {
-            console.log(`User data update already in progress (request #${updateCount}), skipping`);
             return;
           }
           
@@ -254,7 +241,6 @@ export const useAuthStore = create<AuthState>()(
           
           // 最後の更新からTHROTTLE_TIME_MS以内かつforceRefreshがfalseならスキップ
           if (!forceRefresh && (now - lastUserDataUpdate) < THROTTLE_TIME_MS) {
-            console.log(`Skipping user data update - recent update detected (${Math.round((now - lastUserDataUpdate) / 1000)}s ago)`);
             return;
           }
           
@@ -272,8 +258,6 @@ export const useAuthStore = create<AuthState>()(
               const rawUserData = userSnap.data();
               const userData = convertToUserData(rawUserData);
               
-              console.log(`Successfully updated user data (request #${updateCount}):`, 
-                userData?.subscription_status);
               
               // ステートを一度に更新
               set({ 
@@ -282,7 +266,6 @@ export const useAuthStore = create<AuthState>()(
                 isUpdatingUserData: false
               });
             } else {
-              console.warn(`No user data found for: ${user.uid} (request #${updateCount})`);
               
               // ステートを一度に更新
               set({ 
@@ -301,8 +284,6 @@ export const useAuthStore = create<AuthState>()(
         
         // 強制的にユーザーデータを更新するメソッド
         forceRefreshUserData: async () => {
-          const { updateCount } = get();
-          console.log(`Force refreshing user data (request #${updateCount})...`);
           return await get().updateUserData(true);
         },
         
@@ -344,7 +325,6 @@ export const useAuthStore = create<AuthState>()(
             await get().forceRefreshUserData();
             
           } catch (error) {
-            console.error('Error updating email verification status:', error);
           }
         },
         

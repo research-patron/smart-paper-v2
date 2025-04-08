@@ -40,7 +40,6 @@ const extractJsonContent = (text: string): { summary: string, requiredKnowledge?
       }
     } catch (e) {
       // JSONとして解析できない場合は以降の方法を試す
-      console.log("Not a complete JSON object, trying other methods");
     }
 
     // 2. JSON形式のコードブロックを探す
@@ -54,7 +53,7 @@ const extractJsonContent = (text: string): { summary: string, requiredKnowledge?
           requiredKnowledge: jsonObj.required_knowledge || jsonObj.requiredKnowledge || ''
         };
       } catch (e) {
-        console.log("Code block is not valid JSON, trying other methods");
+        // Code block is not valid JSON, trying other methods
       }
     }
 
@@ -112,7 +111,7 @@ const extractJsonContent = (text: string): { summary: string, requiredKnowledge?
     // どの方法でも抽出できない場合は元のテキストをsummaryとして返す
     return { summary: text };
   } catch (e) {
-    console.error('Error extracting summary content:', e instanceof Error ? e.message : 'Unknown error');
+    // Error extracting summary content
     return {
       summary: text,
       requiredKnowledge: ''

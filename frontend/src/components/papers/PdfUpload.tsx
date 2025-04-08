@@ -55,8 +55,8 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
   const validateFile = (file: File): boolean => {
     // PDFファイルであるかチェック
     const isPdf = file.name.toLowerCase().endsWith('.pdf');
-    // ファイルサイズが20MB以下であるかチェック
-    const isValidSize = file.size <= 20 * 1024 * 1024; // 20MB
+    // ファイルサイズが10MB以下であるかチェック
+    const isValidSize = file.size <= 10 * 1024 * 1024; // 10MB
     
     if (!isPdf) {
       setError('PDFファイルのみアップロード可能です');
@@ -64,7 +64,7 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
     }
     
     if (!isValidSize) {
-      setError('ファイルサイズは20MB以下にしてください');
+      setError('ファイルサイズは10MB以下にしてください');
       return false;
     }
     

@@ -139,7 +139,6 @@ const HomePage = () => {
   // 処理中の論文を監視
   useEffect(() => {
     if (latestProcessingPaper) {
-      console.log(`Setting up global status watch for paper: ${latestProcessingPaper.id}`);
       // グローバルなStore内の監視機能を使用
       watchPaperProgress(latestProcessingPaper.id);
     }

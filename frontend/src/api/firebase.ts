@@ -17,13 +17,11 @@ const firebaseConfig = {
 
 // Check if Firebase config is properly loaded from environment variables
 if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-  console.error('Firebase configuration is missing. Please check your .env file.');
-  console.log('Available environment variables:', 
-    Object.keys(process.env).filter(key => key.startsWith('REACT_APP_FIREBASE_')));
+  // Firebase configuration is missing
 }
 
-// Log the storage bucket being used
-console.log('Using Firebase Storage bucket:', firebaseConfig.storageBucket);
+// Storage bucket configuration
+// Firebase Storage bucket: firebaseConfig.storageBucket
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);

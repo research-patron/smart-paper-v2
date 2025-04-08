@@ -96,7 +96,6 @@ const RouteObserver: React.FC = () => {
     if (location.pathname === '/subscription') {
       const searchParams = new URLSearchParams(location.search);
       if (searchParams.get('success') === 'true' && !refreshTriggeredRef.current) {
-        console.log('Detected successful subscription payment, refreshing user data...');
         // ユーザーデータを強制更新（1回のみ）
         refreshTriggeredRef.current = true;
         forceRefreshUserData().finally(() => {
@@ -154,33 +153,25 @@ function App() {
         // 取得したデータを変換してからstoreにセット
         const userData = convertToUserData(docSnap.data());
         setUserData(userData);
-        console.log("User data loaded:", userData?.subscription_status);
       } else {
-        console.log("No user data found in Firestore");
         setUserData(null);
       }
     } catch (error) {
-      console.error('Error fetching user data:', error);
     }
   }, [setUserData]);
   
   // 論文データの取得（メモ化）
   const fetchPapers = useCallback(async (uid: string) => {
     try {
-      console.log("Fetching user papers...");
       await fetchUserPapers(uid);
-      console.log("User papers loaded successfully");
     } catch (error) {
-      console.error("Failed to load user papers:", error);
     }
   }, [fetchUserPapers]);
   
   useEffect(() => {
-    console.log("App initializing...");
     
     // Firebase Authの状態監視
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      console.log("Auth state changed:", user ? `User: ${user.uid}` : "No user");
       setUser(user);
       
       if (user) {
@@ -228,10 +219,8 @@ function App() {
     updateIntervalRef.current = setInterval(() => {
       const user = auth.currentUser;
       if (user) {
-        console.log("Running scheduled user data refresh");
         // 直接refreshUserDataを呼び出して状態更新を最小限に
         refreshUserData(user.uid).catch(err => {
-          console.error("Scheduled refresh failed:", err);
         });
       }
     }, 60000);

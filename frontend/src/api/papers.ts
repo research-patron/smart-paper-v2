@@ -121,14 +121,12 @@ export const getCurrentUserToken = async (): Promise<string | null> => {
   try {
     const currentUser = auth.currentUser;
     if (!currentUser) {
-      console.warn('No authenticated user found');
       return null;
     }
     
     const token = await getIdToken(currentUser, true);
     return token;
   } catch (error) {
-    console.error('Error getting auth token:', error);
     return null;
   }
 };
@@ -160,7 +158,6 @@ export const formatDate = (timestamp: any): string => {
       minute: '2-digit'
     });
   } catch (error) {
-    console.error('Date format error:', error);
     return '日付エラー';
   }
 };
@@ -191,7 +188,6 @@ export const requestTranslation = async (request: TranslationRequest): Promise<v
       throw new Error(errorData.error || '翻訳リクエストに失敗しました');
     }
   } catch (error) {
-    console.error('Translation request error:', error);
     throw error;
   }
 };
@@ -254,9 +250,6 @@ export const uploadPDF = async (file: File, userId: string): Promise<string> => 
     // トークンがあれば追加
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
-      console.log('Adding authorization token to request');
-    } else {
-      console.warn('No authorization token available, proceeding without authentication');
     }
     
     // Firebase Cloud Functionsのエンドポイント
@@ -307,11 +300,9 @@ export const startPaperProcessing = async (paperId: string): Promise<void> => {
     
     if (!response.ok) {
       const errorData = await response.json();
-      console.error('Background processing failed:', errorData);
       // エラーをスローせず、処理を続行（Firestoreで状態を監視するため）
     }
   } catch (error) {
-    console.error('Error starting background processing:', error);
     // エラーをスローせず、処理を続行（Firestoreで状態を監視するため）
   }
 };
@@ -320,7 +311,6 @@ export const startPaperProcessing = async (paperId: string): Promise<void> => {
 export const getUserPapers = async (userId: string): Promise<Paper[]> => {
   try {
     // リクエストのデバッグログを追加
-    console.log(`Fetching papers for user: ${userId}`);
     
     const q = query(
       collection(db, 'papers'),
@@ -331,7 +321,6 @@ export const getUserPapers = async (userId: string): Promise<Paper[]> => {
     const querySnapshot = await getDocs(q);
     const papers: Paper[] = [];
     
-    console.log(`Found ${querySnapshot.size} papers for user ${userId}`);
     
     querySnapshot.forEach((doc) => {
       const data = doc.data();
@@ -357,17 +346,9 @@ export const getUserPapers = async (userId: string): Promise<Paper[]> => {
       });
     });
     
-    // より詳細なデバッグログ
-    console.log(`Processed ${papers.length} papers:`, papers.map(p => ({
-      id: p.id, 
-      user_id: p.user_id,
-      status: p.status,
-      title: p.metadata?.title || 'No title'
-    })));
     
     return papers;
   } catch (error) {
-    console.error('Get user papers error:', error);
     throw error;
   }
 };
@@ -404,7 +385,6 @@ export const getPaper = async (paperId: string): Promise<Paper> => {
       throw new Error('論文が見つかりません');
     }
   } catch (error) {
-    console.error('Get paper error:', error);
     throw error;
   }
 };
@@ -457,7 +437,6 @@ export const getPaperTranslatedText = async (paper: Paper): Promise<string> => {
 
     throw new Error('翻訳テキストがありません');
   } catch (error) {
-    console.error('Get translated text error:', error);
     throw error;
   }
 };
@@ -496,7 +475,6 @@ export const getPaperPdfUrl = async (paper: Paper): Promise<string> => {
     const data = await response.json();
     return data.url;
   } catch (error) {
-    console.error('Get PDF URL error:', error);
     throw error;
   }
 };
@@ -527,7 +505,6 @@ export const getTranslatedChapters = async (paperId: string): Promise<Translated
     
     return chapters;
   } catch (error) {
-    console.error('Get translated chapters error:', error);
     throw error;
   }
 };
@@ -562,7 +539,6 @@ export const watchPaperStatus = (
       });
     }
   }, (error) => {
-    console.error('Watch paper status error:', error);
   });
   
   return unsubscribe;
@@ -580,7 +556,6 @@ export const updatePaperObsidianState = async (paperId: string, obsidianState: P
       }
     });
   } catch (error) {
-    console.error('Update Obsidian state error:', error);
     throw error;
   }
 };
@@ -629,7 +604,6 @@ export const deletePaper = async (paperId: string): Promise<void> => {
     // 4. 論文ドキュメントを削除
     await deleteDoc(paperRef);
   } catch (error) {
-    console.error('Delete paper error:', error);
     throw error;
   }
 };

@@ -70,7 +70,7 @@ const extractTranslatedText = (text: string | null, processedContent?: string | 
       }
     } catch (e) {
       // JSONとして解析できない場合は次の方法を試す
-      console.log('Failed to parse as JSON object:', e);
+      // Failed to parse as JSON object
     }
 
     // JSON形式かチェック - 完全なJSON文字列の場合
@@ -202,7 +202,7 @@ const extractTranslatedText = (text: string | null, processedContent?: string | 
 
     return processedText;
   } catch (e) {
-    console.error('Error extracting translated text:', e instanceof Error ? e.message : 'Unknown error');
+    // Error extracting translated text
     return text; // エラーの場合は元のテキストを返す
   }
 };
@@ -269,7 +269,7 @@ const TranslationViewer: React.FC<TranslationViewerProps> = ({
         setTimeout(() => setCopied(false), 2000);
       })
       .catch(err => {
-        console.error('Failed to copy text:', err);
+        // Failed to copy text
       });
   };
   

@@ -286,8 +286,8 @@ def process_pdf(request: Request):
             raise ValidationError("Invalid file type. Only PDF files are allowed.")
 
         content_length = request.content_length or 0
-        if content_length > 20 * 1024 * 1024:  # 20MB limit
-            raise ValidationError("File too large. Maximum size is 20MB.")
+        if content_length > 10 * 1024 * 1024:  # 10MB limit
+            raise ValidationError("File too large. Maximum size is 10MB.")
             
         add_step(session_id, temp_paper_id, "file_validation_complete", {"file_size": content_length, "filename": pdf_file.filename})
 

@@ -142,9 +142,7 @@ const PaperViewPage: React.FC = () => {
     
     try {
       setError(null); // エラーをクリア
-      console.log("Refreshing paper data...");
       await fetchPaper(id);
-      console.log("Paper data refreshed successfully");
       
       // ローカルの翻訳テキストをクリア（再取得するため）
       setLocalTranslatedText(null);
@@ -214,8 +212,6 @@ const PaperViewPage: React.FC = () => {
           };
           
           setObsidianSettings(settings);
-          console.log('Firestoreから設定を読み込みました:', settings);
-          
           // 既存の動作との互換性のためにローカルストレージにも保存
           const localStorageSettings = {
             ...settings,
@@ -238,11 +234,9 @@ const PaperViewPage: React.FC = () => {
             }
             
             setObsidianSettings(parsedSettings);
-            console.log('ローカルストレージから設定を読み込みました:', parsedSettings);
           } else {
             // デフォルト設定を使用
             setObsidianSettings(DEFAULT_OBSIDIAN_SETTINGS);
-            console.log('デフォルト設定を使用します');
           }
         }
       } catch (error) {
@@ -277,18 +271,15 @@ const PaperViewPage: React.FC = () => {
       
       // 自動保存が有効になっているかチェック
       if (!obsidianSettings.auto_export) {
-        console.log('自動保存が無効化されているため、自動エクスポートをスキップします。');
         return;
       }
       
       // Vault設定が保存されているかチェック
       if (!obsidianSettings.vault_name || !obsidianSettings.vault_dir) {
-        console.log('Obsidian Vaultが設定されていないため、自動エクスポートをスキップします。手動で「Obsidianに保存」ボタンをクリックしてください。');
         return;
       }
       
       try {
-        console.log('自動エクスポートを開始します...');
         setExportAttempted(true);
         setObsidianExportStatus('pending');
         
@@ -299,7 +290,6 @@ const PaperViewPage: React.FC = () => {
         const vaultHandle = await getVault(true);
         
         if (!vaultHandle) {
-          console.log('Obsidian Vaultが取得できないため、自動エクスポートをスキップします。');
           // 権限がない場合はユーザーに通知
           setSnackbarMessage('Obsidian Vaultへのアクセス権限がありません。「Obsidianに保存」ボタンをクリックして権限を付与してください。');
           setSnackbarOpen(true);
@@ -322,7 +312,6 @@ const PaperViewPage: React.FC = () => {
           setSnackbarOpen(true);
         } else {
           if (result.error) {
-            console.log('自動エクスポートに失敗しました:', result.error);
             // エラーメッセージを表示しない（ユーザーに通知せず、手動エクスポートを促す）
           }
         }
@@ -391,48 +380,28 @@ const PaperViewPage: React.FC = () => {
       
       try {
         setIsLoadingText(true);
-        console.log("Attempting to fetch translated text...");
-        console.log("Current paper state:", {
-          id: currentPaper.id,
-          hasTranslatedText: !!currentPaper.translated_text,
-          hasTranslatedTextPath: !!currentPaper.translated_text_path,
-          status: currentPaper.status
-        });
         
         let text = null;
         
         // Case 1: 論文に翻訳テキストが直接含まれている場合
         if (currentPaper.translated_text) {
-          console.log("Using translated_text directly from paper object");
           text = currentPaper.translated_text;
         }
         // Case 2: 翻訳テキストへのパスがある場合
         else if (currentPaper.translated_text_path) {
-          console.log("Fetching translated text from path:", currentPaper.translated_text_path);
           text = await getPaperTranslatedText(currentPaper);
-          console.log("Fetched translated text successfully, length:", text?.length || 0);
         }
         // Case 3: どちらもない場合、論文データを再取得して確認
         else {
-          console.log("No translation content available, retrying with fresh data...");
-          
           if (currentPaper.id) {
             try {
               // 論文データを再取得
               const refreshedPaper = await getPaperOriginal(currentPaper.id);
-              console.log("Refreshed paper data:", {
-                hasTranslatedText: !!refreshedPaper.translated_text,
-                hasTranslatedTextPath: !!refreshedPaper.translated_text_path
-              });
               
               if (refreshedPaper.translated_text) {
                 text = refreshedPaper.translated_text;
-                console.log("Got translated_text from refreshed paper");
               } else if (refreshedPaper.translated_text_path) {
                 text = await getPaperTranslatedText(refreshedPaper);
-                console.log("Got translated_text from refreshed paper path");
-              } else {
-                console.warn("Refreshed paper still has no translation content");
               }
             } catch (refreshError) {
               console.error("Error refreshing paper:", refreshError);
@@ -581,14 +550,6 @@ const PaperViewPage: React.FC = () => {
   const getSelectedChapterText = () => {
     if (!currentPaper) return null;
 
-    // デバッグ情報
-    console.log("Getting chapter text, state:", {
-      hasLocalText: !!localTranslatedText, 
-      localTextLength: localTranslatedText?.length,
-      hasPaperText: !!currentPaper.translated_text,
-      paperTextLength: currentPaper.translated_text?.length,
-      selectedChapter: selectedChapter
-    });
     
     // 選択された章がない場合は全文を返す
     if (!selectedChapter) {

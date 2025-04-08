@@ -84,7 +84,6 @@ export const usePaperStore = create<PaperState>()(
           });
         } catch (error: any) {
           set({ error: error.message, loading: false });
-          console.error('Error fetching papers:', error);
         }
       },
       
@@ -109,13 +108,11 @@ export const usePaperStore = create<PaperState>()(
               // 念のためバックグラウンド処理を開始/再開する
               await startPaperProcessing(paperId);
             } catch (err) {
-              console.error('Error starting background processing:', err);
               // エラーは無視して続行
             }
           }
         } catch (error: any) {
           set({ currentPaperError: error.message, currentPaperLoading: false });
-          console.error('Error fetching paper:', error);
         }
       },
       
@@ -125,7 +122,6 @@ export const usePaperStore = create<PaperState>()(
           const chapters = await getTranslatedChapters(paperId);
           set({ currentPaperChapters: chapters });
         } catch (error: any) {
-          console.error('Error fetching translated chapters:', error);
           // エラーは表示せず、空の配列を設定
           set({ currentPaperChapters: [] });
         }
@@ -159,7 +155,6 @@ export const usePaperStore = create<PaperState>()(
           
           // ここが新しい部分: 処理完了時の自動リダイレクト
           if (paper.status === 'completed' && get().redirectOnCompletion) {
-            console.log(`Paper ${paperId} processing completed! Redirecting to details page.`);
             
             // リダイレクトを実行
             // ブラウザAPIを使って直接リダイレクト（確実な方法）
@@ -219,7 +214,6 @@ export const usePaperStore = create<PaperState>()(
           }
         } catch (error: any) {
           set({ error: error.message, loading: false });
-          console.error('Error deleting paper:', error);
         }
       },
       

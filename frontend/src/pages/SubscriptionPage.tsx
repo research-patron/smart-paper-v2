@@ -125,7 +125,7 @@ const SubscriptionPage = () => {
     try {
       return new Date(effectiveUserData.subscription_end_date.seconds * 1000);
     } catch (error) {
-      console.error('Error parsing subscription end date:', error);
+      // Error parsing subscription end date
       return null;
     }
   }, [effectiveUserData.subscription_end_date]);
@@ -135,8 +135,7 @@ const SubscriptionPage = () => {
   // effectiveUserDataが変更されたときにデータを確認
   useEffect(() => {
     if (effectiveUserData) {
-      console.log("Current subscription plan:", effectiveUserData.subscription_plan);
-      console.log("Current subscription status:", effectiveUserData.subscription_status);
+      // Check current subscription details
       
       // 支払い成功後かつステータスが更新されている場合、データ確定フラグをセット
       if (paymentSuccess && selectedPlan) {
@@ -152,7 +151,7 @@ const SubscriptionPage = () => {
     // 直前の更新から3秒以内なら何もしない
     const now = Date.now();
     if (now - lastUpdateTimeRef.current < 3000) {
-      console.log('Throttling update request - too recent');
+      // Throttling update request - too recent
       return;
     }
     
@@ -164,11 +163,11 @@ const SubscriptionPage = () => {
     
     setRefreshingUserData(true);
     try {
-      console.log('Refreshing user data...');
+      // Refreshing user data
       await forceRefreshUserData();
-      console.log('User data refreshed successfully.');
+      // User data refreshed successfully
     } catch (err) {
-      console.error('Error refreshing user data:', err);
+      // Error refreshing user data
     } finally {
       setRefreshingUserData(false);
       
@@ -191,23 +190,23 @@ const SubscriptionPage = () => {
     setRetryProgress(true);
     
     try {
-      console.log(`Retry ${currentRetry}/${MAX_RETRIES}: Refreshing user data...`);
+      // Retry refreshing user data
       await forceRefreshUserData();
       
       // 更新後のステータスをチェック
       if (userData?.subscription_status === 'paid') {
-        console.log('Success! Subscription status updated to paid.');
+        // Success! Subscription status updated to paid
         isRetryingRef.current = false;
         setRetryProgress(false);
         setDataConfirmed(true); // データ確定フラグをセット
         return true; // 成功
       }
       
-      console.log(`Retry ${currentRetry}/${MAX_RETRIES}: Status still ${userData?.subscription_status}`);
+      // Status still the same after retry
       
       // 最大リトライ回数をチェック
       if (currentRetry >= MAX_RETRIES) {
-        console.log(`Maximum retries (${MAX_RETRIES}) reached. Stopping retries.`);
+        // Maximum retries reached
         isRetryingRef.current = false;
         setRetryProgress(false);
         // 最大リトライ回数に達しても更新されなかった場合でも、表示はする
@@ -224,7 +223,7 @@ const SubscriptionPage = () => {
       
       return false; // まだ成功していない
     } catch (err) {
-      console.error(`Error during retry ${currentRetry}:`, err);
+      // Error during retry
       
       // エラーが発生しても最大回数に達していなければリトライ
       if (currentRetry < MAX_RETRIES) {
@@ -258,14 +257,14 @@ const SubscriptionPage = () => {
       // 支払い成功時のユーザーデータ更新をリクエスト
       if (user) {
         // Webhookの処理完了を待つために少し待機してからデータ更新
-        console.log('Payment success detected, updating user data in 3 seconds...');
+        // Payment success detected, updating user data
         setTimeout(async () => {
           try {
             await forceRefreshUserData();
             // データ確定フラグを設定（リトライ無しの場合は即時表示）
             setDataConfirmed(true);
           } catch (err) {
-            console.error('Error updating user data:', err);
+            // Error updating user data
             // エラーが発生しても表示は行う
             setDataConfirmed(true);
           }
@@ -363,7 +362,7 @@ const SubscriptionPage = () => {
         setDataConfirmed(true); // 解約は即時反映される
       }
     } catch (err) {
-      console.error('Error canceling subscription:', err);
+      // Error canceling subscription
       setError(err instanceof Error ? err.message : 'サブスクリプションの解約に失敗しました');
     } finally {
       setCancelLoading(false);

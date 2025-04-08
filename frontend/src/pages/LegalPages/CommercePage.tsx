@@ -171,9 +171,6 @@ const CommercePage: React.FC = () => {
                     <Typography paragraph>
                       解約後、自動的に無料プランに切り替わります。解約手続き完了後の返金はいたしかねますのでご了承ください。
                     </Typography>
-                    <Typography>
-                      サービス初回利用から7日以内であれば、全額返金いたします。返金をご希望の場合は、上記メールアドレスまでご連絡ください。
-                    </Typography>
                   </TableCell>
                 </TableRow>
                 

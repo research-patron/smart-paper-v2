@@ -65,7 +65,7 @@ const Plans: React.FC<PlansProps> = ({
     { name: '翻訳数', free: '3個/月', paid: '無制限' },
     { name: '論文保存期間', free: '3日間', paid: '1ヶ月間' },
     { name: '関連論文推薦', free: '3件/月', paid: '無制限' },
-    { name: 'PDFファイルサイズ上限', free: '20MB', paid: '20MB' },
+    { name: 'PDFファイルサイズ上限', free: '10MB', paid: '10MB' },
     { name: 'Obsidian連携', free: true, paid: true },
     { name: 'Zotero連携', free: true, paid: true },
   ], []);
