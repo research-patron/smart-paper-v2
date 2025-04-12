@@ -17,6 +17,8 @@ yarn-error.log
 frontend/build/
 functions/lib/
 
+frontend/public/videos/
+
 # Firebase キャッシュ・ログ
 .firebase/
 firebase-debug.log
