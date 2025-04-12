@@ -746,15 +746,15 @@ def get_processing_time(request: Request):
         # 章別のデータを取得（翻訳の場合のみ）
         chapters_data = []
         if translate_doc.exists:
-            # translate コレクション内の章別ドキュメントを取得
-            chapters_query = process_ref.collection("translate").where(
-                firestore.FieldPath.document_id(), "!=", "data"
-            ).stream()
+            # 修正: すべてのドキュメントを取得後、"data"以外をフィルタリング
+            chapters_query = process_ref.collection("translate").stream()
             
             for doc in chapters_query:
-                chapter_data = doc.to_dict()
-                if chapter_data and "chapter_number" in chapter_data:
-                    chapters_data.append(chapter_data)
+                # "data"ドキュメント以外をフィルタリング
+                if doc.id != "data":
+                    chapter_data = doc.to_dict()
+                    if chapter_data and "chapter_number" in chapter_data:
+                        chapters_data.append(chapter_data)
         
         # レスポンスデータ構築
         result = {
