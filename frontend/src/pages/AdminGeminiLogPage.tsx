@@ -34,6 +34,7 @@ import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import HomeIcon from '@mui/icons-material/Home';
 import ScienceIcon from '@mui/icons-material/Science';
 import DataObjectIcon from '@mui/icons-material/DataObject';
+import TimerIcon from '@mui/icons-material/Timer';
 import { useAuthStore } from '../store/authStore';
 import { getGeminiLogs } from '../api/admin';
 import { getPaper, formatDate } from '../api/papers';
@@ -313,6 +314,14 @@ const AdminGeminiLogPage: React.FC = () => {
           </Typography>
           
           <Box>
+            <Button
+              variant="outlined"
+              startIcon={<TimerIcon />}
+              onClick={() => navigate(`/admin/performance/${paperId}`)}
+              sx={{ mr: 1 }}
+            >
+              処理時間分析
+            </Button>
             <Button
               variant="outlined"
               startIcon={<RefreshIcon />}

@@ -215,6 +215,20 @@ gcloud functions deploy get_signed_url \
   --allow-unauthenticated \
   --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
 
+# 処理時間データ取得の関数を追加
+echo -e "\n${BLUE}get_processing_time 関数をデプロイしています...${NC}"
+gcloud functions deploy get_processing_time \
+  --region=${REGION} \
+  --runtime=python310 \
+  --trigger-http \
+  --source=./functions \
+  --entry-point=get_processing_time_router \
+  --memory=512MB \
+  --timeout=60s \
+  --max-instances=10 \
+  --allow-unauthenticated \
+  --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
+
 # Stripe関連のCloud Functions
 echo -e "\n${BLUE}Stripe関連のCloud Functionsをデプロイしています...${NC}"
 
@@ -280,11 +294,26 @@ gcloud functions deploy share_paper_with_admin \
   --allow-unauthenticated \
   --set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},ADMIN_EMAIL_MASTER=s.kosei0626@gmail.com,ADMIN_EMAIL_SERVICE=smart-paper-v2@student-subscription.com
 
+# フロントエンドのビルドとデプロイ
+echo -e "\n${BLUE}フロントエンドをビルドしています...${NC}"
+cd frontend
+npm install
+npm run build
+
+echo -e "\n${BLUE}Firebase Hostingをデプロイしています...${NC}"
+firebase deploy --only hosting
+
+# Firestoreルールのデプロイ
+echo -e "\n${BLUE}Firestoreセキュリティルールをデプロイしています...${NC}"
+cd ..
+firebase deploy --only firestore:rules
+
 echo -e "\n${GREEN}デプロイが完了しました！${NC}"
 echo -e "以下のURLでCloud Functionsにアクセスできます:"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf_background${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/get_signed_url${NC}"
+echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/get_processing_time${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/create_stripe_checkout${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/cancel_stripe_subscription${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/update_payment_method${NC}"
@@ -325,6 +354,9 @@ echo "{
   ]
 }" > firestore.indexes.json
 
+# Indexを更新
+firebase deploy --only firestore:indexes
+
 # Stripe Webhook設定の確認方法を表示
 echo -e "\n${BLUE}Stripe Webhook 設定方法:${NC}"
 echo -e "1. Stripeダッシュボードで以下のURLを登録:"
@@ -338,6 +370,6 @@ echo -e "   - invoice.payment_succeeded"
 echo -e "   - invoice.payment_failed"
 echo -e "3. シークレットを確認 (既に Secret Manager に保存済み)"
 
-echo -e "\n${GREEN}設定が完了しました！${NC}"
-echo -e "${YELLOW}Firestoreの'process_time'コレクションに処理時間データが記録されます${NC}"
-echo -e "${YELLOW}Firestoreに'inquiries'コレクションが作成され、問い合わせと問題報告データが保存されます${NC}"
+echo -e "\n${GREEN}処理時間分析機能がデプロイされました！${NC}"
+echo -e "${YELLOW}管理者ページの「Geminiログを表示」ボタンから「処理時間分析」ボタンを押すことで、論文処理の詳細な時間分析ができます${NC}"
+echo -e "${YELLOW}CSV出力機能で処理時間データをダウンロードすることも可能です${NC}"

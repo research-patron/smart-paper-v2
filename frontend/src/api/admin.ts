@@ -12,6 +12,9 @@ import {
 import { db } from './firebase';
 import { Paper, getCurrentUserToken } from './papers';
 
+// Cloud Functions APIのベースURL
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'https://us-central1-smart-paper-v2.cloudfunctions.net';
+
 // 管理者が全ての論文を取得
 export const getAdminPapers = async (): Promise<Paper[]> => {
   try {
@@ -220,4 +223,97 @@ export const getGeminiLogs = async (paperId: string): Promise<any[]> => {
     console.error('Failed to get Gemini logs:', error);
     throw error;
   }
+};
+
+// 処理時間データを取得
+export const getProcessingTime = async (paperId: string): Promise<any> => {
+  try {
+    // 認証トークンを取得（管理者権限が必要）
+    const token = await getCurrentUserToken();
+    if (!token) {
+      throw new Error('認証が必要です');
+    }
+    
+    const headers: HeadersInit = { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    };
+    
+    // Cloud Functions APIを呼び出す
+    const response = await fetch(`${API_BASE_URL}/get_processing_time`, {
+      method: 'POST',
+      headers,
+      mode: 'cors',
+      body: JSON.stringify({ paper_id: paperId }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || '処理時間データの取得に失敗しました');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Failed to get processing time data:', error);
+    throw error;
+  }
+};
+
+// 処理時間データをCSVとしてフォーマット
+export const exportProcessingTimeCSV = (data: any): string => {
+  if (!data) return '';
+  
+  const rows: string[] = [];
+  
+  // ヘッダー行
+  rows.push('Operation,Step,Timestamp,Duration (ms),Details');
+  
+  // 各操作タイプのデータを追加
+  const operations = [
+    {key: 'translation', name: 'translation'},
+    {key: 'summary', name: 'summary'},
+    {key: 'metadata', name: 'metadata_extraction'}
+  ];
+  
+  operations.forEach(op => {
+    const opData = data[op.key];
+    if (!opData || !opData.steps) return;
+    
+    opData.steps.forEach((step: any) => {
+      const timestamp = step.timestamp?.seconds 
+        ? new Date(step.timestamp.seconds * 1000).toISOString() 
+        : 'unknown';
+      const duration = step.processing_time_sec 
+        ? (step.processing_time_sec * 1000).toFixed(2) 
+        : '';
+      
+      // 詳細情報をJSON文字列に変換（カンマを含むのでダブルクォートでエスケープ）
+      let details = '';
+      if (step.details) {
+        details = `"${JSON.stringify(step.details).replace(/"/g, '""')}"`;
+      }
+      
+      rows.push(`${op.name},${step.step_name},${timestamp},${duration},${details}`);
+    });
+  });
+  
+  // 章ごとのデータを追加
+  if (data.chapters && data.chapters.length > 0) {
+    data.chapters.forEach((chapter: any) => {
+      if (!chapter) return;
+      
+      const chapterNum = chapter.chapter_number;
+      const timestamp = chapter.timestamp?.seconds 
+        ? new Date(chapter.timestamp.seconds * 1000).toISOString()
+        : 'unknown';
+      const duration = chapter.processing_time_sec 
+        ? (chapter.processing_time_sec * 1000).toFixed(2) 
+        : '';
+      const details = `"Chapter ${chapterNum}: ${chapter.title}"`;
+      
+      rows.push(`chapter_translation,chapter_${chapterNum},${timestamp},${duration},${details}`);
+    });
+  }
+  
+  return rows.join('\n');
 };

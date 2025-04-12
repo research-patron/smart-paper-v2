@@ -286,8 +286,8 @@ def process_pdf(request: Request):
             raise ValidationError("Invalid file type. Only PDF files are allowed.")
 
         content_length = request.content_length or 0
-        if content_length > 10 * 1024 * 1024:  # 10MB limit
-            raise ValidationError("File too large. Maximum size is 10MB.")
+        if content_length > 20 * 1024 * 1024:  # 20MB limit
+            raise ValidationError("File too large. Maximum size is 20MB.")
             
         add_step(session_id, temp_paper_id, "file_validation_complete", {"file_size": content_length, "filename": pdf_file.filename})
 
@@ -675,6 +675,103 @@ def get_signed_url(request: Request):
         
         return jsonify({"error": "Failed to generate signed URL", "details": str(e)}), 500, headers
 
+@functions_framework.http
+def get_processing_time(request: Request):
+    """
+    論文IDに基づいて処理時間データを取得する
+    """
+    try:
+        # CORSヘッダーの設定
+        if request.method == 'OPTIONS':
+            headers = {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                'Access-Control-Max-Age': '3600'
+            }
+            return ('', 204, headers)
+
+        headers = {'Access-Control-Allow-Origin': '*'}
+
+        # クエリパラメータまたはJSONからpaper_idを取得
+        paper_id = request.args.get('paper_id')
+        
+        if not paper_id:
+            # JSONからも試みる
+            request_json = request.get_json(silent=True)
+            if request_json:
+                paper_id = request_json.get('paper_id')
+        
+        if not paper_id:
+            return jsonify({"error": "paper_id is required"}), 400, headers
+
+        # 認証確認
+        user_id = verify_firebase_token(request)
+        # 管理者かどうかを確認
+        if not user_id:
+            return jsonify({"error": "認証が必要です"}), 401, headers
+
+        # 管理者かどうかを確認する処理を追加
+        admin_emails = ["smart-paper-v2@student-subscription.com", "s.kosei0626@gmail.com"]
+        user_record = firebase_auth.get_user(user_id)
+        if user_record.email not in admin_emails:
+            return jsonify({"error": "管理者権限が必要です"}), 403, headers
+
+        log_info("GetProcessingTime", f"Fetching processing time for paper: {paper_id}", {"user_id": user_id})
+
+        # performance.pyから週範囲取得用の関数をインポート
+        from performance import get_current_week_range
+        
+        # 最新の週範囲を取得
+        week_range = get_current_week_range()
+        
+        # process_time コレクションから特定の paper_id に関するデータを取得
+        process_ref = db.collection("process_time").document(week_range).collection("processes").document(paper_id)
+        
+        # 翻訳処理データを取得
+        translate_ref = process_ref.collection("translate").document("data")
+        translate_doc = translate_ref.get()
+        translate_data = translate_doc.to_dict() if translate_doc.exists else None
+        
+        # 要約処理データを取得
+        summary_ref = process_ref.collection("summarize").document("data")
+        summary_doc = summary_ref.get()
+        summary_data = summary_doc.to_dict() if summary_doc.exists else None
+        
+        # メタデータ処理データを取得
+        metadata_ref = process_ref.collection("extract_metadata_and_chapters").document("data")
+        metadata_doc = metadata_ref.get()
+        metadata_data = metadata_doc.to_dict() if metadata_doc.exists else None
+        
+        # 章別のデータを取得（翻訳の場合のみ）
+        chapters_data = []
+        if translate_doc.exists:
+            # translate コレクション内の章別ドキュメントを取得
+            chapters_query = process_ref.collection("translate").where(
+                firestore.FieldPath.document_id(), "!=", "data"
+            ).stream()
+            
+            for doc in chapters_query:
+                chapter_data = doc.to_dict()
+                if chapter_data and "chapter_number" in chapter_data:
+                    chapters_data.append(chapter_data)
+        
+        # レスポンスデータ構築
+        result = {
+            "paper_id": paper_id,
+            "translation": translate_data,
+            "summary": summary_data,
+            "metadata": metadata_data,
+            "chapters": chapters_data
+        }
+        
+        log_info("GetProcessingTime", f"Successfully fetched processing time for paper: {paper_id}")
+        return jsonify(result), 200, headers
+        
+    except Exception as e:
+        log_error("GetProcessingTimeError", f"Failed to get processing time: {str(e)}")
+        return jsonify({"error": f"エラーが発生しました: {str(e)}"}), 500, headers
+
 # Stripe関数のリダイレクト - 変更なし
 
 # 管理者機能関数のリダイレクト
@@ -685,3 +782,11 @@ def share_paper_with_admin_router(request: Request):
     """
     from admin_functions import share_paper_with_admin
     return share_paper_with_admin(request)
+
+# 処理時間データ取得用の関数ルーティング
+@functions_framework.http
+def get_processing_time_router(request: Request):
+    """
+    get_processing_time関数へのルーターとして機能
+    """
+    return get_processing_time(request)
