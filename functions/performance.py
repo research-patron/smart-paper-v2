@@ -167,10 +167,13 @@ def add_processing_step(paper_id, session_id, step_name, details=None, processin
             "details": {"recovery": True, "original_step": step_name}
         }
     
+    # 現在のタイムスタンプを作成（秒の小数点以下もしっかり保持）
+    current_timestamp = datetime.datetime.now()
+    
     # ステップ情報を記録
     step_info = {
         "step_name": step_name,
-        "timestamp": datetime.datetime.now(),
+        "timestamp": current_timestamp,
     }
     
     # 詳細情報があれば追加
@@ -395,8 +398,24 @@ def end_processing_session(paper_id, session_id, success=True, error=None):
                 chapter_data = _chapter_data.get(paper_id, [])
                 
                 if chapter_data:
-                    # 章番号で昇順ソート
-                    sorted_chapters = sorted(chapter_data, key=lambda x: x["chapter_number"])
+                    # 章番号で昇順ソート（数値型と文字列型の両方に対応）
+                    def chapter_sort_key(chapter):
+                        try:
+                            # 数値に変換できる場合
+                            if isinstance(chapter["chapter_number"], (int, float)):
+                                return float(chapter["chapter_number"])
+                            # ピリオドを含む場合（例: "1.1"）
+                            elif "." in str(chapter["chapter_number"]):
+                                parts = str(chapter["chapter_number"]).split(".")
+                                return float(parts[0]) + float("0." + parts[1])
+                            # その他の場合
+                            else:
+                                return float(chapter["chapter_number"])
+                        except (ValueError, TypeError):
+                            # 変換できない場合は文字列として扱う
+                            return str(chapter["chapter_number"])
+                    
+                    sorted_chapters = sorted(chapter_data, key=chapter_sort_key)
                     
                     # 1. すべての章のサマリーを作成 (メインのデータドキュメントに保存)
                     chapters_summary = []
@@ -414,7 +433,11 @@ def end_processing_session(paper_id, session_id, success=True, error=None):
                         chapter_num = chapter["chapter_number"]
                         # 章番号をゼロパディングして常に2桁に (例: 1 → 01, 10 → 10)
                         # これにより章が昇順でソートされる
-                        chapter_doc_id = f"chapter_{chapter_num:02d}"
+                        if isinstance(chapter_num, (int, float)):
+                            chapter_doc_id = f"chapter_{int(chapter_num):02d}"
+                        else:
+                            # 文字列の場合（例: "1.1"）
+                            chapter_doc_id = f"chapter_{chapter_num}"
                         
                         chapter_doc_ref = operation_coll.document(chapter_doc_id)
                         chapter_doc_ref.set({
@@ -518,6 +541,8 @@ def add_step(session_id, paper_id, step_name, details=None, processing_time_ms=N
     processing_time_sec = None
     if processing_time_ms is not None:
         processing_time_sec = processing_time_ms / 1000.0
+        # ログにミリ秒から秒への変換を記録
+        log_info("Performance", f"Converting processing time from ms to sec: {processing_time_ms}ms -> {processing_time_sec}sec")
     
     add_processing_step(paper_id, session_id, step_name, details, processing_time_sec)
 
@@ -562,6 +587,12 @@ def add_chapter_translation(session_id, paper_id, chapter_number, title, transla
     if paper_id not in _processing_data or not any(session_id in sessions for sessions in _processing_data.values()):
         log_warning("Performance", f"No valid session found for session_id: {session_id}, paper_id: {paper_id}")
         return
+    
+    # 処理時間のチェック
+    if processing_time_sec is not None and processing_time_sec > 1000:
+        # 明らかに大きすぎる値の場合はミリ秒と解釈して変換
+        processing_time_sec = processing_time_sec / 1000.0
+        log_warning("Performance", f"Converting chapter processing time from ms to sec: {processing_time_sec * 1000}ms -> {processing_time_sec}sec")
     
     add_chapter_data(paper_id, chapter_number, title, translated_text, processing_time_sec)
 

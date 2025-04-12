@@ -259,20 +259,20 @@ export const getProcessingTime = async (paperId: string): Promise<any> => {
   }
 };
 
-// 処理時間データをCSVとしてフォーマット
+// 処理時間データをCSVとしてフォーマット - 修正版
 export const exportProcessingTimeCSV = (data: any): string => {
   if (!data) return '';
   
   const rows: string[] = [];
   
   // ヘッダー行
-  rows.push('Operation,Step,Timestamp,Duration (ms),Details');
+  rows.push('Operation,Step,Timestamp,Duration (sec),Details');
   
   // 各操作タイプのデータを追加
   const operations = [
-    {key: 'translation', name: 'translation'},
-    {key: 'summary', name: 'summary'},
-    {key: 'metadata', name: 'metadata_extraction'}
+    {key: 'translation', name: 'Translation'},
+    {key: 'summary', name: 'Summary'},
+    {key: 'metadata', name: 'Metadata Extraction'}
   ];
   
   operations.forEach(op => {
@@ -280,38 +280,72 @@ export const exportProcessingTimeCSV = (data: any): string => {
     if (!opData || !opData.steps) return;
     
     opData.steps.forEach((step: any) => {
-      const timestamp = step.timestamp?.seconds 
-        ? new Date(step.timestamp.seconds * 1000).toISOString() 
-        : 'unknown';
-      const duration = step.processing_time_sec 
-        ? (step.processing_time_sec * 1000).toFixed(2) 
-        : '';
+      // タイムスタンプの適切な変換
+      let timestamp = 'N/A';
+      if (step.timestamp) {
+        // Firestoreのタイムスタンプオブジェクトの場合
+        if (step.timestamp.seconds) {
+          timestamp = new Date(step.timestamp.seconds * 1000).toISOString();
+        } 
+        // 既にISOString形式の場合
+        else if (typeof step.timestamp === 'string') {
+          timestamp = step.timestamp;
+        }
+      }
+      
+      // 処理時間の適切な処理（秒単位で統一）
+      let duration = '';
+      if (step.processing_time_sec !== undefined && step.processing_time_sec !== null) {
+        // 数値を秒単位で正確に表示
+        duration = step.processing_time_sec.toFixed(3);
+      }
       
       // 詳細情報をJSON文字列に変換（カンマを含むのでダブルクォートでエスケープ）
       let details = '';
       if (step.details) {
-        details = `"${JSON.stringify(step.details).replace(/"/g, '""')}"`;
+        try {
+          // オブジェクトを文字列化し、ダブルクォートをエスケープ
+          details = `"${JSON.stringify(step.details).replace(/"/g, '""')}"`;
+        } catch (e) {
+          details = `"Error parsing details"`;
+        }
       }
       
       rows.push(`${op.name},${step.step_name},${timestamp},${duration},${details}`);
     });
   });
   
-  // 章ごとのデータを追加
+  // 章ごとのデータを追加（翻訳処理の内訳として）
   if (data.chapters && data.chapters.length > 0) {
     data.chapters.forEach((chapter: any) => {
       if (!chapter) return;
       
-      const chapterNum = chapter.chapter_number;
-      const timestamp = chapter.timestamp?.seconds 
-        ? new Date(chapter.timestamp.seconds * 1000).toISOString()
-        : 'unknown';
-      const duration = chapter.processing_time_sec 
-        ? (chapter.processing_time_sec * 1000).toFixed(2) 
-        : '';
-      const details = `"Chapter ${chapterNum}: ${chapter.title}"`;
+      // 章番号とタイトル
+      const chapterNum = chapter.chapter_number || 'unknown';
+      const chapterTitle = chapter.title || '';
       
-      rows.push(`chapter_translation,chapter_${chapterNum},${timestamp},${duration},${details}`);
+      // タイムスタンプの処理
+      let timestamp = 'N/A';
+      if (chapter.timestamp) {
+        if (chapter.timestamp.seconds) {
+          timestamp = new Date(chapter.timestamp.seconds * 1000).toISOString();
+        } else if (typeof chapter.timestamp === 'string') {
+          timestamp = chapter.timestamp;
+        }
+      }
+      
+      // 処理時間の処理（秒単位に統一）
+      let duration = '';
+      if (chapter.processing_time_sec !== undefined && chapter.processing_time_sec !== null) {
+        duration = chapter.processing_time_sec.toFixed(3);
+      }
+      
+      // 章の詳細情報（開始・終了ページを含む）
+      const startPage = chapter.start_page !== undefined ? chapter.start_page : 'N/A';
+      const endPage = chapter.end_page !== undefined ? chapter.end_page : 'N/A';
+      const details = `"Chapter ${chapterNum}: ${chapterTitle} (Pages ${startPage}-${endPage})"`;
+      
+      rows.push(`Chapter Translation,chapter_${chapterNum},${timestamp},${duration},${details}`);
     });
   }
   

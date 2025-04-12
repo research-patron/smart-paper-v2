@@ -164,6 +164,75 @@ const AdminPerformanceDetailPage = () => {
     document.body.removeChild(link);
   };
 
+  // 処理時間の表示形式を統一する関数
+  const formatProcessingTime = (timeInSec: number | undefined | null): string => {
+    if (timeInSec === undefined || timeInSec === null) return '不明';
+    
+    // 1分未満は秒単位で表示
+    if (timeInSec < 60) {
+      return `${timeInSec.toFixed(1)}秒`;
+    }
+    
+    // 1分以上は分と秒で表示
+    const minutes = Math.floor(timeInSec / 60);
+    const seconds = Math.round(timeInSec % 60);
+    return `${minutes}分 ${seconds}秒`;
+  };
+
+  // 総処理時間を計算する関数 - 修正版
+  const getTotalProcessingTime = () => {
+    let totalSec = 0;
+    
+    // 各操作の処理時間を加算（秒単位で統一）
+    if (performanceData?.translation?.processing_time_sec) {
+      totalSec += performanceData.translation.processing_time_sec;
+    }
+    
+    if (performanceData?.summary?.processing_time_sec) {
+      totalSec += performanceData.summary.processing_time_sec;
+    }
+    
+    if (performanceData?.metadata?.processing_time_sec) {
+      totalSec += performanceData.metadata.processing_time_sec;
+    }
+    
+    // 章ごとの処理時間の合計も確認
+    let chaptersTotal = 0;
+    if (performanceData?.chapters && performanceData.chapters.length > 0) {
+      chaptersTotal = performanceData.chapters.reduce((sum: number, chapter: any) => {
+        return sum + (chapter.processing_time_sec || 0);
+      }, 0);
+    }
+    
+    // 各ステップの合計も計算して検証
+    let stepsTotal = 0;
+    ['translation', 'summary', 'metadata'].forEach(key => {
+      if (performanceData?.[key]?.steps && performanceData[key].steps.length > 0) {
+        stepsTotal += performanceData[key].steps.reduce((sum: number, step: any) => {
+          return sum + (step.processing_time_sec || 0);
+        }, 0);
+      }
+    });
+    
+    // もし章の処理時間の合計が全体よりも詳細な情報を持っている場合は優先
+    if (chaptersTotal > totalSec) {
+      totalSec = chaptersTotal;
+    }
+    
+    // 分と秒に変換
+    const minutes = Math.floor(totalSec / 60);
+    const seconds = totalSec % 60;
+    
+    return {
+      totalSec,
+      chaptersTotal,
+      stepsTotal,
+      formatted: totalSec >= 60 
+        ? `${minutes}分 ${Math.round(seconds)}秒` 
+        : `${totalSec.toFixed(1)}秒`
+    };
+  };
+
   if (!isAdmin) {
     return (
       <Container maxWidth="lg">
@@ -205,38 +274,9 @@ const AdminPerformanceDetailPage = () => {
     );
   }
 
-  // 総処理時間を計算
-  const getTotalProcessingTime = () => {
-    let totalMs = 0;
-    
-    // 各操作の処理時間を加算
-    if (performanceData?.translation?.processing_time_sec) {
-      totalMs += performanceData.translation.processing_time_sec * 1000;
-    }
-    
-    if (performanceData?.summary?.processing_time_sec) {
-      totalMs += performanceData.summary.processing_time_sec * 1000;
-    }
-    
-    if (performanceData?.metadata?.processing_time_sec) {
-      totalMs += performanceData.metadata.processing_time_sec * 1000;
-    }
-    
-    // 秒に変換
-    const totalSec = totalMs / 1000;
-    
-    // ミリ秒 (3桁の精度) も表示
-    return {
-      totalMs,
-      formatted: totalSec >= 60 
-        ? `${Math.floor(totalSec / 60)}分 ${Math.round(totalSec % 60)}秒` 
-        : `${totalSec.toFixed(1)}秒`
-    };
-  };
-
   const totalTime = getTotalProcessingTime();
   
-  // 処理ステップのタイムライン
+  // タイムライン表示コンポーネントの修正
   const renderTimeline = (operationData: any, operationName: string) => {
     if (!operationData || !operationData.steps || operationData.steps.length === 0) {
       return (
@@ -250,17 +290,31 @@ const AdminPerformanceDetailPage = () => {
       <Timeline position="alternate">
         {operationData.steps.map((step: any, index: number) => {
           // タイムスタンプの処理
-          const timestamp = step.timestamp?.seconds 
-            ? new Date(step.timestamp.seconds * 1000)
-            : null;
-            
+          let timestampDate = null;
+          if (step.timestamp) {
+            // Firestoreのタイムスタンプオブジェクトの場合
+            if (step.timestamp.seconds) {
+              timestampDate = new Date(step.timestamp.seconds * 1000);
+            } 
+            // Dateオブジェクトの場合
+            else if (step.timestamp instanceof Date) {
+              timestampDate = step.timestamp;
+            }
+            // 文字列の場合
+            else if (typeof step.timestamp === 'string') {
+              timestampDate = new Date(step.timestamp);
+            }
+          }
+          
           // 処理時間の表示形式
-          const duration = step.processing_time_sec 
-            ? step.processing_time_sec >= 1 
-              ? `${step.processing_time_sec.toFixed(2)}秒` 
-              : `${(step.processing_time_sec * 1000).toFixed(0)}ms`
-            : '不明';
-            
+          let duration = '不明';
+          if (step.processing_time_sec !== undefined && step.processing_time_sec !== null) {
+            // 1秒未満の場合はミリ秒表示、それ以外は秒表示
+            duration = step.processing_time_sec < 1 
+              ? `${(step.processing_time_sec * 1000).toFixed(0)}ms` 
+              : `${step.processing_time_sec.toFixed(2)}秒`;
+          }
+          
           // ステップごとの詳細情報
           const details = step.details ? Object.entries(step.details).map(([key, value]) => (
             <Typography variant="body2" key={key} color="text.secondary">
@@ -271,13 +325,13 @@ const AdminPerformanceDetailPage = () => {
           return (
             <TimelineItem key={index}>
               <TimelineOppositeContent color="text.secondary">
-                {timestamp ? (
+                {timestampDate ? (
                   <>
                     <Typography variant="body2">
-                      {timestamp.toLocaleTimeString()}
+                      {timestampDate.toLocaleTimeString()}
                     </Typography>
                     <Typography variant="caption">
-                      {timestamp.toLocaleDateString()}
+                      {timestampDate.toLocaleDateString()}
                     </Typography>
                   </>
                 ) : (
@@ -324,7 +378,7 @@ const AdminPerformanceDetailPage = () => {
     );
   };
 
-  // 章ごとのデータをテーブルで表示
+  // 章ごとのデータをテーブルで表示 - 修正
   const renderChaptersTable = () => {
     const chapters = performanceData?.chapters;
     
@@ -336,50 +390,98 @@ const AdminPerformanceDetailPage = () => {
       );
     }
     
-    // 章番号でソート
+    // 章番号でソート - 数値と文字列の両方に対応
     const sortedChapters = [...chapters].sort((a, b) => {
-      const aNum = typeof a.chapter_number === 'number' ? a.chapter_number : parseInt(a.chapter_number);
-      const bNum = typeof b.chapter_number === 'number' ? b.chapter_number : parseInt(b.chapter_number);
-      return aNum - bNum;
+      // 章番号を適切にソート (例: 1, 1.1, 2, 10 など)
+      const aNum = a.chapter_number;
+      const bNum = b.chapter_number;
+      
+      // 両方数値の場合は数値比較
+      if (typeof aNum === 'number' && typeof bNum === 'number') {
+        return aNum - bNum;
+      }
+      
+      // 文字列で "1.1" のような形式の場合
+      const aParts = String(aNum).split('.');
+      const bParts = String(bNum).split('.');
+      
+      // メインの章番号を比較
+      const aMain = parseInt(aParts[0], 10);
+      const bMain = parseInt(bParts[0], 10);
+      
+      if (aMain !== bMain) {
+        return aMain - bMain;
+      }
+      
+      // サブチャプターがある場合は比較
+      if (aParts.length > 1 && bParts.length > 1) {
+        return parseInt(aParts[1], 10) - parseInt(bParts[1], 10);
+      }
+      
+      // サブチャプターの有無で比較
+      return aParts.length - bParts.length;
     });
     
+    // 総処理時間を計算
+    const totalTime = sortedChapters.reduce((total, chapter) => {
+      return total + (chapter.processing_time_sec || 0);
+    }, 0);
+    
     return (
-      <TableContainer component={Paper} variant="outlined">
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>章番号</TableCell>
-              <TableCell>タイトル</TableCell>
-              <TableCell>処理時間</TableCell>
-              <TableCell>開始ページ</TableCell>
-              <TableCell>終了ページ</TableCell>
-              <TableCell>タイムスタンプ</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {sortedChapters.map((chapter, index) => (
-              <TableRow key={index}>
-                <TableCell>{chapter.chapter_number}</TableCell>
-                <TableCell>{chapter.title}</TableCell>
-                <TableCell>
-                  {chapter.processing_time_sec 
-                    ? chapter.processing_time_sec >= 1
-                      ? `${chapter.processing_time_sec.toFixed(2)}秒`
-                      : `${(chapter.processing_time_sec * 1000).toFixed(0)}ms`
-                    : '不明'}
-                </TableCell>
-                <TableCell>{chapter.start_page}</TableCell>
-                <TableCell>{chapter.end_page}</TableCell>
-                <TableCell>
-                  {chapter.timestamp?.seconds 
-                    ? formatDate(new Date(chapter.timestamp.seconds * 1000))
-                    : '不明'}
-                </TableCell>
+      <>
+        <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="subtitle1">
+            全{sortedChapters.length}章 - 合計処理時間: {formatProcessingTime(totalTime)}
+          </Typography>
+        </Box>
+        
+        <TableContainer component={Paper} variant="outlined">
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>章番号</TableCell>
+                <TableCell>タイトル</TableCell>
+                <TableCell>処理時間</TableCell>
+                <TableCell>開始ページ</TableCell>
+                <TableCell>終了ページ</TableCell>
+                <TableCell>タイムスタンプ</TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+            </TableHead>
+            <TableBody>
+              {sortedChapters.map((chapter, index) => {
+                // 処理時間の表示形式
+                let duration = '不明';
+                if (chapter.processing_time_sec !== undefined && chapter.processing_time_sec !== null) {
+                  duration = formatProcessingTime(chapter.processing_time_sec);
+                }
+                
+                // タイムスタンプの処理
+                let timestamp = '不明';
+                if (chapter.timestamp) {
+                  if (chapter.timestamp.seconds) {
+                    timestamp = formatDate(new Date(chapter.timestamp.seconds * 1000));
+                  } else if (chapter.timestamp instanceof Date) {
+                    timestamp = formatDate(chapter.timestamp);
+                  } else if (typeof chapter.timestamp === 'string') {
+                    timestamp = formatDate(new Date(chapter.timestamp));
+                  }
+                }
+                
+                return (
+                  <TableRow key={index}>
+                    <TableCell>{chapter.chapter_number}</TableCell>
+                    <TableCell>{chapter.title}</TableCell>
+                    <TableCell>{duration}</TableCell>
+                    <TableCell>{chapter.start_page}</TableCell>
+                    <TableCell>{chapter.end_page}</TableCell>
+                    <TableCell>{timestamp}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </>
     );
   };
 
@@ -508,7 +610,7 @@ const AdminPerformanceDetailPage = () => {
                   </Typography>
                   <Typography variant="h4">
                     {performanceData?.metadata?.processing_time_sec 
-                      ? `${performanceData.metadata.processing_time_sec.toFixed(1)}秒`
+                      ? formatProcessingTime(performanceData.metadata.processing_time_sec)
                       : '不明'}
                   </Typography>
                   <Divider sx={{ my: 1 }} />
@@ -528,7 +630,7 @@ const AdminPerformanceDetailPage = () => {
                   </Typography>
                   <Typography variant="h4">
                     {performanceData?.translation?.processing_time_sec 
-                      ? `${performanceData.translation.processing_time_sec.toFixed(1)}秒`
+                      ? formatProcessingTime(performanceData.translation.processing_time_sec)
                       : '不明'}
                   </Typography>
                   <Divider sx={{ my: 1 }} />
@@ -551,7 +653,7 @@ const AdminPerformanceDetailPage = () => {
                   </Typography>
                   <Typography variant="h4">
                     {performanceData?.summary?.processing_time_sec 
-                      ? `${performanceData.summary.processing_time_sec.toFixed(1)}秒`
+                      ? formatProcessingTime(performanceData.summary.processing_time_sec)
                       : '不明'}
                   </Typography>
                   <Divider sx={{ my: 1 }} />
