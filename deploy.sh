@@ -183,7 +183,7 @@ gcloud functions deploy process_pdf \
   --entry-point=process_pdf \
   --memory=2048MB \
   --timeout=540s \
-  --min-instances=1 \
+  --min-instances=0 \
   --max-instances=10 \
   --allow-unauthenticated \
   --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_FUNCTIONS_SA=${SERVICE_ACCOUNT}
@@ -197,7 +197,7 @@ gcloud functions deploy process_pdf_background \
   --entry-point=process_pdf_background \
   --memory=2048MB \
   --timeout=540s \
-  --min-instances=1 \
+  --min-instances=0 \
   --max-instances=10 \
   --allow-unauthenticated \
   --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_FUNCTIONS_SA=${SERVICE_ACCOUNT}

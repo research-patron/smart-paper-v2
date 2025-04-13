@@ -363,7 +363,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
                          {"paper_id": paper_id})
                 
                 # 翻訳前に少し待機（レート制限対策）
-                time.sleep(2.0 + random.uniform(0.5, 1.5))
+                time.sleep(0.2 + random.uniform(0.1, 0.3))
                 
                 # 章処理の開始時間を記録
                 chapter_start = time.time()
@@ -479,7 +479,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
                 })
                 
                 # 各章の処理後に待機（重要: レート制限対策）
-                time.sleep(3.0 + random.uniform(1.0, 2.0))
+                time.sleep(0.3 + random.uniform(0.1, 0.4))
                 
             except Exception as chapter_error:
                 log_error("ProcessChapterError", f"Error processing chapter {chapter['chapter_number']}",
@@ -497,7 +497,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
                 })
                 
                 # エラー後は少し長めに待機
-                time.sleep(5.0 + random.uniform(1.0, 3.0))
+                time.sleep(1.0 + random.uniform(0.5, 1.0))
 
         # 翻訳テキスト全体をパフォーマンス計測モジュールに保存
         save_translated_text(session_id, all_translated_text)
@@ -510,7 +510,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
             doc_ref.update({"progress": 75})
             
             # 要約前に少し待機（レート制限対策）
-            time.sleep(3.0 + random.uniform(1.0, 2.0))
+            time.sleep(0.1 + random.uniform(0.1, 0.5))
             
             # 要約処理の開始時間を記録
             summary_start = time.time()
@@ -823,7 +823,7 @@ def process_content(pdf_gs_path: str, paper_id: str, operation: str, chapter_inf
         # リトライ処理でAPIを呼び出す
         def api_call():
             # リソースエラー対策のためのスリープ (ランダム要素を含める)
-            time.sleep(1.0 + random.uniform(0.1, 0.5))
+            time.sleep(0.1 + random.uniform(0.1, 0.5))
             return process_with_chat(paper_id, prompt, operation=operation)  # operation パラメータを追加
         
         # APIコール開始時間を記録
