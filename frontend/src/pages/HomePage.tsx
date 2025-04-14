@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/pages/HomePage.tsx
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Container, 
@@ -46,6 +46,19 @@ const HomePage = () => {
   const [paperToDelete, setPaperToDelete] = useState<string | null>(null);
   const [limitAlertOpen, setLimitAlertOpen] = useState(false);
   
+  // ファイル選択状態を追加
+  const [isFileSelected, setIsFileSelected] = useState(false);
+  // 一時的な処理中論文データ
+  const [tempProcessingPaper, setTempProcessingPaper] = useState<PaperType | null>(null);
+  // データ更新用タイマーの参照
+  const refreshTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // 論文IDの参照（タイマー内で最新の値を使用するため）
+  const paperIdRef = useRef<string | null>(null);
+  // サイレント更新フラグ（ロード表示を避けるため）
+  const [silentUpdate, setSilentUpdate] = useState(false);
+  // ローカルのローディング状態
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  
   const { user, userData, forceRefreshUserData } = useAuthStore();
   const { 
     papers, 
@@ -54,7 +67,8 @@ const HomePage = () => {
     fetchUserPapers, 
     deletePaper,
     watchPaperProgress,
-    setRedirectOnCompletion
+    setRedirectOnCompletion,
+    clearError
   } = usePaperStore();
 
   // ユーザーデータを初期ロード時に強制リフレッシュ
@@ -82,12 +96,125 @@ const HomePage = () => {
     }
   };
 
+  // 独自の論文データ更新関数（サイレント更新）
+  const silentlyUpdatePapers = useCallback(async () => {
+    if (!user) return;
+    
+    try {
+      // サイレント更新フラグを設定
+      setSilentUpdate(true);
+      // エラーをクリア
+      clearError();
+      // 論文データを取得
+      await fetchUserPapers(user.uid);
+    } catch (error) {
+      console.error('Failed to silently update papers:', error);
+    } finally {
+      // 更新完了後にフラグをリセット
+      setSilentUpdate(false);
+    }
+  }, [user, fetchUserPapers, clearError]);
+
   // PDFアップロード成功時の処理
   const handleUploadSuccess = useCallback((paperId: string) => {
+    // 論文IDを参照に保存（タイマー内で使用するため）
+    paperIdRef.current = paperId;
     forceRefreshUserData();
-    // ブラウザ全体をリロード
-    window.location.reload();
-  }, [forceRefreshUserData]);
+    
+    // 論文データを更新（初回はサイレント更新ではない）
+    if (user) {
+      fetchUserPapers(user.uid);
+    }
+    
+    // 一定時間後に自動更新を開始
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+    }
+    
+    // 10秒後に自動更新を開始（アップロード処理が完了するまでの猶予）
+    refreshTimerRef.current = setTimeout(() => {
+      startPeriodicRefresh();
+    }, 10000);
+    
+  }, [forceRefreshUserData, fetchUserPapers, user]);
+
+  // 定期的な論文データ更新を開始
+  const startPeriodicRefresh = useCallback(() => {
+    // 既存のタイマーがあればクリア
+    if (refreshTimerRef.current) {
+      clearInterval(refreshTimerRef.current);
+    }
+    
+    // 8秒ごとに論文データを更新（サイレント更新を使用）
+    refreshTimerRef.current = setInterval(() => {
+      if (user) {
+        console.log('Silently refreshing paper data...');
+        silentlyUpdatePapers();
+      }
+    }, 8000);
+    
+    // ログ出力
+    console.log('Periodic refresh started');
+  }, [silentlyUpdatePapers, user]);
+
+  // コンポーネントのアンマウント時にタイマーをクリア
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) {
+        clearInterval(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // 新しい関数: ファイル選択時の処理
+  const handleFileSelect = useCallback((file: File) => {
+    // ファイル選択状態を有効化
+    setIsFileSelected(true);
+    
+    // 一時的な処理中論文データを作成
+    const tempPaper: PaperType = {
+      id: 'temp_' + Date.now(),
+      user_id: user?.uid || '',
+      file_path: '',
+      status: 'pending',
+      uploaded_at: { toMillis: () => Date.now() } as any,
+      completed_at: null,
+      metadata: {
+        title: file.name.replace('.pdf', ''),
+        authors: [],
+        year: new Date().getFullYear(),
+        journal: '',
+        doi: '',
+        keywords: [],
+        abstract: ''
+      },
+      chapters: null,
+      summary: null,
+      translated_text: null,
+      translated_text_path: null,
+      progress: 5
+    };
+    
+    setTempProcessingPaper(tempPaper);
+    
+    // 一定時間後に自動更新を開始
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+    }
+    
+    // 15秒後に強制的にユーザーの論文を再取得（アップロード完了を想定）
+    refreshTimerRef.current = setTimeout(() => {
+      if (user) {
+        console.log('Forced refresh after file selection');
+        silentlyUpdatePapers();
+        
+        // 定期更新も開始
+        startPeriodicRefresh();
+      }
+    }, 15000);
+    
+  }, [user, silentlyUpdatePapers, startPeriodicRefresh]);
 
   // 論文削除のハンドラー
   const handleConfirmDelete = async () => {
@@ -105,7 +232,10 @@ const HomePage = () => {
   // ユーザーの論文一覧を取得
   useEffect(() => {
     if (user) {
-      fetchUserPapers(user.uid);
+      // 初回ロードのみフラグを更新
+      fetchUserPapers(user.uid).finally(() => {
+        setInitialLoadComplete(true);
+      });
     }
   }, [user, fetchUserPapers]);
 
@@ -114,7 +244,7 @@ const HomePage = () => {
     // リダイレクト機能を有効化
     setRedirectOnCompletion(true);
     
-    // クリーンアップでも状態を維持（他の画面での動作に影響しないため）
+    // クリーンアップでも状態を維持
     return () => {
       // ここでfalseに戻さない
     };
@@ -133,16 +263,56 @@ const HomePage = () => {
     });
   }, [papers]);
 
-  // 最新の処理中の論文
-  const latestProcessingPaper = processingPapers.length > 0 ? processingPapers[0] : null;
+  // 最新の処理中の論文を、実際のものか一時的なものかで判断
+  const latestProcessingPaper = useMemo(() => {
+    // ファイルが選択されたばかりでまだアップロード中なら一時データを優先
+    if (isFileSelected && tempProcessingPaper) {
+      return tempProcessingPaper;
+    }
+    // 実際のデータがあればそれを表示
+    return processingPapers.length > 0 ? processingPapers[0] : null;
+  }, [isFileSelected, tempProcessingPaper, processingPapers]);
+
+  // アップロード完了時に一時データをクリア
+  useEffect(() => {
+    if (isFileSelected && processingPapers.length > 0) {
+      console.log('Real paper data loaded, clearing temporary data');
+      
+      // 実際の論文データが取得できたら一時データを破棄
+      setIsFileSelected(false);
+      setTempProcessingPaper(null);
+      
+      // 定期更新も開始（まだ開始されていない場合）
+      startPeriodicRefresh();
+    }
+  }, [isFileSelected, processingPapers, startPeriodicRefresh]);
 
   // 処理中の論文を監視
   useEffect(() => {
-    if (latestProcessingPaper) {
-      // グローバルなStore内の監視機能を使用
+    if (latestProcessingPaper && !isFileSelected) {
+      // 実際の論文データの場合はwatchPaperProgressを呼び出す
+      // （一時データの場合は呼ばない）
       watchPaperProgress(latestProcessingPaper.id);
+      
+      // 論文IDを参照に保存
+      paperIdRef.current = latestProcessingPaper.id;
     }
-  }, [latestProcessingPaper?.id, watchPaperProgress]);
+  }, [latestProcessingPaper?.id, watchPaperProgress, isFileSelected]);
+
+  // 論文の完了またはエラー状態を監視し、定期更新を停止
+  useEffect(() => {
+    // 処理中の論文が完了またはエラー状態になったら定期更新を停止
+    if (processingPapers.length > 0) {
+      const latestPaper = processingPapers[0];
+      if (latestPaper.status === 'completed' || latestPaper.status === 'error') {
+        if (refreshTimerRef.current) {
+          console.log('Paper processing completed or failed, stopping periodic refresh');
+          clearInterval(refreshTimerRef.current);
+          refreshTimerRef.current = null;
+        }
+      }
+    }
+  }, [processingPapers]);
 
   // 表示できる論文一覧（処理中以外または最新の処理中以外の論文）
   const displayablePapers = useMemo(() => {
@@ -150,6 +320,9 @@ const HomePage = () => {
       .filter(paper => !latestProcessingPaper || paper.id !== latestProcessingPaper.id)
       .slice(0, 6); // 最大6件まで表示
   }, [papers, latestProcessingPaper]);
+
+  // ローディング状態の計算 - サイレント更新中は表示用のローディングをfalseにする
+  const showLoading = loading && !silentUpdate && !initialLoadComplete && displayablePapers.length === 0;
 
   return (
     <Container maxWidth="lg">
@@ -164,7 +337,7 @@ const HomePage = () => {
         )}
 
         {/* PDFアップロードエリアを画面幅いっぱいに拡大 */}
-        <Grid container sx={{ mb: 6 }}> {/* ここに mb: 5 を追加 */}
+        <Grid container sx={{ mb: 6 }}>
           <Grid item xs={12}>
             {latestProcessingPaper ? (
               <Box sx={{ mb: 4 }}>
@@ -180,7 +353,6 @@ const HomePage = () => {
                         color="primary"
                         variant="outlined"
                       />
-                      {/* パーセンテージ表示を削除 */}
                     </Box>
                     
                     <Typography variant="h5" gutterBottom>
@@ -219,6 +391,7 @@ const HomePage = () => {
                         variant="contained"
                         color="primary"
                         onClick={() => navigate(`/papers/${latestProcessingPaper.id}`)}
+                        disabled={isFileSelected} // 一時データの場合はボタンを無効化
                       >
                         詳細を見る
                       </Button>
@@ -227,9 +400,12 @@ const HomePage = () => {
                         size="small"
                         color="error"
                         onClick={() => {
-                          setPaperToDelete(latestProcessingPaper.id);
-                          setDeleteDialogOpen(true);
+                          if (!isFileSelected) { // 一時データの場合は削除しない
+                            setPaperToDelete(latestProcessingPaper.id);
+                            setDeleteDialogOpen(true);
+                          }
                         }}
+                        disabled={isFileSelected} // 一時データの場合はボタンを無効化
                       >
                         <DeleteIcon />
                       </IconButton>
@@ -238,7 +414,10 @@ const HomePage = () => {
                 </Card>
               </Box>
             ) : (
-              <PdfUpload onUploadSuccess={handleUploadSuccess} />
+              <PdfUpload 
+                onUploadSuccess={handleUploadSuccess} 
+                onFileSelect={handleFileSelect} // 新しいコールバックを追加
+              />
             )}
           </Grid>
         </Grid>
@@ -269,7 +448,7 @@ const HomePage = () => {
                 </Button>
               </Box>
 
-              {loading ? (
+              {showLoading ? (
                 <Paper sx={{ p: 3, textAlign: 'center' }}>
                   <Typography>読み込み中...</Typography>
                 </Paper>
@@ -301,7 +480,6 @@ const HomePage = () => {
                                 }
                                 variant={paper.status === 'completed' ? 'filled' : 'outlined'}
                               />
-                              {/* パーセンテージ表示を削除 */}
                             </Box>
                             
                             <Typography variant="h6" noWrap title={paper.metadata?.title}>
@@ -371,6 +549,7 @@ const HomePage = () => {
           </Grid>
 
           <Grid item xs={12} md={4}>
+            {/* 省略（変更なし） */}
             {/* プロフィールと翻訳状況表示 */}
             <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
               <Button
@@ -470,6 +649,7 @@ const HomePage = () => {
         </Grid>
       </Box>
       
+      {/* 省略（変更なし） */}
       {/* 論文削除確認ダイアログ */}
       <Dialog
         open={deleteDialogOpen}

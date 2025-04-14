@@ -1,5 +1,5 @@
 // ~/Desktop/smart-paper-v2/frontend/src/components/papers/PdfUpload.tsx
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { 
   Box, 
   Button, 
@@ -19,38 +19,20 @@ import ErrorMessage from '../common/ErrorMessage';
 
 interface PdfUploadProps {
   onUploadSuccess?: (paperId: string) => void;
+  onFileSelect?: (file: File) => void; // 新しいコールバックを追加
 }
 
-const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
+const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess, onFileSelect }) => {
   const { user } = useAuthStore();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
-  const [reloadCountdown, setReloadCountdown] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const theme = useTheme();
 
-  // 10秒カウントダウン後にリロードする
-  useEffect(() => {
-    if (reloadCountdown === null) return;
-    
-    if (reloadCountdown <= 0) {
-      // カウントダウン終了時にリロード
-      window.location.reload();
-      return;
-    }
-    
-    // 1秒ごとにカウントダウン
-    const timer = setTimeout(() => {
-      setReloadCountdown(prev => prev !== null ? prev - 1 : null);
-    }, 1000);
-    
-    return () => clearTimeout(timer);
-  }, [reloadCountdown]);
-  
   // ファイルのバリデーション
   const validateFile = (file: File): boolean => {
     // PDFファイルであるかチェック
@@ -68,9 +50,6 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
       return false;
     }
     
-    // バリデーション通過時に10秒カウントダウン開始
-    setReloadCountdown(30);
-    
     return true;
   };
   
@@ -82,6 +61,12 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
       if (validateFile(file)) {
         setSelectedFile(file);
         setError(null);
+        
+        // ファイルが選択された時点で親コンポーネントに通知
+        if (onFileSelect) {
+          onFileSelect(file);
+        }
+        
         // ファイル選択時に自動的にアップロードを開始
         handleUpload(file);
       }
@@ -122,6 +107,12 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
       if (validateFile(file)) {
         setSelectedFile(file);
         setError(null);
+        
+        // ファイルがドロップされた時点で親コンポーネントに通知
+        if (onFileSelect) {
+          onFileSelect(file);
+        }
+        
         // ドロップされたファイルを自動的にアップロード
         handleUpload(file);
       }
@@ -162,21 +153,17 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
         onUploadSuccess(paperId);
       }
       
-      // リセット - カウントダウン中はリセットしない
-      if (reloadCountdown === null) {
-        setTimeout(() => {
-          setSelectedFile(null);
-          setIsUploading(false);
-        }, 500);
-      }
+      // リセット
+      setTimeout(() => {
+        setSelectedFile(null);
+        setIsUploading(false);
+      }, 500);
       
     } catch (error: any) {
       console.error('Upload failed:', error);
       setError(error.message || 'アップロードに失敗しました');
       setErrorDetails(JSON.stringify(error, null, 2));
       setIsUploading(false);
-      // エラー時はカウントダウンをキャンセル
-      setReloadCountdown(null);
     }
   };
   
@@ -186,7 +173,6 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
     setSelectedFile(null);
     setError(null);
     setErrorDetails(null);
-    setReloadCountdown(null); // カウントダウンもキャンセル
     
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -312,9 +298,7 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess }) => {
                 {isUploading && (
                   <Box sx={{ mt: 1, mx: 'auto', width: '80%', maxWidth: 400 }}>
                     <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 1 }}>
-                      {reloadCountdown !== null 
-                        ? `検証完了！ ${reloadCountdown}秒後にリロードします...` 
-                        : 'ファイルをアップロード中...'}
+                      ファイルをアップロード中...
                     </Typography>
                     <LinearProgress />
                   </Box>
