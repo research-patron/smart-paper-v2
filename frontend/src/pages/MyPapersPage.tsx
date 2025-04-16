@@ -298,6 +298,19 @@ const SectionTitle = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
+// CategoryCardのインターフェースを定義
+interface CategoryCardProps {
+  title: string;
+  count: number;
+  isSelected: boolean;
+  onSelect: () => void;
+  icon?: React.ReactNode;
+  color?: string;
+  // 新しいプロパティをオプショナルにする
+  onEdit?: () => void;
+  onDelete?: () => void;
+}
+
 // SANGO風のカテゴリーカードコンポーネント
 const CategoryCard = ({ 
   title, 
@@ -305,7 +318,9 @@ const CategoryCard = ({
   isSelected, 
   onSelect,
   icon,
-  color
+  color,
+  onEdit,
+  onDelete
 }: { 
   title: string; 
   count: number; 
@@ -313,9 +328,40 @@ const CategoryCard = ({
   onSelect: () => void;
   icon?: React.ReactNode;
   color?: string;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }) => {
   const theme = useTheme();
   const customColor = color || theme.palette.primary.main;
+  
+  // 3点メニューの状態管理
+  const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
+  const menuOpen = Boolean(menuAnchorEl);
+  
+  // メニューを開く処理
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    event.stopPropagation(); // カード自体のクリックイベントを阻止
+    setMenuAnchorEl(event.currentTarget);
+  };
+  
+  // メニューを閉じる処理
+  const handleMenuClose = () => {
+    setMenuAnchorEl(null);
+  };
+  
+  // 編集ボタンのクリックハンドラー
+  const handleEdit = (event: React.MouseEvent) => {
+    event.stopPropagation(); // 伝播を止める
+    handleMenuClose();
+    if (onEdit) onEdit();
+  };
+  
+  // 削除ボタンのクリックハンドラー
+  const handleDelete = (event: React.MouseEvent) => {
+    event.stopPropagation(); // 伝播を止める
+    handleMenuClose();
+    if (onDelete) onDelete();
+  };
   
   return (
     <Card 
@@ -361,16 +407,65 @@ const CategoryCard = ({
               {title}
             </Typography>
           </Box>
-          <Chip 
-            label={count} 
-            size="small" 
-            sx={{ 
-              minWidth: 40,
-              fontWeight: 600,
-              bgcolor: isSelected ? customColor : undefined,
-              color: isSelected ? 'white' : undefined,
-            }} 
-          />
+          
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            {/* 数値カウント */}
+            <Chip 
+              label={count} 
+              size="small" 
+              sx={{ 
+                minWidth: 40,
+                fontWeight: 600,
+                bgcolor: isSelected ? customColor : undefined,
+                color: isSelected ? 'white' : undefined,
+                mr: 1, // 3点メニューとの間隔を追加
+              }} 
+            />
+            
+            {/* 3点メニューボタン（編集/削除可能な場合のみ表示） */}
+            {(onEdit || onDelete) && (
+              <IconButton
+                size="small"
+                aria-label="more"
+                aria-controls={menuOpen ? 'category-menu' : undefined}
+                aria-haspopup="true"
+                aria-expanded={menuOpen ? 'true' : undefined}
+                onClick={handleMenuOpen}
+                sx={{ p: 0.5 }}
+              >
+                <MoreVertIcon fontSize="small" />
+              </IconButton>
+            )}
+            
+            {/* 編集/削除メニュー */}
+            <Menu
+              id="category-menu"
+              anchorEl={menuAnchorEl}
+              open={menuOpen}
+              onClose={handleMenuClose}
+              onClick={(e) => e.stopPropagation()} // メニュークリックでカードのクリックを阻止
+              MenuListProps={{
+                'aria-labelledby': 'more-button',
+              }}
+            >
+              {onEdit && (
+                <MenuItem onClick={handleEdit}>
+                  <ListItemIcon>
+                    <EditIcon fontSize="small" />
+                  </ListItemIcon>
+                  編集
+                </MenuItem>
+              )}
+              {onDelete && (
+                <MenuItem onClick={handleDelete}>
+                  <ListItemIcon>
+                    <DeleteIcon fontSize="small" />
+                  </ListItemIcon>
+                  削除
+                </MenuItem>
+              )}
+            </Menu>
+          </Box>
         </Box>
       </CardContent>
     </Card>
@@ -1280,16 +1375,6 @@ const CollectionDialog = ({
           onChange={(e) => setName(e.target.value)}
           sx={{ mb: 2 }}
         />
-        <TextField
-          margin="dense"
-          label="説明（オプション）"
-          fullWidth
-          multiline
-          rows={2}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          sx={{ mb: 3 }}
-        />
         <Typography variant="subtitle1" gutterBottom>
           カラー
         </Typography>
@@ -1389,16 +1474,6 @@ const ProjectDialog = ({
           value={name}
           onChange={(e) => setName(e.target.value)}
           sx={{ mb: 2 }}
-        />
-        <TextField
-          margin="dense"
-          label="説明（オプション）"
-          fullWidth
-          multiline
-          rows={2}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          sx={{ mb: 3 }}
         />
         <Typography variant="subtitle1" gutterBottom>
           カラー
@@ -1620,17 +1695,6 @@ const DisplaySettingsDialog = ({
                 />
               }
               label="進捗バーを表示"
-            />
-          </Grid>
-          <Grid item xs={6}>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={localSettings.cardDisplayOptions.showAbstract}
-                  onChange={handleChange('showAbstract')}
-                />
-              }
-              label="アブストラクトを表示"
             />
           </Grid>
         </Grid>
@@ -2069,7 +2133,6 @@ const MyPapersPage = () => {
       } else {
         // デフォルトのプロジェクトを設定
         const defaultProjects: Project[] = [
-          { id: 'research-1', name: '研究プロジェクト1', color: '#3f51b5', createdAt: Date.now() },
           { id: 'thesis', name: '論文執筆', color: '#f44336', createdAt: Date.now() },
           { id: 'review', name: '文献レビュー', color: '#4caf50', createdAt: Date.now() },
         ];
@@ -2090,7 +2153,6 @@ const MyPapersPage = () => {
         // デフォルトのコレクションを設定
         const defaultCollections: Collection[] = [
           { id: 'favorites', name: 'お気に入り', color: '#ffc107', createdAt: Date.now() },
-          { id: 'ai-papers', name: 'AI関連論文', color: '#9c27b0', createdAt: Date.now() },
           { id: 'later', name: '後で読む', color: '#607d8b', createdAt: Date.now() },
         ];
         setCollections(defaultCollections);
@@ -3021,46 +3083,20 @@ const MyPapersPage = () => {
                 <Collapse in={isProjectsMenuOpen}>
                   {projects.length > 0 ? (
                     projects.map(project => (
-                      <Box key={project.id} sx={{ position: 'relative' }}>
-                        <CategoryCard
-                          title={project.name}
-                          count={extendedPapers.filter(p => p.projects?.includes(project.id)).length}
-                          isSelected={selectedProject === project.id}
-                          onSelect={() => handleProjectSelect(project.id)}
-                          icon={<WorkIcon fontSize="small" />}
-                          color={project.color}
-                        />
-                        <Box 
-                          sx={{ 
-                            position: 'absolute', 
-                            right: 8,
-                            top: 8,
-                            display: 'flex',
-                            gap: 0.5
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Tooltip title="編集">
-                            <IconButton
-                              size="small"
-                              onClick={() => {
-                                setEditingProject(project);
-                                setIsProjectDialogOpen(true);
-                              }}
-                            >
-                              <EditIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="削除">
-                            <IconButton
-                              size="small"
-                              onClick={() => handleDeleteProject(project.id)}
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </Box>
-                      </Box>
+                      <CategoryCard
+                        key={project.id}
+                        title={project.name}
+                        count={extendedPapers.filter(p => p.projects?.includes(project.id)).length}
+                        isSelected={selectedProject === project.id}
+                        onSelect={() => handleProjectSelect(project.id)}
+                        icon={<WorkIcon fontSize="small" />}
+                        color={project.color}
+                        onEdit={() => {
+                          setEditingProject(project);
+                          setIsProjectDialogOpen(true);
+                        }}
+                        onDelete={() => handleDeleteProject(project.id)}
+                      />
                     ))
                   ) : (
                     <Typography variant="body2" color="text.secondary" sx={{ ml: 4, my: 1 }}>
@@ -3069,8 +3105,7 @@ const MyPapersPage = () => {
                   )}
                 </Collapse>
               </Box>
-              
-              {/* コレクション一覧 */}
+
               <Box sx={{ mt: 3 }}>
                 <Box 
                   sx={{ 
@@ -3105,46 +3140,20 @@ const MyPapersPage = () => {
                 <Collapse in={isCollectionsMenuOpen}>
                   {collections.length > 0 ? (
                     collections.map(collection => (
-                      <Box key={collection.id} sx={{ position: 'relative' }}>
-                        <CategoryCard
-                          title={collection.name}
-                          count={extendedPapers.filter(p => p.collections?.includes(collection.id)).length}
-                          isSelected={selectedCollection === collection.id}
-                          onSelect={() => handleCollectionSelect(collection.id)}
-                          icon={<FolderSpecialIcon fontSize="small" />}
-                          color={collection.color}
-                        />
-                        <Box 
-                          sx={{ 
-                            position: 'absolute', 
-                            right: 8,
-                            top: 8,
-                            display: 'flex',
-                            gap: 0.5
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Tooltip title="編集">
-                            <IconButton
-                              size="small"
-                              onClick={() => {
-                                setEditingCollection(collection);
-                                setIsCollectionDialogOpen(true);
-                              }}
-                            >
-                              <EditIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="削除">
-                            <IconButton
-                              size="small"
-                              onClick={() => handleDeleteCollection(collection.id)}
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </Box>
-                      </Box>
+                      <CategoryCard
+                        key={collection.id}
+                        title={collection.name}
+                        count={extendedPapers.filter(p => p.collections?.includes(collection.id)).length}
+                        isSelected={selectedCollection === collection.id}
+                        onSelect={() => handleCollectionSelect(collection.id)}
+                        icon={<FolderSpecialIcon fontSize="small" />}
+                        color={collection.color}
+                        onEdit={() => {
+                          setEditingCollection(collection);
+                          setIsCollectionDialogOpen(true);
+                        }}
+                        onDelete={() => handleDeleteCollection(collection.id)}
+                      />
                     ))
                   ) : (
                     <Typography variant="body2" color="text.secondary" sx={{ ml: 4, my: 1 }}>
