@@ -35,6 +35,11 @@ gcloud projects add-iam-policy-binding ${PROJECT_ID} \
   --member=serviceAccount:${SERVICE_ACCOUNT} \
   --role=roles/cloudfunctions.invoker || true
 
+# Cloud Tasks実行権限を付与
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+  --member=serviceAccount:${SERVICE_ACCOUNT} \
+  --role=roles/cloudtasks.enqueuer || true
+
 # Secret Managerへのアクセス権限を付与
 gcloud projects add-iam-policy-binding ${PROJECT_ID} \
   --member=serviceAccount:${SERVICE_ACCOUNT} \
@@ -62,15 +67,20 @@ gcloud services enable firestore.googleapis.com
 echo -e "\n${BLUE}Firebase Auth APIを有効化...${NC}"
 gcloud services enable identitytoolkit.googleapis.com
 
+# Cloud Tasks APIを有効化
+echo -e "\n${BLUE}Cloud Tasks APIを有効化...${NC}"
+gcloud services enable cloudtasks.googleapis.com
+
 # Cloud Functions依存関係のインストール
 echo -e "\n${BLUE}Cloud Functions依存関係のインストール...${NC}"
 cd functions
-# requirements.txtを修正 - 最新バージョンを使用
+# requirements.txtを修正 - 最新バージョンとCloud Tasksを追加
 echo "firebase-functions>=0.4.2
 google-cloud-firestore>=2.0.0
 google-cloud-storage>=2.0.0
 google-cloud-aiplatform>=1.0.0
 google-cloud-secret-manager>=2.0.0
+google-cloud-tasks>=2.7.1
 Flask>=2.0.0
 python-dateutil>=2.8.2
 requests>=2.25.0
@@ -84,96 +94,16 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt -t lib --upgrade
 cd ..
 
-# 追加した性能計測モジュールが存在することを確認
-echo -e "\n${BLUE}性能計測モジュールの確認...${NC}"
-if [ ! -f "functions/performance.py" ]; then
-  echo -e "${RED}Error: functions/performance.py が見つかりません${NC}"
-  exit 1
-fi
-
-# stripe_functions.pyが存在することを確認
-echo -e "\n${BLUE}Stripeモジュールの確認...${NC}"
-if [ ! -f "functions/stripe_functions.py" ]; then
-  echo -e "${RED}Error: functions/stripe_functions.py が見つかりません${NC}"
-  exit 1
-fi
-
-# admin_functions.pyが存在することを確認
-echo -e "\n${BLUE}管理者機能モジュールの確認...${NC}"
-if [ ! -f "functions/admin_functions.py" ]; then
-  echo -e "${RED}Error: functions/admin_functions.py が見つかりません${NC}"
-  exit 1
-fi
-
-# ==========================================
-# Secret Managerのシークレット取得と設定
-# ==========================================
-echo -e "\n${BLUE}Secret Managerからシークレットキーを取得中...${NC}"
-
-# Stripe Webhook Secret Keyを取得
-WEBHOOK_SECRET=$(gcloud secrets versions access latest --secret=STRIPE_WEBHOOK_SECRET --project=${PROJECT_ID} 2>/dev/null || echo "")
-
-if [ -z "$WEBHOOK_SECRET" ]; then
-  echo -e "${YELLOW}Secret Manager に STRIPE_WEBHOOK_SECRET が見つかりません${NC}"
-  
-  # 手動入力を求める
-  echo -e "${YELLOW}Stripeダッシュボードから新しいシークレットキーを取得し、入力してください${NC}"
-  echo -e "${YELLOW}ウェブフック > エンドポイント > シークレットキーの表示${NC}"
-  read -s -p "Webhook Secret Key: " WEBHOOK_SECRET
-  
-  if [ -z "$WEBHOOK_SECRET" ]; then
-    echo -e "\n${RED}キーが入力されていません。${NC}"
-    echo -e "${YELLOW}警告: Webhook関数はStripe Webhookを処理できない可能性があります${NC}"
-  else
-    echo -e "\n${GREEN}シークレットキーを受け取りました。Secret Manager に保存します...${NC}"
-    
-    # 新しいシークレットをSecret Managerに保存
-    echo -n "$WEBHOOK_SECRET" | gcloud secrets versions add STRIPE_WEBHOOK_SECRET --data-file=- --project=${PROJECT_ID}
-    
-    if [ $? -ne 0 ]; then
-      echo -e "${RED}シークレットの保存に失敗しました。権限を確認してください。${NC}"
-      WEBHOOK_SECRET=""
-    else
-      echo -e "${GREEN}シークレットを Secret Manager に保存しました。${NC}"
-    fi
-  fi
-else
-  echo -e "${GREEN}Webhook Secret Key を Secret Manager から取得しました (${#WEBHOOK_SECRET} 文字)${NC}"
-  echo -e "${YELLOW}Webhook Secret Key の値: ${WEBHOOK_SECRET}${NC}"
-fi
-
-# Stripeの秘密鍵を取得
-STRIPE_SECRET_KEY=$(gcloud secrets versions access latest --secret=STRIPE_SECRET_KEY --project=${PROJECT_ID} 2>/dev/null || echo "")
-
-if [ -z "$STRIPE_SECRET_KEY" ]; then
-  echo -e "${YELLOW}Secret Manager に STRIPE_SECRET_KEY が見つかりません${NC}"
-  read -s -p "Stripe Secret Key (sk_...): " STRIPE_SECRET_KEY
-  
-  if [ -z "$STRIPE_SECRET_KEY" ]; then
-    echo -e "\n${RED}キーが入力されていません。${NC}"
-    echo -e "${YELLOW}警告: Stripe決済機能は動作しません${NC}"
-  else
-    echo -e "\n${GREEN}Stripe Secret Key を受け取りました。Secret Manager に保存します...${NC}"
-    echo -n "$STRIPE_SECRET_KEY" | gcloud secrets versions add STRIPE_SECRET_KEY --data-file=- --project=${PROJECT_ID}
-    
-    if [ $? -ne 0 ]; then
-      echo -e "${RED}シークレットの保存に失敗しました。権限を確認してください。${NC}"
-      STRIPE_SECRET_KEY=""
-    else
-      echo -e "${GREEN}シークレットを Secret Manager に保存しました。${NC}"
-    fi
-  fi
-else
-  echo -e "${GREEN}Stripe Secret Key を Secret Manager から取得しました (${#STRIPE_SECRET_KEY} 文字)${NC}"
-  echo -e "${YELLOW}Stripe Secret Key の値: ${STRIPE_SECRET_KEY}${NC}"
-fi
+# Cloud Tasks キューの作成スクリプトを実行
+echo -e "\n${BLUE}Cloud Tasks キューを作成/更新しています...${NC}"
+bash ./create_queue.sh
 
 # ==========================================
 # Cloud Functionsのデプロイ
 # ==========================================
 echo -e "\n${BLUE}Cloud Functions をデプロイしています...${NC}"
 
-# PDF処理関連の関数
+# 主要なPDF処理関数
 echo -e "\n${BLUE}process_pdf 関数をデプロイしています...${NC}"
 gcloud functions deploy process_pdf \
   --region=${REGION} \
@@ -181,7 +111,7 @@ gcloud functions deploy process_pdf \
   --trigger-http \
   --source=./functions \
   --entry-point=process_pdf \
-  --memory=2048MB \
+  --memory=512MB \
   --timeout=540s \
   --min-instances=0 \
   --max-instances=10 \
@@ -195,12 +125,55 @@ gcloud functions deploy process_pdf_background \
   --trigger-http \
   --source=./functions \
   --entry-point=process_pdf_background \
-  --memory=2048MB \
+  --memory=512MB \
   --timeout=540s \
   --min-instances=0 \
   --max-instances=10 \
   --allow-unauthenticated \
   --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_FUNCTIONS_SA=${SERVICE_ACCOUNT}
+
+# 非同期処理用の新しい関数をデプロイ
+echo -e "\n${BLUE}process_chapter_translation 関数をデプロイしています...${NC}"
+gcloud functions deploy process_chapter_translation \
+  --region=${REGION} \
+  --runtime=python310 \
+  --trigger-http \
+  --source=./functions \
+  --entry-point=process_chapter_translation \
+  --memory=512MB \
+  --timeout=540s \
+  --min-instances=0 \
+  --max-instances=10 \
+  --allow-unauthenticated \
+  --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
+
+echo -e "\n${BLUE}process_paper_summary 関数をデプロイしています...${NC}"
+gcloud functions deploy process_paper_summary \
+  --region=${REGION} \
+  --runtime=python310 \
+  --trigger-http \
+  --source=./functions \
+  --entry-point=process_paper_summary \
+  --memory=512MB \
+  --timeout=540s \
+  --min-instances=0 \
+  --max-instances=10 \
+  --allow-unauthenticated \
+  --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
+
+echo -e "\n${BLUE}check_paper_completion 関数をデプロイしています...${NC}"
+gcloud functions deploy check_paper_completion \
+  --region=${REGION} \
+  --runtime=python310 \
+  --trigger-http \
+  --source=./functions \
+  --entry-point=check_paper_completion \
+  --memory=512MB \
+  --timeout=60s \
+  --min-instances=0 \
+  --max-instances=10 \
+  --allow-unauthenticated \
+  --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
 
 echo -e "\n${BLUE}get_signed_url 関数をデプロイしています...${NC}"
 gcloud functions deploy get_signed_url \
@@ -312,6 +285,9 @@ echo -e "\n${GREEN}デプロイが完了しました！${NC}"
 echo -e "以下のURLでCloud Functionsにアクセスできます:"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf_background${NC}"
+echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_chapter_translation${NC}"
+echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_paper_summary${NC}"
+echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/check_paper_completion${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/get_signed_url${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/get_processing_time${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/create_stripe_checkout${NC}"

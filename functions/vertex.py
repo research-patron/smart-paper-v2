@@ -12,7 +12,7 @@ from json_utils import extract_json_from_response, extract_content_from_json
 # 環境変数から設定を取得
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT")
 LOCATION = "us-central1"  # Vertex AIのリージョン
-MODEL_NAME = "gemini-2.0-flash-lite"  # 最新のモデル名に更新
+MODEL_NAME = "gemini-2.0-flash"  # 最新のモデル名に更新
 
 # チャットセッションを保持する辞書
 # キー: 論文ID、値: ChatSessionオブジェクト
