@@ -67,6 +67,52 @@ export interface ObsidianState {
   updated_at?: Timestamp;
 }
 
+// 公開論文を取得する関数
+export const getPublicPapers = async (limitCount: number = 10): Promise<Paper[]> => {
+  try {
+    // 公開設定されている論文を取得
+    const q = query(
+      collection(db, 'papers'),
+      where('public', '==', true),
+      where('status', '==', 'completed'),
+      orderBy('public_since', 'desc'),
+      limit(limitCount)
+    );
+    
+    const querySnapshot = await getDocs(q);
+    const papers: Paper[] = [];
+    
+    querySnapshot.forEach((doc) => {
+      const data = doc.data();
+      papers.push({
+        id: doc.id,
+        user_id: data.user_id,
+        file_path: data.file_path,
+        status: data.status,
+        uploaded_at: data.uploaded_at,
+        completed_at: data.completed_at,
+        metadata: data.metadata,
+        chapters: data.chapters,
+        summary: data.summary,
+        required_knowledge: data.required_knowledge,
+        translated_text: data.translated_text,
+        translated_text_path: data.translated_text_path,
+        related_papers: data.related_papers,
+        progress: data.progress,
+        error_message: data.error_message,
+        obsidian: data.obsidian,
+        public: data.public,
+        public_since: data.public_since
+      });
+    });
+    
+    return papers;
+  } catch (error) {
+    console.error('Failed to get public papers:', error);
+    throw error;
+  }
+};
+
 export interface Paper {
   id: string;
   user_id: string;
@@ -80,12 +126,14 @@ export interface Paper {
   required_knowledge?: string | null;
   translated_text: string | null;
   translated_text_path: string | null;
-  related_papers?: RelatedPaper[] | null; // Made optional
+  related_papers?: RelatedPaper[] | null;
   error_message?: string;
   progress?: number; 
   obsidian?: ObsidianState;
   reported_at?: Timestamp; // 問題報告された日時
   report_id?: string;      // 問題報告のドキュメントID
+  public?: boolean;        // 公開設定フラグ（管理者が設定可能）
+  public_since?: Timestamp; // 公開設定された日時
 }
 
 // Cloud Functionsへのリクエスト型

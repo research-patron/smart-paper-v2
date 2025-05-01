@@ -1,5 +1,6 @@
 // ~/Desktop/smart-paper-v2/frontend/src/components/papers/PdfUpload.tsx
 import { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   Box, 
   Button, 
@@ -8,11 +9,19 @@ import {
   CardContent,
   IconButton,
   useTheme,
-  LinearProgress
+  LinearProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
+  Alert
 } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import CancelIcon from '@mui/icons-material/Cancel';
+import LoginIcon from '@mui/icons-material/Login';
+import HowToRegIcon from '@mui/icons-material/HowToReg';
 import { uploadPDF } from '../../api/papers';
 import { useAuthStore } from '../../store/authStore';
 import ErrorMessage from '../common/ErrorMessage';
@@ -24,11 +33,13 @@ interface PdfUploadProps {
 
 const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess, onFileSelect }) => {
   const { user } = useAuthStore();
+  const navigate = useNavigate();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const [loginDialogOpen, setLoginDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const theme = useTheme();
@@ -37,8 +48,8 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess, onFileSelect }) 
   const validateFile = (file: File): boolean => {
     // PDFファイルであるかチェック
     const isPdf = file.name.toLowerCase().endsWith('.pdf');
-    // ファイルサイズが10MB以下であるかチェック
-    const isValidSize = file.size <= 10 * 1024 * 1024; // 10MB
+    // ファイルサイズが20MB以下であるかチェック
+    const isValidSize = file.size <= 20 * 1024 * 1024; // 20MB
     
     if (!isPdf) {
       setError('PDFファイルのみアップロード可能です');
@@ -46,7 +57,7 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess, onFileSelect }) 
     }
     
     if (!isValidSize) {
-      setError('ファイルサイズは10MB以下にしてください');
+      setError('ファイルサイズは20MB以下にしてください');
       return false;
     }
     
@@ -61,6 +72,12 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess, onFileSelect }) 
       if (validateFile(file)) {
         setSelectedFile(file);
         setError(null);
+        
+        // ログインしていない場合はログインダイアログを表示
+        if (!user) {
+          setLoginDialogOpen(true);
+          return;
+        }
         
         // ファイルが選択された時点で親コンポーネントに通知
         if (onFileSelect) {
@@ -108,6 +125,12 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess, onFileSelect }) 
         setSelectedFile(file);
         setError(null);
         
+        // ログインしていない場合はログインダイアログを表示
+        if (!user) {
+          setLoginDialogOpen(true);
+          return;
+        }
+        
         // ファイルがドロップされた時点で親コンポーネントに通知
         if (onFileSelect) {
           onFileSelect(file);
@@ -124,6 +147,12 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess, onFileSelect }) 
     // アップロード中は選択ダイアログを開かない
     if (isUploading) return;
     
+    // ログインしていない場合はログインダイアログを表示
+    if (!user) {
+      setLoginDialogOpen(true);
+      return;
+    }
+    
     if (fileInputRef.current) {
       fileInputRef.current.click();
     }
@@ -136,8 +165,13 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess, onFileSelect }) 
       return;
     }
     
-    // デモ用：userが未設定でも動作するように修正
-    const userId = user?.uid || 'demo-user-id';
+    // ユーザーがログインしていない場合は処理しない（ログインダイアログを表示）
+    if (!user) {
+      setLoginDialogOpen(true);
+      return;
+    }
+    
+    const userId = user.uid;
     
     setIsUploading(true);
     setError(null);
@@ -184,6 +218,26 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess, onFileSelect }) 
     if (bytes < 1024) return bytes + ' bytes';
     else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
     else return (bytes / 1048576).toFixed(1) + ' MB';
+  };
+  
+  // ログインダイアログを閉じる
+  const handleCloseLoginDialog = () => {
+    setLoginDialogOpen(false);
+    // ファイル選択状態をリセット
+    setSelectedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+  
+  // ログインページへ移動
+  const handleNavigateToLogin = () => {
+    navigate('/login');
+  };
+  
+  // 会員登録ページへ移動
+  const handleNavigateToRegister = () => {
+    navigate('/register');
   };
   
   return (
@@ -345,6 +399,49 @@ const PdfUpload: React.FC<PdfUploadProps> = ({ onUploadSuccess, onFileSelect }) 
           </CardContent>
         </Card>
       </Box>
+      
+      {/* ログイン促進ダイアログ */}
+      <Dialog 
+        open={loginDialogOpen} 
+        onClose={handleCloseLoginDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>ログインが必要です</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            論文の翻訳・要約機能を利用するには、ログインが必要です。アカウントをお持ちでない場合は、会員登録を行ってください。
+          </DialogContentText>
+          
+          <Alert severity="info" sx={{ mb: 2 }}>
+            ログインすると、翻訳した論文の保存や、マークダウン形式でのエクスポート、関連論文の検索など、様々な機能が利用できます。
+          </Alert>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3, display: 'flex', justifyContent: 'center', gap: 2 }}>
+          <Button 
+            onClick={handleCloseLoginDialog} 
+            color="inherit"
+          >
+            キャンセル
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<HowToRegIcon />}
+            onClick={handleNavigateToRegister}
+          >
+            会員登録
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<LoginIcon />}
+            onClick={handleNavigateToLogin}
+            autoFocus
+          >
+            ログイン
+          </Button>
+        </DialogActions>
+      </Dialog>
       
       {error && (
         <ErrorMessage 

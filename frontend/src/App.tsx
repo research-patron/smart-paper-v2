@@ -63,6 +63,63 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return <>{children}</>;
 };
 
+// パブリック論文表示用または認証済みユーザーのみアクセス可能なルート
+const PublicOrProtectedRoute: React.FC<{ children: React.ReactNode, paperId: string }> = ({ children, paperId }) => {
+  const { user, loading } = useAuthStore();
+  const [isPublicPaper, setIsPublicPaper] = useState<boolean | null>(null);
+  const [checkingStatus, setCheckingStatus] = useState(true);
+  
+  // 論文の公開状態を確認
+  useEffect(() => {
+    const checkPaperPublicStatus = async () => {
+      try {
+        // Firestoreから論文データを直接取得
+        const paperRef = doc(db, 'papers', paperId);
+        const paperSnap = await getDoc(paperRef);
+        
+        if (paperSnap.exists()) {
+          const paperData = paperSnap.data();
+          setIsPublicPaper(paperData.public === true);
+        } else {
+          // 論文が存在しない場合
+          setIsPublicPaper(false);
+        }
+      } catch (error) {
+        console.error('Failed to check paper public status:', error);
+        setIsPublicPaper(false);
+      } finally {
+        setCheckingStatus(false);
+      }
+    };
+    
+    if (paperId) {
+      checkPaperPublicStatus();
+    }
+  }, [paperId]);
+  
+  // 認証状態とパブリック状態の両方を確認中はローディング表示
+  if (loading || checkingStatus) {
+    return (
+      <Container sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+        <CircularProgress />
+      </Container>
+    );
+  }
+  
+  // 1. 論文が公開されている場合はアクセス許可
+  if (isPublicPaper) {
+    return <>{children}</>;
+  }
+  
+  // 2. ユーザーがログインしている場合はアクセス許可
+  if (user) {
+    return <>{children}</>;
+  }
+  
+  // 3. 上記以外の場合はログインページにリダイレクト
+  return <Navigate to="/login" />;
+};
+
 // 管理者ルートのコンポーネント
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuthStore();
@@ -279,7 +336,7 @@ function App() {
           <Header />
           <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 3 } }}>
             <Routes>
-              <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
+              <Route path="/" element={<HomePage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -287,11 +344,11 @@ function App() {
               {/* 追加: メール確認ページ */}
               <Route path="/verify-email" element={<EmailVerificationPage />} />
               
+              {/* 論文閲覧ページ - PublicOrProtectedRouteに変更 */}
               <Route path="/papers/:id" element={
-                <ProtectedRoute>
-                  <PaperViewPage />
-                </ProtectedRoute>
+                <PaperViewPage />
               } />
+              
               <Route path="/profile" element={
                 <ProtectedRoute>
                   <ProfilePage />

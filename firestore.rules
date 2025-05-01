@@ -9,6 +9,11 @@ service cloud.firestore {
          request.auth.token.email == 's.kosei0626@gmail.com');
     }
 
+    // 公開論文かどうかをチェックする関数
+    function isPublicPaper(paperData) {
+      return paperData != null && paperData.public == true;
+    }
+
     // コレクショングループクエリのための権限設定
     match /{document=**}/papers/{paperId} {
       allow read, list: if isAdmin();
@@ -27,12 +32,21 @@ service cloud.firestore {
     
      // 論文ドキュメント
     match /papers/{paperId} {
-      allow read: if request.auth != null && (
-        resource.data.user_id == request.auth.uid || 
-        exists(/databases/$(database)/documents/papers/$(paperId)/shared_with_admins/$(request.auth.uid)) ||
-        isAdmin()
-      );
+      // 読み取り権限:
+      // 1. 認証されたユーザーが自分の論文を読む場合
+      // 2. 管理者が共有された論文を読む場合
+      // 3. 管理者が読む場合
+      // 4. 未認証ユーザーを含む全てのユーザーが公開論文を読む場合
+      allow read: if 
+        (request.auth != null && resource.data.user_id == request.auth.uid) || 
+        (request.auth != null && exists(/databases/$(database)/documents/papers/$(paperId)/shared_with_admins/$(request.auth.uid))) ||
+        isAdmin() ||
+        isPublicPaper(resource.data);
+      
+      // 作成権限: 認証されたユーザーのみ
       allow create: if request.auth != null;
+      
+      // 更新・削除権限: 所有者または管理者のみ
       allow update, delete: if request.auth != null && (
         resource.data.user_id == request.auth.uid ||
         isAdmin()
@@ -40,7 +54,17 @@ service cloud.firestore {
       
       // 章の翻訳サブコレクション
       match /translated_chapters/{chapterId} {
-        allow read, write: if request.auth != null && (
+        // 読み取り権限:
+        // 1. 認証されたユーザーが自分の論文の章を読む場合
+        // 2. 管理者が読む場合
+        // 3. 未認証ユーザーを含む全てのユーザーが公開論文の章を読む場合
+        allow read: if 
+          (request.auth != null && get(/databases/$(database)/documents/papers/$(paperId)).data.user_id == request.auth.uid) ||
+          isAdmin() ||
+          isPublicPaper(get(/databases/$(database)/documents/papers/$(paperId)).data);
+        
+        // 書き込み権限: 所有者または管理者のみ
+        allow write: if request.auth != null && (
           get(/databases/$(database)/documents/papers/$(paperId)).data.user_id == request.auth.uid ||
           isAdmin()
         );

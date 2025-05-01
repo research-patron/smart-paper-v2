@@ -25,6 +25,7 @@ import {
   IconButton,
   Link,
   LinearProgress,
+  CircularProgress,
 } from '@mui/material';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -33,18 +34,23 @@ import StarIcon from '@mui/icons-material/Star';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import DescriptionIcon from '@mui/icons-material/Description';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import PublicIcon from '@mui/icons-material/Public';
+import LoginIcon from '@mui/icons-material/Login';
+import HowToRegIcon from '@mui/icons-material/HowToReg';
 import { Link as RouterLink } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { usePaperStore } from '../store/paperStore';
 import SubscriptionInfoCard from '../components/subscription/SubscriptionInfoCard';
 import PdfUpload from '../components/papers/PdfUpload';
-import { Paper as PaperType } from '../api/papers';
+import { Paper as PaperType, getPublicPapers } from '../api/papers';
 
 const HomePage = () => {
   const navigate = useNavigate();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [paperToDelete, setPaperToDelete] = useState<string | null>(null);
   const [limitAlertOpen, setLimitAlertOpen] = useState(false);
+  const [publicPapers, setPublicPapers] = useState<PaperType[]>([]);
+  const [loadingPublicPapers, setLoadingPublicPapers] = useState(false);
   
   // ファイル選択状態を追加
   const [isFileSelected, setIsFileSelected] = useState(false);
@@ -115,6 +121,33 @@ const HomePage = () => {
     }
   }, [user, fetchUserPapers, clearError]);
 
+  // 公開論文を取得する - 非会員ユーザーの場合のみ
+  const fetchPublicPapers = async () => {
+    // ログイン済みユーザーの場合は公開論文を表示しない
+    if (user) {
+      setPublicPapers([]);
+      return;
+    }
+    
+    try {
+      setLoadingPublicPapers(true);
+      
+      // 公開設定されている論文を取得
+      const papersList = await getPublicPapers(6);
+      setPublicPapers(papersList);
+      
+    } catch (error) {
+      console.error('Failed to fetch public papers:', error);
+    } finally {
+      setLoadingPublicPapers(false);
+    }
+  };
+
+  // 公開論文データを初期ロード - ユーザー状態に応じて実行
+  useEffect(() => {
+    fetchPublicPapers();
+  }, [user]); // userの状態が変わったら再取得（ログイン/ログアウト時）
+
   // PDFアップロード成功時の処理
   const handleUploadSuccess = useCallback((paperId: string) => {
     // 論文IDを参照に保存（タイマー内で使用するため）
@@ -171,6 +204,9 @@ const HomePage = () => {
   const handleFileSelect = useCallback((file: File) => {
     // ファイル選択状態を有効化
     setIsFileSelected(true);
+    
+    // 未ログインの場合は何もしない（PdfUploadコンポーネント側で処理）
+    if (!user) return;
     
     // 一時的な処理中論文データを作成
     const tempPaper: PaperType = {
@@ -289,7 +325,7 @@ const HomePage = () => {
 
   // 処理中の論文を監視
   useEffect(() => {
-    if (latestProcessingPaper && !isFileSelected) {
+    if (latestProcessingPaper && !isFileSelected && user) {
       // 実際の論文データの場合はwatchPaperProgressを呼び出す
       // （一時データの場合は呼ばない）
       watchPaperProgress(latestProcessingPaper.id);
@@ -297,7 +333,7 @@ const HomePage = () => {
       // 論文IDを参照に保存
       paperIdRef.current = latestProcessingPaper.id;
     }
-  }, [latestProcessingPaper?.id, watchPaperProgress, isFileSelected]);
+  }, [latestProcessingPaper?.id, watchPaperProgress, isFileSelected, user]);
 
   // 論文の完了またはエラー状態を監視し、定期更新を停止
   useEffect(() => {
@@ -316,19 +352,73 @@ const HomePage = () => {
 
   // 表示できる論文一覧（処理中以外または最新の処理中以外の論文）
   const displayablePapers = useMemo(() => {
+    if (!user) return [];
+    
     return papers
       .filter(paper => !latestProcessingPaper || paper.id !== latestProcessingPaper.id)
       .slice(0, 6); // 最大6件まで表示
-  }, [papers, latestProcessingPaper]);
+  }, [papers, latestProcessingPaper, user]);
 
   // ローディング状態の計算 - サイレント更新中は表示用のローディングをfalseにする
-  const showLoading = loading && !silentUpdate && !initialLoadComplete && displayablePapers.length === 0;
+  const showLoading = loading && !silentUpdate && !initialLoadComplete && user && displayablePapers.length === 0;
 
   return (
     <Container maxWidth="lg">
       <Box sx={{ my: 4 }}>
+        {/* 未ログインユーザー向けウェルカムメッセージ */}
+        {!user && (
+          <Box sx={{ mb: 6 }}>
+            <Grid container spacing={3} alignItems="center">
+              <Grid item xs={12} md={7}>
+                <Typography variant="h3" component="h1" gutterBottom>
+                  Smart Paper V2
+                </Typography>
+                <Typography variant="h5" color="text.secondary" gutterBottom>
+                  英語論文を簡単に日本語で理解
+                </Typography>
+                <Typography variant="body1" paragraph>
+                  Smart Paper V2は、英語で書かれた学術論文を日本語に翻訳し、要約してくれるAIツールです。
+                  研究者や学生の論文読解をサポートします。
+                </Typography>
+                
+                <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
+                  <Button 
+                    variant="contained" 
+                    color="primary" 
+                    size="large"
+                    startIcon={<LoginIcon />}
+                    onClick={() => navigate('/login')}
+                  >
+                    ログイン
+                  </Button>
+                  <Button 
+                    variant="outlined"
+                    size="large"
+                    startIcon={<HowToRegIcon />}
+                    onClick={() => navigate('/register')}
+                  >
+                    会員登録
+                  </Button>
+                </Box>
+              </Grid>
+              <Grid item xs={12} md={5}>
+                <Box component="img" 
+                  src="/images/paper-illustration.svg" 
+                  alt="論文翻訳イメージ"
+                  sx={{ 
+                    width: '100%', 
+                    maxWidth: 400,
+                    display: 'block',
+                    mx: 'auto'
+                  }}
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        )}
+
         {/* 処理中の論文がない場合のみ「論文を翻訳する」見出しを表示 */}
-        {!latestProcessingPaper && (
+        {(!latestProcessingPaper || !user) && (
           <Box sx={{ display: 'flex', justifyContent: 'left', alignItems: 'left', mb: 3 }}>
             <Typography variant="h4" component="h1" gutterBottom>
               論文を翻訳する
@@ -339,7 +429,7 @@ const HomePage = () => {
         {/* PDFアップロードエリアを画面幅いっぱいに拡大 */}
         <Grid container sx={{ mb: 6 }}>
           <Grid item xs={12}>
-            {latestProcessingPaper ? (
+            {user && latestProcessingPaper ? (
               <Box sx={{ mb: 4 }}>
                 <Typography variant="h5" gutterBottom>
                   処理中の論文
@@ -422,145 +512,275 @@ const HomePage = () => {
           </Grid>
         </Grid>
 
+        {/* 公開論文セクション - 非ログインユーザーのみに表示 */}
+        {!user && publicPapers.length > 0 && (
+          <Box sx={{ mb: 5 }}>
+            <Typography variant="h5" component="h2" gutterBottom>
+              公開されている論文
+            </Typography>
+            
+            {loadingPublicPapers ? (
+              <Box sx={{ textAlign: 'center', py: 4 }}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <Grid container spacing={2}>
+                {publicPapers.map((paper) => (
+                  <Grid item xs={12} sm={6} md={4} key={paper.id}>
+                    <Card variant="outlined" sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                      <CardActionArea 
+                        onClick={() => navigate(`/papers/${paper.id}`)}
+                        sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}
+                      >
+                        <CardContent sx={{ width: '100%' }}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1, width: '100%' }}>
+                            <Chip
+                              icon={<PublicIcon />}
+                              label="公開論文"
+                              size="small"
+                              color="success"
+                              variant="outlined"
+                            />
+                          </Box>
+                          
+                          <Typography variant="h6" noWrap title={paper.metadata?.title}>
+                            {paper.metadata?.title || '無題の論文'}
+                          </Typography>
+                          
+                          <Typography variant="body2" color="text.secondary" noWrap>
+                            {paper.metadata?.authors?.map(a => a.name).join(', ') || '著者不明'}
+                          </Typography>
+                          
+                          {paper.metadata?.year && (
+                            <Typography variant="caption" display="block" color="text.secondary">
+                              {paper.metadata.year}年
+                            </Typography>
+                          )}
+                          
+                          {paper.metadata?.journal && (
+                            <Typography 
+                              variant="caption" 
+                              display="block" 
+                              color="text.secondary"
+                              sx={{ mt: 1 }}
+                              noWrap
+                            >
+                              {paper.metadata.journal}
+                            </Typography>
+                          )}
+
+                          {/* 短い要約（あれば） */}
+                          {paper.summary && (
+                            <Typography
+                              variant="body2"
+                              color="text.secondary"
+                              sx={{
+                                mt: 2,
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis'
+                              }}
+                            >
+                              {paper.summary.slice(0, 100)}...
+                            </Typography>
+                          )}
+                        </CardContent>
+                      </CardActionArea>
+                    </Card>
+                  </Grid>
+                ))}
+              </Grid>
+            )}
+          </Box>
+        )}
+
         {/* 論文一覧とプランカードを同じ高さレベルに配置 */}
         <Grid container spacing={3}>
-          <Grid item xs={12} md={8}>
-            {/* 論文一覧 */}
-            <Box sx={{ mb: 3 }}>
-              <Box sx={{ 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: 2,
-                mb: 2 
-              }}>
-                <Typography variant="h5" component="h2">
-                  最近の翻訳履歴
-                </Typography>
-                
-                <Button
-                  variant="outlined"
-                  startIcon={<MenuBookIcon />}
-                  onClick={() => navigate('/my-papers')}
-                >
-                  すべての論文を見る
-                </Button>
-              </Box>
-
-              {showLoading ? (
-                <Paper sx={{ p: 3, textAlign: 'center' }}>
-                  <Typography>読み込み中...</Typography>
-                </Paper>
-              ) : error ? (
-                <Alert severity="error">{error}</Alert>
-              ) : displayablePapers.length === 0 ? (
-                <Paper sx={{ p: 3, textAlign: 'center' }}>
-                  <MenuBookIcon sx={{ fontSize: 60, color: 'text.secondary', opacity: 0.3 }} />
-                  <Typography variant="h6">論文がありません</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    PDFをアップロードして論文を翻訳してみましょう
+          {/* 論文一覧（ログイン済みの場合のみ） */}
+          {user && (
+            <Grid item xs={12} md={8}>
+              <Box sx={{ mb: 3 }}>
+                <Box sx={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: 2,
+                  mb: 2 
+                }}>
+                  <Typography variant="h5" component="h2">
+                    最近の翻訳履歴
                   </Typography>
-                </Paper>
-              ) : (
-                <Grid container spacing={2}>
-                  {displayablePapers.map((paper) => (
-                    <Grid item xs={12} sm={6} key={paper.id}>
-                      <Card variant="outlined">
-                        <CardActionArea onClick={() => navigate(`/papers/${paper.id}`)}>
-                          <CardContent sx={{ minHeight: 180 }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                              <Chip
-                                label={getStatusText(paper.status)}
-                                size="small"
-                                color={
-                                  paper.status === 'completed' ? 'success' :
-                                  paper.status === 'error' ? 'error' :
-                                  'primary'
-                                }
-                                variant={paper.status === 'completed' ? 'filled' : 'outlined'}
-                              />
-                            </Box>
-                            
-                            <Typography variant="h6" noWrap title={paper.metadata?.title}>
-                              {paper.metadata?.title || '無題の論文'}
-                            </Typography>
-                            
-                            <Typography variant="body2" color="text.secondary" noWrap>
-                              {paper.metadata?.authors?.map(a => a.name).join(', ') || '著者不明'}
-                            </Typography>
-                            
-                            {paper.metadata?.year && (
-                              <Typography variant="caption" display="block" color="text.secondary">
-                                {paper.metadata.year}年
-                              </Typography>
-                            )}
-                            
-                            {paper.metadata?.journal && (
-                              <Typography 
-                                variant="caption" 
-                                display="block" 
-                                color="text.secondary"
-                                sx={{ mt: 1 }}
-                                noWrap
-                              >
-                                {paper.metadata.journal}
-                              </Typography>
-                            )}
-                            
-                            {paper.status === 'processing' && paper.progress && (
-                              <Box sx={{ mt: 2 }}>
-                                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                  <Typography variant="caption" color="text.secondary">処理中...</Typography>
-                                  <Typography variant="caption" color="text.secondary">{paper.progress}%</Typography>
-                                </Box>
-                                <Box sx={{ width: '100%', mr: 1 }}>
-                                  <LinearProgress variant="determinate" value={paper.progress} />
-                                </Box>
-                              </Box>
-                            )}
-                          </CardContent>
-                        </CardActionArea>
-                        <Box sx={{ 
-                          display: 'flex', 
-                          justifyContent: 'flex-end', 
-                          p: 1, 
-                          borderTop: '1px solid',
-                          borderColor: 'divider'
-                        }}>
-                          <IconButton 
-                            size="small"
-                            color="error"
-                            onClick={(e: React.MouseEvent) => {
-                              e.stopPropagation();
-                              setPaperToDelete(paper.id);
-                              setDeleteDialogOpen(true);
-                            }}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Box>
-                      </Card>
-                    </Grid>
-                  ))}
-                </Grid>
-              )}
-            </Box>
-          </Grid>
+                  
+                  <Button
+                    variant="outlined"
+                    startIcon={<MenuBookIcon />}
+                    onClick={() => navigate('/my-papers')}
+                  >
+                    すべての論文を見る
+                  </Button>
+                </Box>
 
-          <Grid item xs={12} md={4}>
-            {/* 省略（変更なし） */}
-            {/* プロフィールと翻訳状況表示 */}
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-              <Button
-                variant="outlined"
-                startIcon={<AccountCircleIcon />}
-                onClick={() => navigate('/profile')}
-              >
-                プロフィール
-              </Button>
-            </Box>
-            {userData && <SubscriptionInfoCard userData={userData} />}
+                {showLoading ? (
+                  <Paper sx={{ p: 3, textAlign: 'center' }}>
+                    <Typography>読み込み中...</Typography>
+                  </Paper>
+                ) : error ? (
+                  <Alert severity="error">{error}</Alert>
+                ) : displayablePapers.length === 0 ? (
+                  <Paper sx={{ p: 3, textAlign: 'center' }}>
+                    <MenuBookIcon sx={{ fontSize: 60, color: 'text.secondary', opacity: 0.3 }} />
+                    <Typography variant="h6">論文がありません</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      PDFをアップロードして論文を翻訳してみましょう
+                    </Typography>
+                  </Paper>
+                ) : (
+                  <Grid container spacing={2}>
+                    {displayablePapers.map((paper) => (
+                      <Grid item xs={12} sm={6} key={paper.id}>
+                        <Card variant="outlined">
+                          <CardActionArea onClick={() => navigate(`/papers/${paper.id}`)}>
+                            <CardContent sx={{ minHeight: 180 }}>
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                                <Chip
+                                  label={getStatusText(paper.status)}
+                                  size="small"
+                                  color={
+                                    paper.status === 'completed' ? 'success' :
+                                    paper.status === 'error' ? 'error' :
+                                    'primary'
+                                  }
+                                  variant={paper.status === 'completed' ? 'filled' : 'outlined'}
+                                />
+                                {paper.public && (
+                                  <Chip
+                                    icon={<PublicIcon />}
+                                    label="公開中"
+                                    size="small"
+                                    color="success"
+                                    variant="outlined"
+                                  />
+                                )}
+                              </Box>
+                              
+                              <Typography variant="h6" noWrap title={paper.metadata?.title}>
+                                {paper.metadata?.title || '無題の論文'}
+                              </Typography>
+                              
+                              <Typography variant="body2" color="text.secondary" noWrap>
+                                {paper.metadata?.authors?.map(a => a.name).join(', ') || '著者不明'}
+                              </Typography>
+                              
+                              {paper.metadata?.year && (
+                                <Typography variant="caption" display="block" color="text.secondary">
+                                  {paper.metadata.year}年
+                                </Typography>
+                              )}
+                              
+                              {paper.metadata?.journal && (
+                                <Typography 
+                                  variant="caption" 
+                                  display="block" 
+                                  color="text.secondary"
+                                  sx={{ mt: 1 }}
+                                  noWrap
+                                >
+                                  {paper.metadata.journal}
+                                </Typography>
+                              )}
+                              
+                              {paper.status === 'processing' && paper.progress && (
+                                <Box sx={{ mt: 2 }}>
+                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                                    <Typography variant="caption" color="text.secondary">処理中...</Typography>
+                                    <Typography variant="caption" color="text.secondary">{paper.progress}%</Typography>
+                                  </Box>
+                                  <Box sx={{ width: '100%', mr: 1 }}>
+                                    <LinearProgress variant="determinate" value={paper.progress} />
+                                  </Box>
+                                </Box>
+                              )}
+                            </CardContent>
+                          </CardActionArea>
+                          <Box sx={{ 
+                            display: 'flex', 
+                            justifyContent: 'flex-end', 
+                            p: 1, 
+                            borderTop: '1px solid',
+                            borderColor: 'divider'
+                          }}>
+                            <IconButton 
+                              size="small"
+                              color="error"
+                              onClick={(e: React.MouseEvent) => {
+                                e.stopPropagation();
+                                setPaperToDelete(paper.id);
+                                setDeleteDialogOpen(true);
+                              }}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </Card>
+                      </Grid>
+                    ))}
+                  </Grid>
+                )}
+              </Box>
+            </Grid>
+          )}
+
+          <Grid item xs={12} md={user ? 4 : 12}>
+            {/* ログイン済みユーザー向け：プロフィールと翻訳状況表示 */}
+            {user && (
+              <>
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+                  <Button
+                    variant="outlined"
+                    startIcon={<AccountCircleIcon />}
+                    onClick={() => navigate('/profile')}
+                  >
+                    プロフィール
+                  </Button>
+                </Box>
+                {userData && <SubscriptionInfoCard userData={userData} />}
+              </>
+            )}
+            
+            {/* 非ログインユーザー向け：会員登録促進カード */}
+            {!user && (
+              <Card sx={{ mb: 3, bgcolor: 'primary.light', boxShadow: 3 }}>
+                <CardContent sx={{ p: 3 }}>
+                  <Typography variant="h5" component="h3" gutterBottom>
+                    会員登録で全機能利用可能に
+                  </Typography>
+                  <Typography variant="body1" paragraph>
+                    会員登録すると、論文の翻訳・要約機能が利用できるようになります。
+                    また、翻訳した論文はマイページに保存され、いつでも閲覧できます。
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      startIcon={<LoginIcon />}
+                      onClick={() => navigate('/login')}
+                    >
+                      ログイン
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      startIcon={<HowToRegIcon />}
+                      onClick={() => navigate('/register')}
+                    >
+                      会員登録
+                    </Button>
+                  </Box>
+                </CardContent>
+              </Card>
+            )}
             
             {/* 機能紹介 */}
             <Paper sx={{ p: 3, mb: 3 }}>
@@ -600,7 +820,7 @@ const HomePage = () => {
             </Paper>
             
             {/* プレミアムプラン宣伝 */}
-            {!isPremium && (
+            {user && !isPremium && (
               <Paper sx={{ p: 3, borderLeft: '4px solid', borderColor: 'primary.main' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                   <StarIcon color="primary" sx={{ mr: 1 }} />
@@ -639,6 +859,66 @@ const HomePage = () => {
                   sx={{ mt: 2 }}
                 >
                   プレミアムにアップグレード
+                </Button>
+                <Typography variant="caption" color="text.secondary" align="center" sx={{ display: 'block', mt: 1 }}>
+                  月額¥500 または 年額¥5,000 (月あたり¥417)
+                </Typography>
+              </Paper>
+            )}
+            
+            {/* 非ログインユーザー向け：プレミアム情報 */}
+            {!user && (
+              <Paper sx={{ p: 3, borderLeft: '4px solid', borderColor: 'primary.main' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <StarIcon color="primary" sx={{ mr: 1 }} />
+                  <Typography variant="h6">
+                    プレミアムプラン
+                  </Typography>
+                </Box>
+                
+                <Typography variant="body2" paragraph>
+                  プレミアムプランでは、月額たったの500円で以下の特典が得られます：
+                </Typography>
+                
+                <List dense>
+                  <ListItem>
+                    <ListItemIcon sx={{ minWidth: 36 }}>
+                      <StarIcon fontSize="small" color="primary" />
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary="翻訳回数無制限" 
+                      secondary="制限なくいつでも翻訳可能" 
+                    />
+                  </ListItem>
+                  <ListItem>
+                    <ListItemIcon sx={{ minWidth: 36 }}>
+                      <StarIcon fontSize="small" color="primary" />
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary="論文の長期保存" 
+                      secondary="論文を長期間保存して管理" 
+                    />
+                  </ListItem>
+                  <ListItem>
+                    <ListItemIcon sx={{ minWidth: 36 }}>
+                      <StarIcon fontSize="small" color="primary" />
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary="優先処理" 
+                      secondary="リクエストを優先的に処理" 
+                    />
+                  </ListItem>
+                </List>
+                
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  fullWidth 
+                  onClick={() => navigate('/register')}
+                  startIcon={<StarIcon />}
+                  sx={{ mt: 2 }}
+                >
+                  会員登録してプレミアムを利用
                 </Button>
                 <Typography variant="caption" color="text.secondary" align="center" sx={{ display: 'block', mt: 1 }}>
                   月額¥500 または 年額¥5,000 (月あたり¥417)

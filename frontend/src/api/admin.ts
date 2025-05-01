@@ -1,4 +1,4 @@
-// ~/Desktop/smart-paper-v2/frontend/src/api/admin.ts
+// frontend/src/api/admin.ts
 import { 
   collection, 
   query, 
@@ -7,7 +7,9 @@ import {
   orderBy, 
   getDoc,
   doc,
-  collectionGroup
+  collectionGroup,
+  updateDoc,
+  Timestamp
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { Paper, getCurrentUserToken } from './papers';
@@ -221,6 +223,31 @@ export const getGeminiLogs = async (paperId: string): Promise<any[]> => {
     return logs;
   } catch (error) {
     console.error('Failed to get Gemini logs:', error);
+    throw error;
+  }
+};
+
+// 論文の公開状態を切り替える関数を追加
+export const togglePaperPublicStatus = async (paperId: string, isPublic: boolean): Promise<void> => {
+  try {
+    // 認証トークンを取得（管理者権限が必要）
+    const token = await getCurrentUserToken();
+    if (!token) {
+      throw new Error('認証が必要です');
+    }
+    
+    // 論文ドキュメントへの参照を取得
+    const paperRef = doc(db, 'papers', paperId);
+    
+    // 公開状態を更新
+    await updateDoc(paperRef, {
+      public: isPublic,
+      public_since: isPublic ? Timestamp.now() : null
+    });
+    
+    console.log(`Paper ${paperId} public status updated to: ${isPublic}`);
+  } catch (error) {
+    console.error('Failed to toggle paper public status:', error);
     throw error;
   }
 };

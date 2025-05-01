@@ -35,13 +35,15 @@ import TranslateIcon from '@mui/icons-material/Translate';
 import SummarizeIcon from '@mui/icons-material/Summarize';
 import InfoIcon from '@mui/icons-material/Info';
 import SaveAltIcon from '@mui/icons-material/SaveAlt';
-import BookIcon from '@mui/icons-material/Book';
+import BookIcon from '@mui/icons-material/MenuBook';
 import TocIcon from '@mui/icons-material/Toc';
 import CloudDoneIcon from '@mui/icons-material/CloudDone';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
+import PublicIcon from '@mui/icons-material/Public';
+import LoginIcon from '@mui/icons-material/Login';
 import { usePaperStore } from '../store/paperStore';
 import { useAuthStore } from '../store/authStore';
 import ErrorMessage from '../components/common/ErrorMessage';
@@ -131,10 +133,28 @@ const PaperViewPage: React.FC = () => {
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [obsidianExportStatus, setObsidianExportStatus] = useState<'success' | 'error' | 'pending' | 'none'>('none');
   const [isLoadingText, setIsLoadingText] = useState<boolean>(false);
+  const [isPublicPaper, setIsPublicPaper] = useState<boolean>(false);
 
   // 管理者かどうかをチェック
   const isAdmin = user?.email === 'smart-paper-v2@student-subscription.com' || 
                  user?.email === 's.kosei0626@gmail.com';
+
+  // 論文の公開ステータスをチェック
+  const checkPaperPublicStatus = async () => {
+    if (!id) return;
+    
+    try {
+      const paperRef = doc(db, 'papers', id);
+      const paperSnap = await getDoc(paperRef);
+      
+      if (paperSnap.exists()) {
+        const paperData = paperSnap.data();
+        setIsPublicPaper(paperData.public === true);
+      }
+    } catch (error) {
+      console.error('Error checking paper public status:', error);
+    }
+  };
 
   // カスタム関数: 論文データを取得して再読み込み
   const refreshPaper = async () => {
@@ -175,14 +195,24 @@ const PaperViewPage: React.FC = () => {
   }, [currentPaper]);
 
   useEffect(() => {
-    if (id && user) {
-      fetchPaper(id);
+    // 論文の公開ステータスをチェック
+    checkPaperPublicStatus();
+    
+    if (id) {
+      // 未ログインの場合で、公開論文でない場合は早期リターン
+      if (!user && !isPublicPaper) {
+        // 未ログインチェックはこの時点ではまだできない
+        // フェッチ処理の中で対応する
+      } else {
+        fetchPaper(id);
+      }
     }
+    
     return () => {
       clearCurrentPaper();
       setLocalTranslatedText(null);
     };
-  }, [id, user, fetchPaper, clearCurrentPaper]);
+  }, [id, user, fetchPaper, clearCurrentPaper, isPublicPaper]);
   
   // Obsidian設定の読み込み（Firestoreから）
   useEffect(() => {
@@ -693,18 +723,28 @@ const PaperViewPage: React.FC = () => {
       return (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           <Chip label="翻訳完了" color="success" />
-          <ObsidianExportStatusChip />
-          <Tooltip title="問題を報告する">
+          {isPublicPaper && (
             <Chip 
-              label="問題報告" 
-              color="default"
-              variant="outlined"  
-              icon={<ReportProblemIcon />} 
-              onClick={() => navigate(`/contact?tab=1&paper_id=${currentPaper.id}`)}
-              clickable
-              sx={{ cursor: 'pointer' }}
+              icon={<PublicIcon />} 
+              label="公開論文" 
+              color="success" 
+              variant="outlined"
             />
-          </Tooltip>
+          )}
+          {user && <ObsidianExportStatusChip />}
+          {user && (
+            <Tooltip title="問題を報告する">
+              <Chip 
+                label="問題報告" 
+                color="default"
+                variant="outlined"  
+                icon={<ReportProblemIcon />} 
+                onClick={() => navigate(`/contact?tab=1&paper_id=${currentPaper.id}`)}
+                clickable
+                sx={{ cursor: 'pointer' }}
+              />
+            </Tooltip>
+          )}
         </Box>
       );
     } else if (currentPaper.status === 'error') {
@@ -736,6 +776,57 @@ const PaperViewPage: React.FC = () => {
       );
     }
   };
+
+  // 未ログインかつ非公開論文の場合はログイン促進画面を表示
+  if (!user && !isPublicPaper && !currentPaperLoading) {
+    return (
+      <Container maxWidth="lg">
+        <Box sx={{ my: 4 }}>
+          <Button 
+            startIcon={<ArrowBackIcon />} 
+            onClick={() => navigate('/')}
+            sx={{ mb: 2 }}
+          >
+            ホームに戻る
+          </Button>
+          
+          <Alert 
+            severity="info" 
+            sx={{ 
+              mb: 3, 
+              px: 4, 
+              py: 3
+            }}
+          >
+            <Box>
+              <Typography variant="h5" gutterBottom>
+                ログインが必要です
+              </Typography>
+              <Typography variant="body1" sx={{ mb: 3 }}>
+                この論文を閲覧するにはログインが必要です。アカウントをお持ちでない場合は、新規登録を行ってください。
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+                <Button 
+                  variant="contained" 
+                  color="primary" 
+                  startIcon={<LoginIcon />}
+                  onClick={() => navigate('/login')}
+                >
+                  ログイン
+                </Button>
+                <Button 
+                  variant="outlined" 
+                  onClick={() => navigate('/register')}
+                >
+                  新規登録
+                </Button>
+              </Box>
+            </Box>
+          </Alert>
+        </Box>
+      </Container>
+    );
+  }
   
   if (currentPaperLoading) {
     return (
@@ -885,55 +976,70 @@ const PaperViewPage: React.FC = () => {
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
               {(currentPaper.status === 'completed' || currentPaper.status === 'reported' || currentPaper.status === 'problem') && (
                 <>
-                  <Button 
-                    variant="outlined" 
-                    size="small" 
-                    startIcon={<DownloadIcon />}
-                    onClick={handleOpenDownloadMenu}
-                    disabled={!currentPaper.translated_text && !localTranslatedText}
-                  >
-                    ダウンロード
-                  </Button>
-                  
-                  <Menu
-                    anchorEl={downloadMenuAnchor}
-                    open={Boolean(downloadMenuAnchor)}
-                    onClose={handleCloseDownloadMenu}
-                  >
-                    <MenuItem onClick={handleDownloadPlainText}>
-                      <SaveAltIcon fontSize="small" sx={{ mr: 1 }} />
-                      プレーンテキスト (.txt)
-                    </MenuItem>
-                    <MenuItem onClick={handleDownloadMarkdown}>
-                      <BookIcon fontSize="small" sx={{ mr: 1 }} />
-                      Markdown (.md)
-                    </MenuItem>
-                  </Menu>
-                  
-                  {obsidianSettings && (
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      startIcon={<BookIcon />}
-                      onClick={handleExportToObsidian}
-                      disabled={isExporting || !currentPaper.translated_text && !localTranslatedText}
-                    >
-                      {isExporting ? (
-                        <>
-                          <CircularProgress size={16} sx={{ mr: 1 }} />
-                          Obsidianに保存中...
-                        </>
-                      ) : obsidianExportStatus === 'success' ? (
-                        'Obsidianに再保存'
-                      ) : (
-                        'Obsidianに保存'
+                  {user && (
+                    <>
+                      <Button 
+                        variant="outlined" 
+                        size="small" 
+                        startIcon={<DownloadIcon />}
+                        onClick={handleOpenDownloadMenu}
+                        disabled={!currentPaper.translated_text && !localTranslatedText}
+                      >
+                        ダウンロード
+                      </Button>
+                      
+                      <Menu
+                        anchorEl={downloadMenuAnchor}
+                        open={Boolean(downloadMenuAnchor)}
+                        onClose={handleCloseDownloadMenu}
+                      >
+                        <MenuItem onClick={handleDownloadPlainText}>
+                          <SaveAltIcon fontSize="small" sx={{ mr: 1 }} />
+                          プレーンテキスト (.txt)
+                        </MenuItem>
+                        <MenuItem onClick={handleDownloadMarkdown}>
+                          <BookIcon fontSize="small" sx={{ mr: 1 }} />
+                          Markdown (.md)
+                        </MenuItem>
+                      </Menu>
+                      
+                      {obsidianSettings && (
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          startIcon={<BookIcon />}
+                          onClick={handleExportToObsidian}
+                          disabled={isExporting || !currentPaper.translated_text && !localTranslatedText}
+                        >
+                          {isExporting ? (
+                            <>
+                              <CircularProgress size={16} sx={{ mr: 1 }} />
+                              Obsidianに保存中...
+                            </>
+                          ) : obsidianExportStatus === 'success' ? (
+                            'Obsidianに再保存'
+                          ) : (
+                            'Obsidianに保存'
+                          )}
+                        </Button>
                       )}
-                    </Button>
+                      
+                      {/* Zoteroエクスポートボタン */}
+                      {currentPaper.metadata?.doi && (
+                        <ZoteroExport paper={currentPaper} />
+                      )}
+                    </>
                   )}
                   
-                  {/* Zoteroエクスポートボタン */}
-                  {currentPaper.metadata?.doi && (
-                    <ZoteroExport paper={currentPaper} />
+                  {!user && (
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      startIcon={<LoginIcon />}
+                      onClick={() => navigate('/login')}
+                    >
+                      ログインで全機能利用可能
+                    </Button>
                   )}
                 </>
               )}
@@ -1209,7 +1315,7 @@ const PaperViewPage: React.FC = () => {
                         <Typography variant="body1" sx={{ mr: 2 }}>
                           {currentPaper.metadata.doi || '不明'}
                         </Typography>
-                        {currentPaper.metadata.doi && (
+                        {currentPaper.metadata.doi && user && (
                           <ZoteroExport paper={currentPaper} />
                         )}
                       </Box>

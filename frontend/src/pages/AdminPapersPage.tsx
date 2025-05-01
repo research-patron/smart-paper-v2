@@ -21,6 +21,12 @@ import {
   InputAdornment,
   IconButton,
   Tooltip,
+  Switch,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -30,9 +36,11 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
 import ScienceIcon from '@mui/icons-material/Science';
+import PublicIcon from '@mui/icons-material/Public';
+import PrivateIcon from '@mui/icons-material/LockOutlined';
 
 import { useAuthStore } from '../store/authStore';
-import { getAdminPapers, getReportedPapers } from '../api/admin';
+import { getAdminPapers, getReportedPapers, togglePaperPublicStatus } from '../api/admin';
 import { Paper as PaperType, formatDate } from '../api/papers';
 
 // タブの値定義
@@ -127,6 +135,9 @@ const AdminPapersPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [publicPapers, setPublicPapers] = useState<PaperType[]>([]);
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [paperToToggle, setPaperToToggle] = useState<PaperType | null>(null);
 
   // マスターアカウントとその他の管理者アカウントを区別
   const isMasterAdmin = user?.email === 's.kosei0626@gmail.com';
@@ -144,6 +155,10 @@ const AdminPapersPage = () => {
       const allPapers = await getAdminPapers();
       setPapers(allPapers);
       
+      // 公開設定されている論文を抽出
+      const publicPapers = allPapers.filter(paper => paper.public === true);
+      setPublicPapers(publicPapers);
+      
       // 問題報告がある論文を取得
       const reported = await getReportedPapers();
       setReportedPapers(reported);
@@ -153,6 +168,53 @@ const AdminPapersPage = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // 公開状態を切り替える
+  const handleTogglePublic = async (paper: PaperType) => {
+    setPaperToToggle(paper);
+    setConfirmDialogOpen(true);
+  };
+
+  // 公開状態切り替え確認
+  const confirmTogglePublic = async () => {
+    if (!paperToToggle) return;
+    
+    try {
+      setLoading(true);
+      
+      // 公開状態を反転
+      const newPublicStatus = !paperToToggle.public;
+      
+      // APIを呼び出して公開状態を更新
+      await togglePaperPublicStatus(paperToToggle.id, newPublicStatus);
+      
+      // ローカルの状態を更新
+      setPapers(prevPapers => 
+        prevPapers.map(p => 
+          p.id === paperToToggle.id 
+            ? { ...p, public: newPublicStatus } 
+            : p
+        )
+      );
+      
+      // 公開論文リストも更新
+      if (newPublicStatus) {
+        setPublicPapers(prev => [...prev, { ...paperToToggle, public: true }]);
+      } else {
+        setPublicPapers(prev => prev.filter(p => p.id !== paperToToggle.id));
+      }
+      
+      setLoading(false);
+      
+    } catch (err) {
+      console.error('Failed to toggle public status:', err);
+      setError('公開状態の更新に失敗しました。');
+      setLoading(false);
+    }
+    
+    setConfirmDialogOpen(false);
+    setPaperToToggle(null);
   };
 
   // 初回ロード時にデータを取得
@@ -252,6 +314,20 @@ const AdminPapersPage = () => {
                   </Box>
                 } 
               />
+              <Tab 
+                label={
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <PublicIcon sx={{ mr: 0.5, color: 'success.main' }} />
+                    <span>公開中の論文</span>
+                    <Chip 
+                      label={publicPapers.length} 
+                      size="small" 
+                      color="success"
+                      sx={{ ml: 1 }} 
+                    />
+                  </Box>
+                } 
+              />
             </Tabs>
           </Box>
           
@@ -299,6 +375,7 @@ const AdminPapersPage = () => {
                 papers={filterPapers(papers)}
                 navigate={navigate}
                 isMasterAdmin={isMasterAdmin}
+                onTogglePublic={handleTogglePublic}
               />
             </TabPanel>
             
@@ -308,11 +385,72 @@ const AdminPapersPage = () => {
                 navigate={navigate}
                 isMasterAdmin={isMasterAdmin}
                 isReportedView
+                onTogglePublic={handleTogglePublic}
+              />
+            </TabPanel>
+            
+            <TabPanel value={tabValue} index={2}>
+              <PaperTable 
+                papers={filterPapers(publicPapers)}
+                navigate={navigate}
+                isMasterAdmin={isMasterAdmin}
+                isPublicView
+                onTogglePublic={handleTogglePublic}
               />
             </TabPanel>
           </>
         )}
       </Box>
+      
+      {/* 公開設定変更確認ダイアログ */}
+      <Dialog
+        open={confirmDialogOpen}
+        onClose={() => {
+          setConfirmDialogOpen(false);
+          setPaperToToggle(null);
+        }}
+      >
+        <DialogTitle>
+          {paperToToggle?.public ? '論文の公開を解除しますか？' : '論文を公開しますか？'}
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {paperToToggle?.public 
+              ? '論文の公開を解除すると、未ログインユーザーはこの論文を閲覧できなくなります。' 
+              : '論文を公開すると、未ログインユーザーもこの論文を閲覧できるようになります。ログイン済みユーザーは変わらず閲覧可能です。'}
+          </DialogContentText>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              論文情報:
+            </Typography>
+            <Typography variant="body2">
+              タイトル: {paperToToggle?.metadata?.title || '無題'}
+            </Typography>
+            <Typography variant="body2">
+              著者: {paperToToggle?.metadata?.authors?.map(a => a.name).join(', ') || '不明'}
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => {
+              setConfirmDialogOpen(false);
+              setPaperToToggle(null);
+            }}
+          >
+            キャンセル
+          </Button>
+          <Button 
+            onClick={confirmTogglePublic} 
+            color={paperToToggle?.public ? "error" : "primary"}
+            variant="contained"
+            autoFocus
+          >
+            {paperToToggle?.public ? '公開を解除する' : '公開する'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
       <style>
         {`
           @keyframes pulse {
@@ -331,12 +469,16 @@ const PaperTable = ({
   papers, 
   navigate, 
   isMasterAdmin,
-  isReportedView = false 
+  isReportedView = false,
+  isPublicView = false,
+  onTogglePublic
 }: { 
   papers: PaperType[]; 
   navigate: (path: string) => void;
   isMasterAdmin: boolean;
   isReportedView?: boolean;
+  isPublicView?: boolean;
+  onTogglePublic: (paper: PaperType) => void;
 }) => {
   if (papers.length === 0) {
     return (
@@ -344,7 +486,9 @@ const PaperTable = ({
         <Typography variant="h6" color="text.secondary">
           {isReportedView 
             ? '問題報告のある論文はありません' 
-            : '表示できる論文がありません'}
+            : isPublicView
+              ? '公開されている論文はありません'
+              : '表示できる論文がありません'}
         </Typography>
       </Paper>
     );
@@ -360,6 +504,7 @@ const PaperTable = ({
             <TableCell>著者</TableCell>
             <TableCell>アップロード日</TableCell>
             <TableCell>ステータス</TableCell>
+            <TableCell>公開設定</TableCell>
             <TableCell align="right">操作</TableCell>
           </TableRow>
         </TableHead>
@@ -380,6 +525,12 @@ const PaperTable = ({
                   '&:hover': {
                     backgroundColor: 'error.main',
                     '& .MuiTableCell-root': { color: 'white' }
+                  }
+                }),
+                ...(paper.public && {
+                  backgroundColor: 'success.light',
+                  '&:hover': {
+                    backgroundColor: 'success.light',
                   }
                 })
               }}
@@ -402,6 +553,32 @@ const PaperTable = ({
               </TableCell>
               <TableCell>
                 <StatusChip status={paper.status} />
+              </TableCell>
+              <TableCell>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Switch
+                    checked={paper.public === true}
+                    onChange={() => onTogglePublic(paper)}
+                    color="success"
+                    size="small"
+                    disabled={paper.status !== 'completed'} // 完了した論文のみ公開可能
+                  />
+                  <Box component="span" sx={{ ml: 1, display: 'flex', alignItems: 'center' }}>
+                    {paper.public ? (
+                      <>
+                        <PublicIcon fontSize="small" color="success" />
+                        <Box component="span" sx={{ ml: 0.5, fontSize: '0.75rem' }}>公開中</Box>
+                      </>
+                    ) : (
+                      <>
+                        <PrivateIcon fontSize="small" color="action" />
+                        <Box component="span" sx={{ ml: 0.5, fontSize: '0.75rem', color: 'text.secondary' }}>
+                          非公開
+                        </Box>
+                      </>
+                    )}
+                  </Box>
+                </Box>
               </TableCell>
               <TableCell align="right">
                 <Tooltip title="論文を表示">
