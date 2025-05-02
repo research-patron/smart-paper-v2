@@ -26,6 +26,7 @@ import {
   Link,
   LinearProgress,
   CircularProgress,
+  Divider,
 } from '@mui/material';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -367,7 +368,7 @@ const HomePage = () => {
       <Box sx={{ my: 4 }}>
         {/* 未ログインユーザー向けウェルカムメッセージ */}
         {!user && (
-          <Box sx={{ mb: 6 }}>
+          <Box sx={{ mb: 8 }}>
             <Grid container spacing={3} alignItems="center">
               <Grid item xs={12} md={7}>
                 <Typography variant="h3" component="h1" gutterBottom>
@@ -403,7 +404,7 @@ const HomePage = () => {
               </Grid>
               <Grid item xs={12} md={5}>
                 <Box component="img" 
-                  src="/images/paper-illustration.svg" 
+                  src="/images/paper-illustration.png" 
                   alt="論文翻訳イメージ"
                   sx={{ 
                     width: '100%', 
@@ -417,13 +418,45 @@ const HomePage = () => {
           </Box>
         )}
 
-        {/* 処理中の論文がない場合のみ「論文を翻訳する」見出しを表示 */}
-        {(!latestProcessingPaper || !user) && (
-          <Box sx={{ display: 'flex', justifyContent: 'left', alignItems: 'left', mb: 3 }}>
-            <Typography variant="h4" component="h1" gutterBottom>
-              論文を翻訳する
-            </Typography>
+        {/* 装飾的な区切り線（非会員ユーザーにのみ表示） */}
+        {!user ? (
+          <Box sx={{ position: 'relative', my: 4 }}>
+            <Divider sx={{ 
+              borderColor: 'primary.main',
+              borderWidth: 2,
+              width: '100%',
+              opacity: 0.7
+            }} />
+            <Box sx={{
+              position: 'absolute',
+              top: -14,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              bgcolor: 'background.default',
+              px: 3,
+            }}>
+              <Typography 
+                variant="h4" 
+                component="h2" 
+                align="center"
+                sx={{ 
+                  color: 'primary.main',
+                  fontWeight: 'medium'
+                }}
+              >
+                論文を翻訳する
+              </Typography>
+            </Box>
           </Box>
+        ) : (
+          /* 会員ユーザー向けに元のシンプルな見出し */
+          !latestProcessingPaper && (
+            <Box sx={{ display: 'flex', justifyContent: 'left', alignItems: 'left', mb: 1 }}>
+              <Typography variant="h5" component="h2" gutterBottom>
+                論文を翻訳する
+              </Typography>
+            </Box>
+          )
         )}
 
         {/* PDFアップロードエリアを画面幅いっぱいに拡大 */}
@@ -750,186 +783,11 @@ const HomePage = () => {
               </>
             )}
             
-            {/* 非ログインユーザー向け：会員登録促進カード */}
-            {!user && (
-              <Card sx={{ mb: 3, bgcolor: 'primary.light', boxShadow: 3 }}>
-                <CardContent sx={{ p: 3 }}>
-                  <Typography variant="h5" component="h3" gutterBottom>
-                    会員登録で全機能利用可能に
-                  </Typography>
-                  <Typography variant="body1" paragraph>
-                    会員登録すると、論文の翻訳・要約機能が利用できるようになります。
-                    また、翻訳した論文はマイページに保存され、いつでも閲覧できます。
-                  </Typography>
-                  <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-                    <Button
-                      variant="contained"
-                      color="primary"
-                      startIcon={<LoginIcon />}
-                      onClick={() => navigate('/login')}
-                    >
-                      ログイン
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      startIcon={<HowToRegIcon />}
-                      onClick={() => navigate('/register')}
-                    >
-                      会員登録
-                    </Button>
-                  </Box>
-                </CardContent>
-              </Card>
-            )}
-            
-            {/* 機能紹介 */}
-            <Paper sx={{ p: 3, mb: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Smart Paper v2の機能
-              </Typography>
-              
-              <List dense>
-                <ListItem>
-                  <ListItemIcon sx={{ minWidth: 36 }}>
-                    <PictureAsPdfIcon fontSize="small" color="primary" />
-                  </ListItemIcon>
-                  <ListItemText 
-                    primary="論文の翻訳" 
-                    secondary="英語論文を日本語に自動翻訳" 
-                  />
-                </ListItem>
-                <ListItem>
-                  <ListItemIcon sx={{ minWidth: 36 }}>
-                    <DescriptionIcon fontSize="small" color="primary" />
-                  </ListItemIcon>
-                  <ListItemText 
-                    primary="要約生成" 
-                    secondary="論文の要点をAIが簡潔にまとめる" 
-                  />
-                </ListItem>
-                <ListItem>
-                  <ListItemIcon sx={{ minWidth: 36 }}>
-                    <ArrowForwardIcon fontSize="small" color="primary" />
-                  </ListItemIcon>
-                  <ListItemText 
-                    primary="Zoteroに登録" 
-                    secondary="ボタンクリックで自動でZoteroに論文を登録" 
-                  />
-                </ListItem>
-              </List>
-            </Paper>
-            
-            {/* プレミアムプラン宣伝 */}
-            {user && !isPremium && (
-              <Paper sx={{ p: 3, borderLeft: '4px solid', borderColor: 'primary.main' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <StarIcon color="primary" sx={{ mr: 1 }} />
-                  <Typography variant="h6">
-                    プレミアム特典
-                  </Typography>
-                </Box>
-                
-                <List dense>
-                  <ListItem>
-                    <ListItemIcon sx={{ minWidth: 36 }}>
-                      <StarIcon fontSize="small" color="primary" />
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary="翻訳回数無制限" 
-                      secondary="月3件の制限なくいつでも翻訳可能" 
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemIcon sx={{ minWidth: 36 }}>
-                      <StarIcon fontSize="small" color="primary" />
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary="保存期間延長" 
-                      secondary="論文を1ヶ月間保存" 
-                    />
-                  </ListItem>
-                </List>
-                
-                <Button 
-                  variant="contained" 
-                  color="primary"
-                  fullWidth 
-                  onClick={() => navigate('/subscription')}
-                  startIcon={<StarIcon />}
-                  sx={{ mt: 2 }}
-                >
-                  プレミアムにアップグレード
-                </Button>
-                <Typography variant="caption" color="text.secondary" align="center" sx={{ display: 'block', mt: 1 }}>
-                  月額¥500 または 年額¥5,000 (月あたり¥417)
-                </Typography>
-              </Paper>
-            )}
-            
-            {/* 非ログインユーザー向け：プレミアム情報 */}
-            {!user && (
-              <Paper sx={{ p: 3, borderLeft: '4px solid', borderColor: 'primary.main' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <StarIcon color="primary" sx={{ mr: 1 }} />
-                  <Typography variant="h6">
-                    プレミアムプラン
-                  </Typography>
-                </Box>
-                
-                <Typography variant="body2" paragraph>
-                  プレミアムプランでは、月額たったの500円で以下の特典が得られます：
-                </Typography>
-                
-                <List dense>
-                  <ListItem>
-                    <ListItemIcon sx={{ minWidth: 36 }}>
-                      <StarIcon fontSize="small" color="primary" />
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary="翻訳回数無制限" 
-                      secondary="制限なくいつでも翻訳可能" 
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemIcon sx={{ minWidth: 36 }}>
-                      <StarIcon fontSize="small" color="primary" />
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary="論文の長期保存" 
-                      secondary="論文を長期間保存して管理" 
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemIcon sx={{ minWidth: 36 }}>
-                      <StarIcon fontSize="small" color="primary" />
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary="優先処理" 
-                      secondary="リクエストを優先的に処理" 
-                    />
-                  </ListItem>
-                </List>
-                
-                <Button 
-                  variant="contained" 
-                  color="primary"
-                  fullWidth 
-                  onClick={() => navigate('/register')}
-                  startIcon={<StarIcon />}
-                  sx={{ mt: 2 }}
-                >
-                  会員登録してプレミアムを利用
-                </Button>
-                <Typography variant="caption" color="text.secondary" align="center" sx={{ display: 'block', mt: 1 }}>
-                  月額¥500 または 年額¥5,000 (月あたり¥417)
-                </Typography>
-              </Paper>
-            )}
+            {/* ここから非会員向けブロックを削除 */}
           </Grid>
         </Grid>
       </Box>
       
-      {/* 省略（変更なし） */}
       {/* 論文削除確認ダイアログ */}
       <Dialog
         open={deleteDialogOpen}
