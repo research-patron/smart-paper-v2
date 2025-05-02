@@ -583,6 +583,7 @@ def process_pdf_background(request: Request):
 def get_signed_url(request: Request):
     """
     Cloud StorageのファイルへのURLを取得する
+    公開論文の場合は認証なしでもアクセス可能
     """
     # 処理時間測定開始
     session_id, temp_paper_id = start_timer("get_signed_url")
@@ -627,11 +628,71 @@ def get_signed_url(request: Request):
 
         bucket_name = parts[0]
         object_name = parts[1]
-
-        # 認証を必須に変更 - 認証なしでは処理を続行しない
-        user_id = require_authentication(request)
-        log_info("Auth", f"Signed URL requested by authenticated user: {user_id}")
-        add_step(session_id, temp_paper_id, "auth_complete", {"user_id": user_id})
+        
+        # ファイルパスから論文IDを抽出する試み
+        paper_id = None
+        # リクエストに paper_id が含まれている場合はそれを使用
+        if "paper_id" in request_json:
+            paper_id = request_json["paper_id"]
+        
+        # 論文IDが見つからない場合は、ファイルパスから推測
+        # papers/以下のファイルパスからpaper_idを推測
+        if not paper_id and object_name.startswith("papers/"):
+            # Firestoreから該当パスのファイルを持つ論文を検索
+            try:
+                papers_ref = db.collection("papers")
+                query = papers_ref.where("file_path", "==", file_path)
+                papers = query.stream()
+                
+                for paper in papers:
+                    paper_id = paper.id
+                    paper_data = paper.to_dict()
+                    # 公開論文かどうかチェック
+                    is_public = paper_data.get("public", False)
+                    
+                    log_info("GetSignedURL", f"Found paper with matching file_path", {
+                        "paper_id": paper_id,
+                        "is_public": is_public
+                    })
+                    
+                    # 認証チェック
+                    user_id = verify_firebase_token(request)  # 認証情報がなければNoneを返す
+                    
+                    # 公開論文または認証されたユーザーの場合は続行
+                    if is_public or user_id:
+                        log_info("Auth", f"Access granted to {'public paper' if is_public else 'private paper'}", {
+                            "paper_id": paper_id,
+                            "user_id": user_id,
+                            "is_public": is_public
+                        })
+                        break
+                    else:
+                        # 非公開論文で未認証の場合
+                        error_response = jsonify({"error": "Authentication required for non-public papers"}), 401, headers
+                        stop_timer(session_id, temp_paper_id, False, "Authentication error: Authentication required")
+                        return error_response
+            except Exception as e:
+                log_error("GetSignedURLError", f"Error while checking paper access: {str(e)}")
+                # エラーが発生しても処理を続行、従来の認証チェックに移る
+        
+        # 論文のチェックで認証OKにならなかった場合は従来通り認証を要求
+        if not paper_id:
+            try:
+                # 従来の認証チェック
+                user_id = verify_firebase_token(request)
+                if not user_id:
+                    # 未認証の場合はエラー
+                    error_response = jsonify({"error": "Authentication required"}), 401, headers
+                    stop_timer(session_id, temp_paper_id, False, "Authentication error: Authentication required")
+                    return error_response
+                
+                log_info("Auth", f"Signed URL requested by authenticated user: {user_id}")
+                add_step(session_id, temp_paper_id, "auth_complete", {"user_id": user_id})
+            except Exception as auth_error:
+                log_error("AuthError", f"Authentication failed: {str(auth_error)}")
+                error_response = jsonify({"error": "Authentication failed"}), 401, headers
+                stop_timer(session_id, temp_paper_id, False, "Authentication error: Authentication failed")
+                return error_response
 
         # 署名付きURL用の認証情報を取得
         try:
