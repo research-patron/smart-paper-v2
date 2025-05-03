@@ -500,7 +500,7 @@ export const checkFolderExists = async (
 };
 
 /**
- * 論文をObsidianに直接エクスポートする
+ * 論文をObsidianに直接エクスポートする - 非会員ユーザー対応版
  * @param paper 論文データ
  * @param chapters 翻訳された章データ
  * @param settings Obsidian設定
@@ -553,7 +553,7 @@ export const exportToObsidian = async (
       };
     }
 
-    // ===== 大幅修正: フォルダ階層の作成部分 =====
+    // ===== フォルダ階層の作成部分 =====
 
     // 1. ベースフォルダパスの決定 (日付フォルダを含まないパス)
     let baseFolderPath = settings.folder_path || 'smart-paper-v2';
@@ -648,17 +648,6 @@ export const exportToObsidian = async (
       };
       localStorage.setItem('obsidian_export_status', JSON.stringify(exportStatus));
     }
-    
-    // 修正: 自動開く機能を削除
-    // 以前は下記の設定があった場合に自動的にObsidianアプリを開いていたが、
-    // ユーザーエクスペリエンス向上のため機能を削除
-    /*
-    if (settings.open_after_export && settings.vault_name) {
-      setTimeout(() => {
-        openInObsidian(settings.vault_name, result.export_path || '');
-      }, 500);
-    }
-    */
     
     return result;
   } catch (error) {

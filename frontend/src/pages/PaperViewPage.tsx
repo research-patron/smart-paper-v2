@@ -523,8 +523,9 @@ const PaperViewPage: React.FC = () => {
       return;
     }
     
-    // 設定がない場合はデフォルト設定を使用
-    const settings = obsidianSettings || DEFAULT_OBSIDIAN_SETTINGS;
+    // 非会員ユーザーの場合はデフォルト設定を使用
+    // user が存在しない場合は DEFAULT_OBSIDIAN_SETTINGS を使用
+    const settings = user ? (obsidianSettings || DEFAULT_OBSIDIAN_SETTINGS) : DEFAULT_OBSIDIAN_SETTINGS;
     
     try {
       setIsExporting(true);
@@ -1003,40 +1004,42 @@ const PaperViewPage: React.FC = () => {
                         </MenuItem>
                       </Menu>
                       
-                      {obsidianSettings && (
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          startIcon={<BookIcon />}
-                          onClick={handleExportToObsidian}
-                          disabled={isExporting || !currentPaper.translated_text && !localTranslatedText}
-                        >
-                          {isExporting ? (
-                            <>
-                              <CircularProgress size={16} sx={{ mr: 1 }} />
-                              Obsidianに保存中...
-                            </>
-                          ) : obsidianExportStatus === 'success' ? (
-                            'Obsidianに再保存'
-                          ) : (
-                            'Obsidianに保存'
-                          )}
-                        </Button>
-                      )}
-                      
                       {/* Zoteroエクスポートボタン */}
                       {currentPaper.metadata?.doi && (
                         <ZoteroExport paper={currentPaper} />
                       )}
                     </>
                   )}
+
+                  {/* Obsidianボタンは会員・非会員どちらでも表示 */}
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<BookIcon />}
+                    onClick={handleExportToObsidian}
+                    disabled={isExporting || !currentPaper.translated_text && !localTranslatedText}
+                    sx={{ ml: user ? 0 : 1 }} // 非会員ではログインボタンの横に配置するため左マージンを追加
+                  >
+                    {isExporting ? (
+                      <>
+                        <CircularProgress size={16} sx={{ mr: 1 }} />
+                        Obsidianに保存中...
+                      </>
+                    ) : obsidianExportStatus === 'success' ? (
+                      'Obsidianに再保存'
+                    ) : (
+                      'Obsidianに保存'
+                    )}
+                  </Button>
                   
+                  {/* 非会員にはログインボタンも表示 */}
                   {!user && (
                     <Button
                       variant="contained"
                       color="primary"
                       startIcon={<LoginIcon />}
                       onClick={() => navigate('/login')}
+                      sx={{ ml: 1 }}
                     >
                       ログインで全機能利用可能
                     </Button>
