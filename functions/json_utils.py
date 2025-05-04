@@ -29,6 +29,12 @@ def extract_json_from_response(response_text: str, operation: str) -> dict:
         if match:
             potential_json = match.group(1)
             parsed_json = json.loads(potential_json)
+            
+            # 要約処理の場合、required_knowledgeフィールドの特殊処理
+            if operation == "summarize" and "required_knowledge" in parsed_json:
+                # エスケープされたバックスラッシュと改行を適切に処理
+                parsed_json["required_knowledge"] = parsed_json["required_knowledge"].replace("\\\\", "").replace("\\n", "\n")
+                
             # 重要な修正: この関数ではJSONとして解析したオブジェクトを返す
             return parsed_json
     except json.JSONDecodeError:
@@ -72,12 +78,26 @@ def extract_json_from_response(response_text: str, operation: str) -> dict:
             if end_index > 0:
                 json_str = text_from_start[:end_index]
                 try:
-                    return json.loads(json_str)  # 修正: パースしたJSONオブジェクトを返す
+                    parsed_json = json.loads(json_str)
+                    
+                    # 要約処理の場合、required_knowledgeフィールドの特殊処理
+                    if operation == "summarize" and "required_knowledge" in parsed_json:
+                        # エスケープされたバックスラッシュと改行を適切に処理
+                        parsed_json["required_knowledge"] = parsed_json["required_knowledge"].replace("\\\\", "").replace("\\n", "\n")
+                        
+                    return parsed_json  # 修正: パースしたJSONオブジェクトを返す
                 except json.JSONDecodeError:
                     # JSONの修復を試みる
                     json_str = json_str.replace('\n', '\\n')
                     try:
-                        return json.loads(json_str)  # 修正: パースしたJSONオブジェクトを返す
+                        parsed_json = json.loads(json_str)
+                        
+                        # 要約処理の場合、required_knowledgeフィールドの特殊処理
+                        if operation == "summarize" and "required_knowledge" in parsed_json:
+                            # エスケープされたバックスラッシュと改行を適切に処理
+                            parsed_json["required_knowledge"] = parsed_json["required_knowledge"].replace("\\\\", "").replace("\\n", "\n")
+                            
+                        return parsed_json  # 修正: パースしたJSONオブジェクトを返す
                     except json.JSONDecodeError:
                         pass
         except Exception:
@@ -166,7 +186,7 @@ def extract_json_from_response(response_text: str, operation: str) -> dict:
             if json_match:
                 # マッチした場合は抽出してJSONオブジェクトを構築
                 summary_text = json_match.group(1).replace('\\n', '\n').replace('\\"', '"')
-                required_knowledge = json_match.group(2).replace('\\n', '\n').replace('\\"', '"')
+                required_knowledge = json_match.group(2).replace('\\\\', '').replace('\\n', '\n').replace('\\"', '"')
                 return {
                     "summary": summary_text,
                     "required_knowledge": required_knowledge
