@@ -108,6 +108,11 @@ service cloud.firestore {
       // サブコレクション全体の読み取り権限を管理者に付与
       allow list: if isAdmin();
     }
+
+    // メール送信用コレクション
+    match /mail/{docId} {
+      allow create: if true;  // 問い合わせフォームからの書き込みを許可
+    }
     
     // パフォーマンス計測データ
     match /process_time/{docId} {

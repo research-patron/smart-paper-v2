@@ -1,4 +1,4 @@
-// ~/Desktop/smart-paper-v2/frontend/src/api/contact.ts
+// frontend/src/api/contact.ts
 import { collection, addDoc, serverTimestamp, doc, updateDoc, arrayUnion, getDoc, setDoc } from 'firebase/firestore';
 import { db, auth } from './firebase';
 import { getCurrentUserToken } from './papers';
@@ -52,8 +52,26 @@ export const submitInquiry = async (inquiry: Inquiry): Promise<void> => {
       updated_at: serverTimestamp()
     });
     
+    // メール通知のドキュメントを作成
+    await addDoc(collection(db, 'mail'), {
+      to: 'smart-paper-v2@student-subscription.com',
+      message: {
+        subject: `【Smart Paper v2】問い合わせ: ${inquiry.subject}`,
+        html: `
+          <h2>Smart Paper v2へのお問い合わせ</h2>
+          <p><strong>カテゴリ:</strong> ${inquiry.category}</p>
+          <p><strong>件名:</strong> ${inquiry.subject}</p>
+          <p><strong>メッセージ:</strong></p>
+          <p>${inquiry.message.replace(/\n/g, '<br>')}</p>
+          <p><strong>ユーザーメールアドレス:</strong> ${inquiry.email}</p>
+          <p><strong>ユーザーID:</strong> ${userId || 'anonymous'}</p>
+        `
+      },
+      replyTo: inquiry.email  // 返信先を設定
+    });
+    
     // デバッグ
-    console.log('Inquiry submitted successfully to inquiries/service/items collection');
+    console.log('Inquiry submitted successfully to inquiries/service/items collection and email notification created');
   } catch (error) {
     console.error('Failed to submit inquiry:', error);
     throw error;
@@ -90,6 +108,25 @@ export const submitProblemReport = async (report: ProblemReport): Promise<void> 
     
     // 問題報告を追加
     await setDoc(reportRef, reportData);
+    
+    // メール通知のドキュメントを作成
+    await addDoc(collection(db, 'mail'), {
+      to: 'smart-paper-v2@student-subscription.com',
+      message: {
+        subject: `【Smart Paper】問題報告: ${report.paper_id ? `論文ID: ${report.paper_id}` : 'その他の問題'}`,
+        html: `
+          <h2>Smart Paperへの問題報告</h2>
+          <p><strong>カテゴリ:</strong> ${report.category}</p>
+          <p><strong>説明:</strong></p>
+          <p>${report.description.replace(/\n/g, '<br>')}</p>
+          ${report.steps_to_reproduce ? `<p><strong>再現手順:</strong></p><p>${report.steps_to_reproduce.replace(/\n/g, '<br>')}</p>` : ''}
+          ${report.paper_id ? `<p><strong>論文ID:</strong> ${report.paper_id}</p>` : ''}
+          <p><strong>管理者との共有:</strong> ${report.share_with_admin ? '許可' : '許可なし'}</p>
+          <p><strong>ユーザーID:</strong> ${userId || 'anonymous'}</p>
+          <p><em>このメールはFirebase Extensionsによって自動送信されています。</em></p>
+        `
+      }
+    });
     
     console.log('Problem report submitted with ID:', reportId);
     
