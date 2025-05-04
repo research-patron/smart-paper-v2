@@ -35,6 +35,8 @@ import HomeIcon from '@mui/icons-material/Home';
 import ScienceIcon from '@mui/icons-material/Science';
 import DataObjectIcon from '@mui/icons-material/DataObject';
 import TimerIcon from '@mui/icons-material/Timer';
+import BookIcon from '@mui/icons-material/Book';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
 import { useAuthStore } from '../store/authStore';
 import { getGeminiLogs } from '../api/admin';
 import { getPaper, formatDate } from '../api/papers';
@@ -87,6 +89,20 @@ const extractContentFromJson = (jsonObj: any, operation: string): string => {
     // 最終手段: JSONをそのまま文字列化して返す
     return JSON.stringify(jsonObj, null, 2);
   }
+};
+
+// 必要な知識を抽出する新しい関数を追加
+const extractRequiredKnowledgeFromJson = (jsonObj: any): string | null => {
+  if (!jsonObj || typeof jsonObj !== 'object') {
+    return null;
+  }
+  
+  // required_knowledgeフィールドがあれば抽出
+  if (jsonObj.required_knowledge) {
+    return jsonObj.required_knowledge;
+  }
+  
+  return null;
 };
 
 // レスポンスからJSONを抽出する関数
@@ -182,10 +198,16 @@ const AdminGeminiLogPage: React.FC = () => {
           const parsedJson = processedJson || (log.response ? extractJsonFromResponse(log.response, log.operation || 'unknown') : null);
           const content = extractedContent || (parsedJson ? extractContentFromJson(parsedJson, log.operation || 'unknown') : null);
           
+          // 必要な知識を抽出 (要約処理の場合のみ)
+          const requiredKnowledge = (log.operation === 'summarize' && parsedJson) 
+            ? extractRequiredKnowledgeFromJson(parsedJson) 
+            : null;
+          
           return {
             ...log,
             parsed_json: parsedJson,
-            content: content
+            content: content,
+            required_knowledge: requiredKnowledge
           };
         });
         
@@ -634,11 +656,11 @@ const LogsList: React.FC<LogsListProps> = ({ logs, onCopy }) => {
             </Box>
             
             {/* 抽出された内容 */}
-            <Box>
+            <Box sx={{ mb: log.required_knowledge ? 3 : 0 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                 <Typography variant="subtitle2">
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    抽出された内容
+                    抽出された内容 {log.operation === 'summarize' && '(要約)'}
                   </Box>
                 </Typography>
                 <Tooltip title="内容をコピー">
@@ -676,6 +698,49 @@ const LogsList: React.FC<LogsListProps> = ({ logs, onCopy }) => {
                 {!log.operation && '抽出された内容'}
               </Typography>
             </Box>
+
+            {/* 必要な知識の表示部分を追加 */}
+            {log.required_knowledge && (
+              <Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography variant="subtitle2">
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <MenuBookIcon fontSize="small" sx={{ mr: 0.5 }} />
+                      必要な知識
+                    </Box>
+                  </Typography>
+                  <Tooltip title="必要な知識をコピー">
+                    <IconButton 
+                      size="small" 
+                      onClick={() => onCopy(log.required_knowledge || '')}
+                    >
+                      <ContentCopyIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+                <Paper 
+                  variant="outlined" 
+                  sx={{ 
+                    p: 2, 
+                    backgroundColor: '#fff8f0', 
+                    minHeight: '100px',
+                    maxHeight: '400px', 
+                    overflow: 'auto' 
+                  }}
+                >
+                  <div style={{ 
+                    margin: 0, 
+                    whiteSpace: 'pre-wrap', 
+                    wordBreak: 'break-word'
+                  }}>
+                    {log.required_knowledge}
+                  </div>
+                </Paper>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  この分野の研究を行うために必要な知識
+                </Typography>
+              </Box>
+            )}
           </AccordionDetails>
         </Accordion>
       ))}

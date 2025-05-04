@@ -28,7 +28,9 @@ def extract_json_from_response(response_text: str, operation: str) -> dict:
         match = json_pattern.search(cleaned_text)
         if match:
             potential_json = match.group(1)
-            return json.loads(potential_json)
+            parsed_json = json.loads(potential_json)
+            # 重要な修正: この関数ではJSONとして解析したオブジェクトを返す
+            return parsed_json
     except json.JSONDecodeError:
         pass
     
@@ -70,12 +72,12 @@ def extract_json_from_response(response_text: str, operation: str) -> dict:
             if end_index > 0:
                 json_str = text_from_start[:end_index]
                 try:
-                    return json.loads(json_str)
+                    return json.loads(json_str)  # 修正: パースしたJSONオブジェクトを返す
                 except json.JSONDecodeError:
                     # JSONの修復を試みる
                     json_str = json_str.replace('\n', '\\n')
                     try:
-                        return json.loads(json_str)
+                        return json.loads(json_str)  # 修正: パースしたJSONオブジェクトを返す
                     except json.JSONDecodeError:
                         pass
         except Exception:
@@ -111,7 +113,7 @@ def extract_json_from_response(response_text: str, operation: str) -> dict:
             
             # 結合して返す
             full_text = f"{chapter_title}\n\n{body_text}"
-            return {"translated_text": full_text}
+            return {"translated_text": full_text}  # 修正: 辞書オブジェクトを返す
     
     # 4. 翻訳処理の特殊フォールバック
     if operation == "translate":
@@ -152,11 +154,29 @@ def extract_json_from_response(response_text: str, operation: str) -> dict:
             
             cleaned_text = '\n\n'.join(processed_paragraphs)
         
-        return {"translated_text": cleaned_text}
+        return {"translated_text": cleaned_text}  # 修正: 辞書オブジェクトを返す
     
     # 5. 要約処理の特殊フォールバック
     elif operation == "summarize":
-        return {"summary": cleaned_text}
+        try:
+            # JSON文字列のパターンを探す
+            summary_json_pattern = re.compile(r'\{\s*"summary"\s*:\s*"(.+?)"\s*,\s*"required_knowledge"\s*:\s*"(.+?)"\s*\}', re.DOTALL)
+            json_match = summary_json_pattern.search(cleaned_text)
+            
+            if json_match:
+                # マッチした場合は抽出してJSONオブジェクトを構築
+                summary_text = json_match.group(1).replace('\\n', '\n').replace('\\"', '"')
+                required_knowledge = json_match.group(2).replace('\\n', '\n').replace('\\"', '"')
+                return {
+                    "summary": summary_text,
+                    "required_knowledge": required_knowledge
+                }
+            else:
+                # マッチしない場合はテキスト全体を要約として扱う
+                return {"summary": cleaned_text}
+        except Exception:
+            # エラー時はテキスト全体を要約として扱う
+            return {"summary": cleaned_text}
     
     # 6. メタデータ抽出の場合は最も厳格
     elif operation == "extract_metadata_and_chapters":

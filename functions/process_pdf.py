@@ -526,6 +526,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
             
             # 正常なJSONレスポンスがある場合
             if isinstance(summary_result, dict):
+                # ここを修正: 直接辞書のキーを取得する
                 summary_text = summary_result.get('summary', '')
                 required_knowledge = summary_result.get('required_knowledge', '')
             else:
@@ -539,7 +540,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
             # Firestoreに結果を保存
             doc_ref.update({
                 "summary": summary_text,
-                "required_knowledge": required_knowledge,  # 新しいフィールドを追加
+                "required_knowledge": required_knowledge,
                 "progress": 80
             })
             
@@ -553,7 +554,7 @@ def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent
                     
             doc_ref.update({
                 "summary": "要約の生成中にエラーが発生しました。",
-                "required_knowledge": ""  # エラー時も空の値を設定
+                "required_knowledge": ""
             })
 
         # 進捗を更新
