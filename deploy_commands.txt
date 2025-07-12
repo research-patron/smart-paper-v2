@@ -1,0 +1,42 @@
+# Smart Paper V2 - デプロイ手順
+
+## 1. 事前準備
+# Google Cloudにログイン
+gcloud auth login
+
+# プロジェクトを設定
+gcloud config set project smart-paper-v2
+
+# Firebaseプロジェクトを設定
+firebase use smart-paper-v2
+
+## 2. ローカルテスト（オプション）
+cd functions
+python -m pip install -r requirements.txt
+python -m pytest test_main.py -v
+
+## 3. デプロイ実行
+cd /Users/niigatadaigakukenkyuuyou/Desktop/Claude\ App/Claude_smart-paper-v2
+bash deploy.sh
+
+## 4. デプロイ後の確認
+# process_pdf_background関数の動作確認
+curl -X POST https://us-central1-smart-paper-v2.cloudfunctions.net/process_pdf_background \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{"paper_id": "test_paper_id"}'
+
+## 5. Firestoreでの結果確認
+# Firebaseコンソールで以下を確認：
+# - papers/[paper_id]/metadata
+# - papers/[paper_id]/translated_text
+# - papers/[paper_id]/summary
+# - papers/[paper_id]/required_knowledge
+# - papers/[paper_id]/status (completedになっているか)
+
+## 変更点の概要
+1. Gemini 2.5 Flashモデルを使用（gemini-2.0-flash → gemini-2.5-flash）
+2. 最大出力トークン数を65535に増加
+3. 分割処理から一括処理への変更
+4. Cloud Tasksによる非同期処理を削除
+5. 処理時間の大幅な短縮が期待される

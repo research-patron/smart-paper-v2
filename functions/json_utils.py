@@ -8,7 +8,8 @@ def extract_json_from_response(response_text: str, operation: str) -> dict:
     
     Args:
         response_text: モデルからのレスポンステキスト
-        operation: 処理タイプ ('translate', 'summarize', 'extract_metadata_and_chapters')
+        operation: 処理タイプ ('translate', 'summarize', 'extract_metadata_and_chapters', 
+                   'integrated', 'metadata_v2', 'translation_summary_v2')
         
     Returns:
         dict: パースされたJSON
@@ -199,7 +200,7 @@ def extract_json_from_response(response_text: str, operation: str) -> dict:
             return {"summary": cleaned_text}
     
     # 6. メタデータ抽出の場合は最も厳格
-    elif operation == "extract_metadata_and_chapters":
+    elif operation in ["extract_metadata_and_chapters", "metadata_v2"]:
         # JSON形式を完全に修復する試み
         try:
             # メタデータの基本構造を作成
@@ -348,7 +349,55 @@ def extract_json_from_response(response_text: str, operation: str) -> dict:
                       {"text_sample": cleaned_text[:500] + "..." if len(cleaned_text) > 500 else cleaned_text})
             raise json.JSONDecodeError(f"Could not extract valid JSON for metadata", cleaned_text, 0)
     
-    # 7. どのケースにも当てはまらない場合、最終手段としてテキスト全体を適切なキーの値として返す
+    # 7. translation_summary_v2の場合の処理
+    elif operation == "translation_summary_v2":
+        # 翻訳と要約を同時に処理
+        try:
+            # まず正規のJSONパース
+            json_pattern = re.compile(r'(\{.*\})', re.DOTALL)
+            match = json_pattern.search(cleaned_text)
+            if match:
+                potential_json = match.group(1)
+                parsed_json = json.loads(potential_json)
+                
+                # required_knowledgeフィールドの特殊処理
+                if "required_knowledge" in parsed_json:
+                    parsed_json["required_knowledge"] = parsed_json["required_knowledge"].replace("\\\\", "").replace("\\n", "\n")
+                    
+                return parsed_json
+        except json.JSONDecodeError:
+            # 個別の要素を抽出する試み
+            result = {}
+            
+            # translated_contentを抽出
+            content_pattern = re.compile(r'"translated_content"\s*:\s*"(.*?)"(?:,|\s*\})', re.DOTALL)
+            content_match = content_pattern.search(cleaned_text)
+            if content_match:
+                result["translated_content"] = content_match.group(1).replace('\\n', '\n').replace('\\"', '"')
+            
+            # summaryを抽出
+            summary_pattern = re.compile(r'"summary"\s*:\s*"(.*?)"(?:,|\s*\})', re.DOTALL)
+            summary_match = summary_pattern.search(cleaned_text)
+            if summary_match:
+                result["summary"] = summary_match.group(1).replace('\\n', '\n').replace('\\"', '"')
+            
+            # required_knowledgeを抽出
+            knowledge_pattern = re.compile(r'"required_knowledge"\s*:\s*"(.*?)"(?:,|\s*\})', re.DOTALL)
+            knowledge_match = knowledge_pattern.search(cleaned_text)
+            if knowledge_match:
+                result["required_knowledge"] = knowledge_match.group(1).replace('\\\\', '').replace('\\n', '\n').replace('\\"', '"')
+            
+            if result:
+                return result
+            else:
+                # フォールバック
+                return {
+                    "translated_content": cleaned_text,
+                    "summary": "",
+                    "required_knowledge": ""
+                }
+    
+    # 8. どのケースにも当てはまらない場合、最終手段としてテキスト全体を適切なキーの値として返す
     log_warning("JSONExtraction", f"Fallback case: returning raw text for operation {operation}", 
                {"text_sample": cleaned_text[:100] + "..." if len(cleaned_text) > 100 else cleaned_text})
     
@@ -378,9 +427,26 @@ def extract_content_from_json(json_obj, operation):
         return json_obj.get("translated_text", "翻訳内容が見つかりません")
     elif operation == "summarize":
         return json_obj.get("summary", "要約内容が見つかりません")
-    elif operation == "extract_metadata_and_chapters":
+    elif operation in ["extract_metadata_and_chapters", "metadata_v2"]:
         # メタデータ抽出の場合は構造化データなのでJSON形式で返す
         return json.dumps(json_obj, indent=2, ensure_ascii=False)
+    elif operation == "translation_summary_v2":
+        # 翻訳と要約の複合結果
+        result = {
+            "translated_content": json_obj.get("translated_content", "翻訳内容が見つかりません"),
+            "summary": json_obj.get("summary", "要約内容が見つかりません"),
+            "required_knowledge": json_obj.get("required_knowledge", "必要な知識が見つかりません")
+        }
+        return json.dumps(result, indent=2, ensure_ascii=False)
+    elif operation == "integrated":
+        # 統合処理の結果
+        result = {
+            "metadata": json_obj.get("metadata", {}),
+            "translated_content": json_obj.get("translated_content", ""),
+            "summary": json_obj.get("summary", ""),
+            "required_knowledge": json_obj.get("required_knowledge", "")
+        }
+        return json.dumps(result, indent=2, ensure_ascii=False)
     else:
         # その他の操作の場合は、よく使われるキーを探す
         for key in ["text", "content", "result", "output", "data"]:

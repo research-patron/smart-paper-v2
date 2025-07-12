@@ -3,8 +3,8 @@
 # プロジェクトID (環境に合わせて変更してください)
 PROJECT_ID="smart-paper-v2"
 REGION="us-central1"
-BUCKET_NAME="${PROJECT_ID}.firebasestorage.app"
-SERVICE_ACCOUNT="${PROJECT_ID}@appspot.gserviceaccount.com"
+BUCKET_NAME="smart-paper-v2.firebasestorage.app"
+SERVICE_ACCOUNT="smart-paper-v2@appspot.gserviceaccount.com"
 
 # 色を使用してログを分かりやすく表示
 RED='\033[0;31m'
@@ -132,48 +132,10 @@ gcloud functions deploy process_pdf_background \
   --allow-unauthenticated \
   --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_FUNCTIONS_SA=${SERVICE_ACCOUNT}
 
-# 非同期処理用の新しい関数をデプロイ
-echo -e "\n${BLUE}process_chapter_translation 関数をデプロイしています...${NC}"
-gcloud functions deploy process_chapter_translation \
-  --region=${REGION} \
-  --runtime=python310 \
-  --trigger-http \
-  --source=./functions \
-  --entry-point=process_chapter_translation \
-  --memory=512MB \
-  --timeout=540s \
-  --min-instances=0 \
-  --max-instances=10 \
-  --allow-unauthenticated \
-  --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
-
-echo -e "\n${BLUE}process_paper_summary 関数をデプロイしています...${NC}"
-gcloud functions deploy process_paper_summary \
-  --region=${REGION} \
-  --runtime=python310 \
-  --trigger-http \
-  --source=./functions \
-  --entry-point=process_paper_summary \
-  --memory=512MB \
-  --timeout=540s \
-  --min-instances=0 \
-  --max-instances=10 \
-  --allow-unauthenticated \
-  --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
-
-echo -e "\n${BLUE}check_paper_completion 関数をデプロイしています...${NC}"
-gcloud functions deploy check_paper_completion \
-  --region=${REGION} \
-  --runtime=python310 \
-  --trigger-http \
-  --source=./functions \
-  --entry-point=check_paper_completion \
-  --memory=512MB \
-  --timeout=60s \
-  --min-instances=0 \
-  --max-instances=10 \
-  --allow-unauthenticated \
-  --set-env-vars=BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
+# 一括処理に変更したため、以下の関数はデプロイしません
+# - process_chapter_translation
+# - process_paper_summary
+# - check_paper_completion
 
 echo -e "\n${BLUE}get_signed_url 関数をデプロイしています...${NC}"
 gcloud functions deploy get_signed_url \
@@ -285,9 +247,7 @@ echo -e "\n${GREEN}デプロイが完了しました！${NC}"
 echo -e "以下のURLでCloud Functionsにアクセスできます:"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_pdf_background${NC}"
-echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_chapter_translation${NC}"
-echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/process_paper_summary${NC}"
-echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/check_paper_completion${NC}"
+# 一括処理に変更したため、削除された関数のURLは表示しません
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/get_signed_url${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/get_processing_time${NC}"
 echo -e "${YELLOW}https://${REGION}-${PROJECT_ID}.cloudfunctions.net/create_stripe_checkout${NC}"

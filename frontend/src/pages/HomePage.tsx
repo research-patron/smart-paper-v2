@@ -230,7 +230,7 @@ const HomePage = () => {
       summary: null,
       translated_text: null,
       translated_text_path: null,
-      progress: 5
+      progress: 10
     };
     
     setTempProcessingPaper(tempPaper);
@@ -495,7 +495,13 @@ const HomePage = () => {
                     {latestProcessingPaper.status === 'processing' && latestProcessingPaper.progress && (
                       <Box sx={{ mt: 3 }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                          <Typography variant="body2">処理中...</Typography>
+                          <Typography variant="body2">
+                            {latestProcessingPaper.progress <= 10 && 'メタデータを抽出中...'}
+                            {latestProcessingPaper.progress > 10 && latestProcessingPaper.progress < 50 && 'メタデータを抽出中...'}
+                            {latestProcessingPaper.progress === 50 && '翻訳・要約を処理中...'}
+                            {latestProcessingPaper.progress > 50 && latestProcessingPaper.progress < 100 && '翻訳・要約を処理中...'}
+                            {latestProcessingPaper.progress === 100 && '処理完了'}
+                          </Typography>
                           <Typography variant="body2">{latestProcessingPaper.progress}%</Typography>
                         </Box>
                         <LinearProgress
@@ -504,6 +510,11 @@ const HomePage = () => {
                           sx={{ height: 8, borderRadius: 4 }}
                         />
                         <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                          {latestProcessingPaper.progress < 50 ? 
+                            'ステップ 1/2: メタデータ抽出' : 
+                            'ステップ 2/2: 翻訳・要約処理'}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                           処理が完了すると自動的に詳細ページに移動します
                         </Typography>
                       </Box>

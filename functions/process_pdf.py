@@ -36,6 +36,10 @@ from error_handling import (
 TRANSLATION_PROMPT_FILE = ""
 SUMMARY_PROMPT_FILE = "./prompts/summary_prompt_v1.json"
 METADATA_AND_CHAPTER_PROMPT_FILE = ""
+INTEGRATED_PROMPT_FILE = "./prompts/integrated_prompt_v1.json"
+# 2段階処理用のプロンプトファイル
+METADATA_PROMPT_V2_FILE = "./prompts/metadata_prompt_v2.json"
+TRANSLATION_SUMMARY_PROMPT_V2_FILE = "./prompts/translation_summary_prompt_v2.json"
 
 # デフォルトのプロンプト (プロンプトファイルが読み込めない場合に使用)
 DEFAULT_TRANSLATION_PROMPT = """
@@ -209,6 +213,178 @@ def has_subchapters(chapter_number, chapters: list) -> bool:
     
     return False
 
+def process_two_stage_content(pdf_gs_path: str, paper_id: str, progress_callback=None) -> dict:
+    """
+    PDFファイルを2段階で処理して、メタデータ抽出後に翻訳・要約を行う
+    
+    Args:
+        pdf_gs_path: PDFファイルのパス (gs://から始まる)
+        paper_id: 論文のID
+        progress_callback: 進捗更新用のコールバック関数 (オプション)
+        
+    Returns:
+        dict: 処理結果（メタデータ、翻訳テキスト、要約、必要な知識）
+    """
+    # 処理時間測定開始
+    session_id, _ = start_timer("process_two_stage_content", paper_id)
+    
+    try:
+        # Vertex AIの初期化
+        initialize_vertex_ai()
+        
+        # チャットセッションを開始
+        start_chat_session(paper_id, pdf_gs_path)
+        add_step(session_id, paper_id, "chat_session_started")
+        
+        # ステージ1: メタデータ抽出
+        log_info("TwoStageProcessing", f"Stage 1: Extracting metadata for paper: {paper_id}")
+        
+        # メタデータ抽出プロンプトを読み込む
+        metadata_prompt = load_prompt(METADATA_PROMPT_V2_FILE)
+        
+        # Gemini APIを呼び出し（メタデータ抽出）
+        metadata_response = process_with_chat(paper_id, metadata_prompt, temperature=0.1, operation="metadata_v2")
+        
+        add_step(session_id, paper_id, "metadata_extraction_complete")
+        
+        # メタデータの抽出と検証
+        metadata_result = extract_json_from_response(metadata_response, "metadata_v2")
+        
+        if not metadata_result.get("metadata"):
+            raise ValidationError("Metadata not found in response")
+        if not metadata_result.get("chapters"):
+            raise ValidationError("Chapters not found in response")
+            
+        # 進捗更新（50%）
+        if progress_callback:
+            progress_callback(50)
+            
+        add_step(session_id, paper_id, "metadata_validation_complete")
+        
+        # ステージ2: 翻訳・要約・必要な知識の抽出
+        log_info("TwoStageProcessing", f"Stage 2: Translation and summary for paper: {paper_id}")
+        
+        # 翻訳・要約プロンプトを読み込む
+        translation_summary_prompt = load_prompt(TRANSLATION_SUMMARY_PROMPT_V2_FILE)
+        
+        # Gemini APIを呼び出し（翻訳・要約）
+        translation_response = process_with_chat(paper_id, translation_summary_prompt, temperature=0.2, operation="translation_summary_v2")
+        
+        add_step(session_id, paper_id, "translation_summary_complete")
+        
+        # 翻訳・要約の抽出と検証
+        translation_result = extract_json_from_response(translation_response, "translation_summary_v2")
+        
+        if not translation_result.get("translated_content"):
+            raise ValidationError("Translated content not found in response")
+        if not translation_result.get("summary"):
+            raise ValidationError("Summary not found in response")
+        if not translation_result.get("required_knowledge"):
+            raise ValidationError("Required knowledge not found in response")
+            
+        add_step(session_id, paper_id, "translation_validation_complete")
+        
+        # 結果を統合
+        final_result = {
+            "metadata": metadata_result["metadata"],
+            "chapters": metadata_result["chapters"],
+            "translated_content": translation_result["translated_content"],
+            "summary": translation_result["summary"],
+            "required_knowledge": translation_result["required_knowledge"]
+        }
+        
+        # パフォーマンス記録に各データを保存
+        save_metadata_text(session_id, json.dumps(metadata_result, ensure_ascii=False))
+        save_translated_text(session_id, translation_result.get("translated_content", ""))
+        save_summary_text(session_id, translation_result.get("summary", ""))
+        
+        # 処理時間の記録を正常終了
+        stop_timer(session_id, paper_id, True)
+        
+        log_info("TwoStageProcessing", f"Two-stage processing completed for paper: {paper_id}")
+        
+        return final_result
+        
+    except Exception as e:
+        # エラー発生時の処理時間記録
+        stop_timer(session_id, paper_id, False, str(e))
+        log_error("TwoStageProcessingError", f"Error in two-stage processing: {str(e)}", 
+                 {"paper_id": paper_id, "pdf_path": pdf_gs_path})
+        raise
+    finally:
+        # チャットセッションを終了
+        end_chat_session(paper_id)
+
+def process_integrated_content(pdf_gs_path: str, paper_id: str) -> dict:
+    """
+    PDFファイルを一括処理して、メタデータ抽出、翻訳、要約を行う
+    
+    Args:
+        pdf_gs_path: PDFファイルのパス (gs://から始まる)
+        paper_id: 論文のID
+        
+    Returns:
+        dict: 処理結果（メタデータ、翻訳テキスト、要約、必要な知識）
+    """
+    # 処理時間測定開始
+    session_id, _ = start_timer("process_integrated_content", paper_id)
+    
+    try:
+        # Vertex AIの初期化
+        initialize_vertex_ai()
+        
+        # チャットセッションを開始
+        start_chat_session(paper_id, pdf_gs_path)
+        add_step(session_id, paper_id, "chat_session_started")
+        
+        # 統合プロンプトを読み込む
+        prompt_template = load_prompt(INTEGRATED_PROMPT_FILE)
+        
+        # プロンプトを使用してAPI呼び出し
+        log_info("IntegratedProcessing", f"Starting integrated processing for paper: {paper_id}")
+        
+        # Gemini APIを呼び出し（temperatureを低く設定）
+        response = process_with_chat(paper_id, prompt_template, temperature=0.2, operation="integrated")
+        
+        add_step(session_id, paper_id, "api_call_complete")
+        
+        # レスポンスからJSONを抽出
+        result = extract_json_from_response(response, "integrated")
+        
+        # 結果の検証
+        if not result.get("metadata"):
+            raise ValidationError("Metadata not found in response")
+        if not result.get("translated_content"):
+            raise ValidationError("Translated content not found in response")
+        if not result.get("summary"):
+            raise ValidationError("Summary not found in response")
+        if not result.get("required_knowledge"):
+            raise ValidationError("Required knowledge not found in response")
+            
+        add_step(session_id, paper_id, "response_validation_complete")
+        
+        # パフォーマンス記録に各データを保存
+        save_metadata_text(session_id, json.dumps(result.get("metadata", {}), ensure_ascii=False))
+        save_translated_text(session_id, result.get("translated_content", ""))
+        save_summary_text(session_id, result.get("summary", ""))
+        
+        # 処理時間の記録を正常終了
+        stop_timer(session_id, paper_id, True)
+        
+        log_info("IntegratedProcessing", f"Integrated processing completed for paper: {paper_id}")
+        
+        return result
+        
+    except Exception as e:
+        # エラー発生時の処理時間記録
+        stop_timer(session_id, paper_id, False, str(e))
+        log_error("IntegratedProcessingError", f"Error in integrated processing: {str(e)}", 
+                 {"paper_id": paper_id, "pdf_path": pdf_gs_path})
+        raise
+    finally:
+        # チャットセッションを終了
+        end_chat_session(paper_id)
+
 def load_prompt(filename: str) -> str:
     """
     JSONファイルからプロンプトを読み込む
@@ -263,402 +439,6 @@ def retry_with_backoff(func, max_retries=0, base_delay=1.0, max_delay=60.0):
                       {"error": str(e)})
             time.sleep(delay)
             retries += 1
-
-def process_all_chapters(chapters: list, paper_id: str, pdf_gs_path: str, parent_session_id=None) -> list:
-    """
-    すべての章を順番に処理する（同期処理版）
-    
-    Args:
-        chapters: 章情報のリスト
-        paper_id: 論文ID
-        pdf_gs_path: PDFのパス
-        parent_session_id: 親処理のセッションID（オプション）
-        
-    Returns:
-        list: 各章の処理結果リスト
-    """
-    # 処理時間測定開始 - paper_idを必ず渡す
-    session_id, _ = start_timer("process_all_chapters", paper_id, {"chapters_count": len(chapters)})
-    
-    from google.cloud import firestore
-    from google.cloud import storage
-    import datetime
-    
-    db = firestore.Client()
-    storage_client = storage.Client()
-    BUCKET_NAME = os.environ.get("BUCKET_NAME", f"{os.environ.get('GOOGLE_CLOUD_PROJECT')}.appspot.com")
-    
-    try:
-        doc_ref = db.collection("papers").document(paper_id)
-
-        # ステータスを処理中に更新
-        doc_ref.update({
-            "status": "processing",
-            "progress": 5
-        })
-        
-        add_step(session_id, paper_id, "processing_started")
-
-        # チャットセッションを初期化
-        start_chat_session(paper_id, pdf_gs_path)
-        log_info("ProcessAllChapters", f"Initialized chat session for paper", {"paper_id": paper_id})
-        add_step(session_id, paper_id, "chat_session_initialized")
-
-        # 各章を順番に処理
-        results = []
-        # 章番号でソートして処理
-        sorted_chapters = sorted(chapters, key=lambda x: x.get("chapter_number", 0))
-        total_chapters = len(sorted_chapters)
-        
-        # 全章の翻訳テキストを結合するための変数
-        all_translated_text = ""
-        
-        # 章番号からその章のデータを取得するための辞書を作成（効率化のため）
-        chapter_dict = {ch['chapter_number']: ch for ch in sorted_chapters}
-        
-        # 1. 翻訳フェーズ - 各章を順番に翻訳
-        for i, chapter in enumerate(sorted_chapters, 1):
-            try:
-                chapter_number = chapter['chapter_number']
-                
-                # 主章で、かつサブ章が存在する場合はスキップ
-                if not is_subchapter(chapter_number) and has_subchapters(chapter_number, sorted_chapters):
-                    log_info("ProcessAllChapters", f"Skipping main chapter {chapter_number} as it has subchapters",
-                            {"paper_id": paper_id})
-                    
-                    # 結果に「スキップ」と記録
-                    results.append({
-                        "chapter_number": chapter_number,
-                        "translated": False,
-                        "skipped": True,
-                        "reason": "has_subchapters"
-                    })
-                    
-                    # サブ章のあるメイン章でも、見出しだけは全体の翻訳テキストに追加
-                    if all_translated_text:
-                        all_translated_text += "\n\n"
-                    
-                    # メタデータに日本語タイトルがあればそれを使用
-                    chapter_title_ja = ""
-                    
-                    # 対応する章のメタデータを検索
-                    chapter_metadata = chapter_dict.get(chapter_number, {})
-                    if "title_ja" in chapter_metadata and chapter_metadata["title_ja"]:
-                        # メタデータから日本語タイトルを取得
-                        chapter_title_ja = chapter_metadata["title_ja"]
-                    else:
-                        # 日本語タイトルがなければ英語タイトルを使用
-                        chapter_title_ja = chapter.get("title", f"Chapter {chapter_number}")
-                    
-                    # 章番号がタイトルに含まれていない場合は追加
-                    if not chapter_title_ja.startswith(f"{chapter_number}"):
-                        chapter_title_ja = f"{chapter_number}. {chapter_title_ja}"
-                    
-                    # メイン章の見出しをHTML形式で追加（内容はスキップ）
-                    all_translated_text += f"<h2>{chapter_title_ja}</h2>\n\n"
-                    
-                    continue
-                
-                log_info("ProcessAllChapters", f"Processing chapter {i}/{total_chapters}: Chapter {chapter['chapter_number']}",
-                         {"paper_id": paper_id})
-                
-                # 翻訳前に少し待機（レート制限対策）
-                time.sleep(0.2 + random.uniform(0.1, 0.3))
-                
-                # 章処理の開始時間を記録
-                chapter_start = time.time()
-                
-                # 翻訳処理 - paper_idを確実に渡す
-                translate_result = process_content(pdf_gs_path, paper_id, "translate", chapter)
-
-                # 章処理の時間を記録
-                chapter_time_ms = (time.time() - chapter_start) * 1000
-                chapter_time_sec = chapter_time_ms / 1000.0
-
-                # 結果を確認して構造化
-                if "chapter" in translate_result and "translated_text" in translate_result:
-                    # 新しい構造の結果をサブチャプターも含めて処理
-                    chapter_title = translate_result["chapter"]
-                    translated_text = translate_result["translated_text"]
-                    
-                    # サブチャプターがあれば構造化されたHTMLを生成
-                    html_content = translated_text
-                    
-                    if "sub_chapters" in translate_result and translate_result["sub_chapters"]:
-                        for sub_chapter in translate_result["sub_chapters"]:
-                            if isinstance(sub_chapter, dict) and "title" in sub_chapter and "content" in sub_chapter:
-                                html_content += f"\n\n<h3>{sub_chapter['title']}</h3>\n\n"
-                                html_content += sub_chapter["content"]
-                    
-                    # 最終的な翻訳テキストを設定
-                    final_result = {
-                        "chapter_number": chapter["chapter_number"],
-                        "title": chapter_title,
-                        "translated_text": html_content,
-                        "start_page": chapter["start_page"],
-                        "end_page": chapter["end_page"]
-                    }
-                else:
-                    # 旧形式の場合は変換（後方互換性）
-                    final_result = translate_result
-                    # 必要なフィールドを追加
-                    if "chapter_number" not in final_result:
-                        final_result["chapter_number"] = chapter["chapter_number"]
-                    if "title" not in final_result:
-                        final_result["title"] = chapter.get("title", f"Chapter {chapter['chapter_number']}")
-                    if "start_page" not in final_result:
-                        final_result["start_page"] = chapter["start_page"]
-                    if "end_page" not in final_result:
-                        final_result["end_page"] = chapter["end_page"]
-
-                # 全体の翻訳テキストに追加（ここで構造化された日本語見出しを使用）
-                chapter_translated_text = final_result.get("translated_text", "")
-                if chapter_translated_text:
-                    if all_translated_text:
-                        all_translated_text += "\n\n"
-                    
-                    # メタデータに日本語タイトルがあればそれを使用
-                    chapter_title_ja = ""
-                    
-                    # 対応する章のメタデータを検索
-                    chapter_metadata = chapter_dict.get(chapter_number, {})
-                    if "title_ja" in chapter_metadata and chapter_metadata["title_ja"]:
-                        # メタデータから日本語タイトルを取得
-                        chapter_title_ja = chapter_metadata["title_ja"]
-                    else:
-                        # 日本語タイトルがなければ英語タイトルを使用
-                        chapter_title_ja = chapter.get("title", final_result.get("title", f"Chapter {chapter_number}"))
-                    
-                    # 章番号がタイトルに含まれていない場合は追加
-                    if not chapter_title_ja.startswith(f"{chapter_number}"):
-                        chapter_title_ja = f"{chapter_number}. {chapter_title_ja}"
-                    
-                    # 見出しレベルを設定（サブ章か主章かで分ける）
-                    heading_level = 3 if is_subchapter(chapter_number) else 2
-                    
-                    # 見出しと翻訳内容を追加
-                    all_translated_text += f"<h{heading_level}>{chapter_title_ja}</h{heading_level}>\n\n"
-                    all_translated_text += chapter_translated_text
-
-                # FirestoreのサブコレクションにTranslation結果を保存
-                # (章のメタデータが提供されていれば、日本語タイトルも含める)
-                if "title_ja" in chapter:
-                    final_result["title_ja"] = chapter["title_ja"]
-                
-                chapter_ref = doc_ref.collection("translated_chapters").document(f"chapter_{chapter['chapter_number']}")
-                chapter_ref.set(final_result)
-                
-                # 章データを追加 - 修正: paper_idを確実に渡す
-                add_chapter_translation(
-                    session_id, 
-                    paper_id, 
-                    final_result["chapter_number"], 
-                    final_result["title"], 
-                    final_result["translated_text"], 
-                    chapter_time_sec
-                )
-                
-                # パフォーマンス計測モジュールに翻訳テキストを保存 - 個別章のテキストだけを保存
-                
-                add_step(session_id, paper_id, f"chapter_{chapter['chapter_number']}_translated", 
-                        {"chapter_number": chapter["chapter_number"],
-                         "start_page": chapter["start_page"], 
-                         "end_page": chapter["end_page"]}, 
-                        chapter_time_ms)
-                
-                log_info("ProcessAllChapters", f"Translation completed for chapter {chapter['chapter_number']}",
-                         {"paper_id": paper_id})
-                
-                # 進捗を更新 (翻訳フェーズで5%から75%まで)
-                progress = 5 + int((i / total_chapters) * 70)
-                doc_ref.update({"progress": progress})
-                
-                results.append({
-                    "chapter_number": chapter["chapter_number"],
-                    "translated": True
-                })
-                
-                # 各章の処理後に待機（重要: レート制限対策）
-                time.sleep(0.3 + random.uniform(0.1, 0.4))
-                
-            except Exception as chapter_error:
-                log_error("ProcessChapterError", f"Error processing chapter {chapter['chapter_number']}",
-                         {"paper_id": paper_id, "error": str(chapter_error)})
-                         
-                add_step(session_id, paper_id, f"chapter_{chapter['chapter_number']}_error", 
-                        {"chapter_number": chapter["chapter_number"],
-                         "error": str(chapter_error)})
-                
-                # エラーが発生しても続行
-                results.append({
-                    "chapter_number": chapter["chapter_number"],
-                    "translated": False,
-                    "error": str(chapter_error)
-                })
-                
-                # エラー後は少し長めに待機
-                time.sleep(1.0 + random.uniform(0.5, 1.0))
-
-        # 翻訳テキスト全体をパフォーマンス計測モジュールに保存
-        save_translated_text(session_id, all_translated_text)
-
-        # 2. 要約フェーズ - 論文全体の要約を一回だけ生成
-        try:
-            log_info("ProcessAllChapters", f"Generating summary for the entire paper", {"paper_id": paper_id})
-            
-            # 進捗を更新
-            doc_ref.update({"progress": 75})
-            
-            # 要約前に少し待機（レート制限対策）
-            time.sleep(0.1 + random.uniform(0.1, 0.5))
-            
-            # 要約処理の開始時間を記録
-            summary_start = time.time()
-            
-            # 要約処理 (章情報なしで全体要約) - paper_idを確実に渡す
-            summary_result = process_content(pdf_gs_path, paper_id, "summarize")
-            
-            # 要約処理の時間を記録
-            summary_time_ms = (time.time() - summary_start) * 1000
-            summary_time_sec = summary_time_ms / 1000.0
-            
-            add_step(session_id, paper_id, "summary_generated", {}, summary_time_ms)
-            
-            # 正常なJSONレスポンスがある場合
-            if isinstance(summary_result, dict):
-                # ここを修正: 直接辞書のキーを取得する
-                summary_text = summary_result.get('summary', '')
-                required_knowledge = summary_result.get('required_knowledge', '')
-            else:
-                # JSONレスポンスがない場合、結果全体を要約とみなす
-                summary_text = str(summary_result)
-                required_knowledge = ''
-
-            # パフォーマンス計測モジュールに要約テキストを保存
-            save_summary_text(session_id, summary_text)
-
-            # Firestoreに結果を保存
-            doc_ref.update({
-                "summary": summary_text,
-                "required_knowledge": required_knowledge,
-                "progress": 80
-            })
-            
-            log_info("ProcessAllChapters", f"Summary completed for the entire paper", {"paper_id": paper_id})
-            
-        except Exception as summary_error:
-            log_error("ProcessSummaryError", f"Error generating paper summary",
-                    {"paper_id": paper_id, "error": str(summary_error)})
-                    
-            add_step(session_id, paper_id, "summary_error", {"error": str(summary_error)})
-                    
-            doc_ref.update({
-                "summary": "要約の生成中にエラーが発生しました。",
-                "required_knowledge": ""
-            })
-
-        # 進捗を更新
-        doc_ref.update({"progress": 85})
-        add_step(session_id, paper_id, "chapters_combining_started", {"chapters_count": len(results)})
-        
-        # エラーチェック
-        if not all_translated_text:
-            log_warning("ProcessAllChapters", "No translated text was generated", {"paper_id": paper_id})
-            
-            add_step(session_id, paper_id, "no_translated_text_error")
-            all_translated_text = "<p>翻訳の生成に失敗しました。しばらくしてから再度お試しください。</p>"
-
-        # 文字数に応じて保存先を決定
-        text_length = len(all_translated_text)
-        add_step(session_id, paper_id, "text_combined", {"translated_text_length": text_length})
-        
-        if text_length > 800000:
-            # Cloud Storageに保存
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
-            file_name = f"translated_text_{timestamp}_{paper_id}.txt"
-            blob = storage_client.bucket(BUCKET_NAME).blob(f"papers/{file_name}")
-            
-            storage_start = time.time()
-            blob.upload_from_string(all_translated_text, content_type="text/plain")
-            storage_time_ms = (time.time() - storage_start) * 1000
-            storage_time_sec = storage_time_ms / 1000.0
-            
-            translated_text_path = f"gs://{BUCKET_NAME}/papers/{file_name}"
-            add_step(session_id, paper_id, "text_saved_to_storage", 
-                    {"translated_text_path": translated_text_path},
-                    storage_time_ms)
-
-            doc_ref.update({
-                "translated_text_path": translated_text_path,
-                "translated_text": None,
-                "status": "completed",
-                "completed_at": datetime.datetime.now(),
-                "progress": 100
-            })
-
-            log_info("ProcessAllChapters", f"Large translated text saved to Cloud Storage",
-                    {"paper_id": paper_id, "path": translated_text_path})
-        else:
-            # Firestoreに保存
-            firestore_start = time.time()
-            doc_ref.update({
-                "translated_text_path": None,
-                "translated_text": all_translated_text,
-                "status": "completed",
-                "completed_at": datetime.datetime.now(),
-                "progress": 100
-            })
-            firestore_time_ms = (time.time() - firestore_start) * 1000
-            firestore_time_sec = firestore_time_ms / 1000.0
-            
-            add_step(session_id, paper_id, "text_saved_to_firestore", {}, firestore_time_ms)
-
-            log_info("ProcessAllChapters", f"Translated text saved to Firestore", {"paper_id": paper_id})
-
-        # チャットセッションを終了して解放
-        end_chat_session(paper_id)
-        log_info("ProcessAllChapters", f"Ended chat session for paper", {"paper_id": paper_id})
-        add_step(session_id, paper_id, "chat_session_ended")
-
-        # 処理時間の記録
-        stop_timer(session_id, paper_id, True)
-        
-        # 親セッションにステップを追加（存在する場合）
-        if parent_session_id:
-            add_step(parent_session_id, paper_id, "all_chapters_completed", 
-                    {"chapters_count": total_chapters, 
-                     "translated_text_length": text_length,
-                     "success": True})
-        
-        return results
-        
-    except Exception as e:
-        log_error("ProcessAllChaptersError", "Failed to process all chapters",
-                 {"paper_id": paper_id, "error": str(e)})
-
-        # エラー状態に更新
-        doc_ref.update({
-            "status": "error",
-            "error_message": str(e)
-        })
-        
-        add_step(session_id, paper_id, "processing_failed", {"error": str(e)})
-        
-        # 処理時間の記録（エラー発生時）
-        stop_timer(session_id, paper_id, False, str(e))
-        
-        # 親セッションにステップを追加（存在する場合）
-        if parent_session_id:
-            add_step(parent_session_id, paper_id, "all_chapters_failed", 
-                    {"error": str(e)})
-        
-        # エラー時もチャットセッションを解放
-        try:
-            end_chat_session(paper_id)
-        except:
-            pass
-            
-        raise
 
 def process_with_cache(cache_id: str, operation: str, chapter_info: dict = None) -> dict:
     """
